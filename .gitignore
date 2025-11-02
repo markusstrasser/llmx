@@ -27,6 +27,7 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ipynb_checkpoints/
+*.egg-info/
 
 # ---- Secrets ----
 .env
