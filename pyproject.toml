@@ -1,0 +1,22 @@
+[project]
+name = "llmx"
+version = "0.1.0"
+description = "Unified API wrapper for LLM providers using LiteLLM"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "litellm>=1.40.0",
+    "click>=8.1.7",
+    "python-dotenv>=1.0.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+llmx = "llmx.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+dev-dependencies = []
