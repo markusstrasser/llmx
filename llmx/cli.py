@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-llmx - Unified API wrapper using LiteLLM
-
-Simple tool for calling LLM APIs from scripts and skills.
-NOT a replacement for agent CLIs (gemini, codex).
+llmx - Unified LLM CLI via LiteLLM
 
 Usage:
     llmx "your prompt"
-    llmx --provider openai "your prompt"
-    cat prompt.txt | llmx
+    llmx --model gpt-5-pro "your prompt"
+    cat file.txt | llmx --model claude-sonnet-4-5 "review"
     llmx --compare "question"
+    llmx image "a cute robot" -o robot.png
+    llmx svg "physics momentum arrow icon" -o momentum.svg
 """
 
 import sys
@@ -32,40 +31,177 @@ from .logger import configure_logger, logger
 
 console = Console()
 
+# Subcommand names for detection
+SUBCOMMANDS = {"image", "svg"}
 
-@click.command()
+
+# ============================================================================
+# Image Generation Commands
+# ============================================================================
+
+@click.command("image")
+@click.argument("prompt", nargs=-1, required=True)
+@click.option("-o", "--output", help="Output file path (default: auto-generated)")
+@click.option(
+    "-m", "--model",
+    type=click.Choice(["flash", "pro"]),
+    default="pro",
+    help="Model: Both use Gemini 3 Pro Image (gemini-3-pro-image-preview)"
+)
+@click.option(
+    "--aspect-ratio", "-a",
+    default="1:1",
+    help="Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 5:4, 4:5"
+)
+@click.option(
+    "--resolution", "-r",
+    type=click.Choice(["1K", "2K", "4K"]),
+    default="1K",
+    help="Resolution: 1K, 2K, 4K (2K+ requires pro model)"
+)
+@click.option("--debug", is_flag=True, help="Debug logging")
+def image_cmd(prompt, output, model, aspect_ratio, resolution, debug):
+    """Generate images using Gemini Nano Banana models.
+
+    Examples:
+        llmx image "a cute robot mascot"
+        llmx image "pixel art knight with sword" -o knight.png
+        llmx image "game background forest" -m pro -r 2K
+        llmx image "physics momentum diagram" --aspect-ratio 16:9
+    """
+    configure_logger(debug=debug)
+
+    prompt_text = " ".join(prompt)
+
+    try:
+        from .image import generate_image
+
+        result = generate_image(
+            prompt=prompt_text,
+            output_path=output,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+        )
+
+        if result:
+            click.echo(f"Image saved: {result}")
+        else:
+            click.echo("No image was generated.", err=True)
+            sys.exit(1)
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@click.command("svg")
+@click.argument("prompt", nargs=-1, required=True)
+@click.option("-o", "--output", help="Output file path (default: auto-generated)")
+@click.option(
+    "-m", "--model",
+    type=click.Choice(["flash", "pro"]),
+    default="pro",
+    help="Model: 'flash' (fast) or 'pro' (better quality)"
+)
+@click.option("--debug", is_flag=True, help="Debug logging")
+def svg_cmd(prompt, output, model, debug):
+    """Generate SVG graphics using Gemini.
+
+    Examples:
+        llmx svg "momentum arrow icon for physics game"
+        llmx svg "simple cart with wheels" -o cart.svg
+        llmx svg "Newton cradle diagram" -m pro
+    """
+    configure_logger(debug=debug)
+
+    prompt_text = " ".join(prompt)
+
+    try:
+        from .image import generate_svg
+
+        result = generate_svg(
+            prompt=prompt_text,
+            output_path=output,
+            model=model,
+        )
+
+        if result:
+            click.echo(f"SVG saved: {result}")
+        else:
+            click.echo("No SVG was generated.", err=True)
+            sys.exit(1)
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+# ============================================================================
+# Text Chat Command (default behavior)
+# ============================================================================
+
+@click.command("chat")
 @click.argument("prompt", nargs=-1, required=False)
+@click.option(
+    "-m",
+    "--model",
+    help="Model: 'gpt-5-pro', 'claude-sonnet-4-5', 'gemini-2.5-pro', 'kimi-k2-thinking', 'cerebras/qwen-3-coder-480b'.",
+)
 @click.option(
     "-p",
     "--provider",
     default=None,
-    help="Provider (openai, google, anthropic, xai, deepseek, openrouter, kimi) - auto-inferred from model if not specified",
+    help="Provider: openai, anthropic, kimi, cerebras, google",
 )
-@click.option("-m", "--model", help="Model name (overrides provider default)")
 @click.option(
-    "-t", "--temperature", default=0.7, type=float, help="Temperature 0-1 (default: 0.7)"
+    "-t",
+    "--temperature",
+    default=None,
+    type=float,
+    help="Temperature 0-2 (default 0.7).",
 )
 @click.option(
     "--reasoning-effort",
-    type=click.Choice(["low", "medium", "high"], case_sensitive=False),
-    help="Reasoning effort for OpenAI o1/GPT-5 models (low, medium, high)",
+    type=click.Choice(["minimal", "low", "medium", "high"], case_sensitive=False),
+    help="GPT-5 only: minimal/low/medium/high.",
 )
-@click.option("--stream/--no-stream", default=False, help="Enable/disable streaming (default: no-stream)")
+@click.option(
+    "--stream/--no-stream",
+    default=False,
+    help="Stream output (default: off)",
+)
 @click.option(
     "--compare",
     is_flag=True,
-    help="Compare multiple providers (use --providers to specify)",
+    help="Compare multiple providers",
 )
 @click.option(
     "--providers",
-    help="Comma-separated list of providers for comparison (default: google,openai,xai)",
+    help="Providers for --compare (default: google,openai,xai)",
 )
-@click.option("--debug", is_flag=True, help="Enable debug logging to stderr")
-@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-@click.option("--list-providers", "list_providers_flag", is_flag=True, help="List available providers and exit")
-@click.option("--use-old", is_flag=True, help="Use older model version (currently only for Kimi K2)")
-@click.version_option(version=__version__)
-def main(
+@click.option(
+    "--timeout",
+    default=120,
+    type=int,
+    help="Timeout seconds (default: 120)",
+)
+@click.option("--debug", is_flag=True, help="Debug logging")
+@click.option("--json", "json_output", is_flag=True, help="JSON output")
+@click.option(
+    "--list-providers",
+    "list_providers_flag",
+    is_flag=True,
+    help="List providers",
+)
+@click.option(
+    "--use-old",
+    is_flag=True,
+    help="Kimi: k2-0905-instruct (fast, non-reasoning)",
+)
+@click.pass_context
+def chat_cmd(
+    ctx,
     prompt,
     provider,
     model,
@@ -74,23 +210,13 @@ def main(
     stream,
     compare,
     providers,
+    timeout,
     debug,
     json_output,
     list_providers_flag,
     use_old,
 ):
-    """llmx - Unified API wrapper for LLM providers
-
-    Simple tool for calling LLM APIs from scripts and skills.
-    NOT a replacement for agent CLIs (gemini, codex).
-
-    Examples:
-        llmx "What is 2+2?"
-        llmx --provider openai "Explain Python"
-        cat prompt.txt | llmx
-        llmx --compare "Which is better: tabs or spaces?"
-    """
-    # Configure logger
+    """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
 
     # List providers
@@ -116,29 +242,28 @@ def main(
 
     # Combine stdin and prompt
     if stdin_text and prompt_text:
-        # Both provided: prepend stdin as context, append prompt as question
         prompt_text = f"{stdin_text}\n\n{prompt_text}"
         logger.debug("Combined stdin context with prompt")
     elif stdin_text:
-        # Only stdin provided
         prompt_text = stdin_text
     elif not prompt_text:
-        # Nothing provided
-        logger.error("No prompt provided")
-        click.echo(
-            "Error: No prompt provided. Use: llmx 'your prompt' or pipe input.",
-            err=True,
-        )
-        click.echo("Try: llmx --help", err=True)
-        sys.exit(1)
+        click.echo(ctx.get_help())
+        return
 
     if not prompt_text:
         logger.error("Empty prompt")
         click.echo("Error: Empty prompt.", err=True)
         sys.exit(1)
 
+    user_specified_temp = temperature is not None
+    final_temperature = temperature if temperature is not None else 0.7
+
+    if timeout < 1 or timeout > 600:
+        logger.error(f"Invalid timeout: {timeout}")
+        click.echo("Error: Timeout must be between 1 and 600 seconds.", err=True)
+        sys.exit(1)
+
     try:
-        # Handle compare mode
         if compare:
             provider_list = (
                 providers.split(",") if providers else ["google", "openai", "xai"]
@@ -146,10 +271,19 @@ def main(
             provider_list = [p.strip() for p in provider_list]
 
             logger.info(f"Comparing {len(provider_list)} providers", {"providers": provider_list})
-            compare_providers(prompt_text, provider_list, temperature, reasoning_effort, debug, json_output, use_old)
+            compare_providers(
+                prompt_text,
+                provider_list,
+                final_temperature,
+                reasoning_effort,
+                debug,
+                json_output,
+                use_old,
+                user_specified_temp,
+                timeout,
+            )
             return
 
-        # Infer provider from model if no provider specified
         final_provider = provider
         if model and not provider:
             inferred = infer_provider_from_model(model)
@@ -157,24 +291,28 @@ def main(
                 final_provider = inferred
                 logger.debug(f"Inferred provider '{final_provider}' from model '{model}'")
             else:
-                final_provider = "google"  # fallback to default
+                final_provider = "google"
                 logger.debug(f"Could not infer provider from model '{model}', using default: google")
         elif not provider:
-            final_provider = "google"  # default if no model or provider specified
+            final_provider = "google"
 
-        # Auto-adjust temperature for GPT-5 models (only support temperature=1)
-        final_temperature = temperature
-        model_check = (model or "").lower()
-        if final_provider == "openai" and ("gpt-5" in model_check or "gpt5" in model_check):
-            final_temperature = 1.0
-            logger.debug(f"Auto-adjusted temperature to 1.0 for GPT-5 model (was {temperature})")
-
-        # Regular chat
         logger.info(
             "Starting chat",
             {"provider": final_provider, "model": model or "default", "stream": stream, "reasoning_effort": reasoning_effort},
         )
-        chat(prompt_text, final_provider, model, final_temperature, reasoning_effort, stream, debug, json_output, use_old)
+        chat(
+            prompt_text,
+            final_provider,
+            model,
+            final_temperature,
+            reasoning_effort,
+            stream,
+            debug,
+            json_output,
+            use_old,
+            user_specified_temp,
+            timeout,
+        )
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
@@ -190,9 +328,49 @@ def main(
         else:
             click.echo(f"Error: {error}", err=True)
 
-        # Exit codes: 2 for API key issues, 1 for others
         exit_code = 2 if "api key" in str(error).lower() else 1
         sys.exit(exit_code)
+
+
+# ============================================================================
+# CLI Group with Custom Dispatch
+# ============================================================================
+
+class LlmxGroup(click.Group):
+    """Custom group that defaults to chat command when no subcommand is given."""
+
+    def parse_args(self, ctx, args):
+        # If no args or first arg is not a subcommand, prepend 'chat'
+        if not args or (args[0] not in self.commands and not args[0].startswith('-')):
+            # Check if first arg looks like a subcommand
+            if not args or args[0] not in SUBCOMMANDS:
+                args = ['chat'] + list(args)
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=LlmxGroup)
+@click.version_option(version=__version__)
+def cli():
+    """llmx - Unified LLM CLI
+
+    Examples:
+        llmx "What is 2+2?"                                  # Text generation (default)
+        llmx --model gpt-5-pro "Explain Python"              # Specific model
+        llmx image "a cute robot" -o robot.png               # Image generation
+        llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
+    """
+    pass
+
+
+# Register subcommands
+cli.add_command(chat_cmd, name="chat")
+cli.add_command(image_cmd, name="image")
+cli.add_command(svg_cmd, name="svg")
+
+
+def main():
+    """Entry point for the CLI"""
+    cli()
 
 
 if __name__ == "__main__":

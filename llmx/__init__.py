@@ -42,7 +42,7 @@ Helpers:
         return chat(f"Analyze: {code}")
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Import public API
 from .api import LLM, Response, chat, batch

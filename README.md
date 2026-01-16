@@ -1,173 +1,153 @@
 # llmx
 
-Unified CLI for 100+ LLM providers via LiteLLM. Simple tool for calling LLM APIs from scripts and skills.
+Unified CLI for LLM providers via LiteLLM. Simple tool for calling LLM APIs from scripts.
 
 ## Installation
 
 ```bash
-# Install with uv (editable mode for development)
 uv tool install --editable /path/to/llmx
-
-# Or install from directory
-uv tool install /path/to/llmx
 ```
 
-## Usage
-
-### Basic Examples
+## Quick Start
 
 ```bash
-# Default provider (Google Gemini)
+# Default (Gemini)
 llmx "What is 2+2?"
 
-# Specific provider
-llmx --provider openai "Explain Python"
+# Specify model (provider auto-inferred)
+llmx --model gpt-5-pro "Explain Python"
+llmx --model claude-sonnet-4-5 "Write code"
+llmx --model kimi-k2-thinking "Complex task"
+llmx --model cerebras/qwen-3-coder-480b "Fast coding"
 
 # Pipe input
-cat code.txt | llmx "Review this code"
+cat code.txt | llmx --model claude-sonnet-4-5 "Review this"
 
-# Compare providers
+# Compare models
 llmx --compare "Which is better: tabs or spaces?"
 ```
 
-### OpenAI GPT-5 Models
+## Models
 
-GPT-5 models (gpt-5-pro, gpt-5-codex) have special requirements:
+### GPT-5 (OpenAI)
+```bash
+llmx --model gpt-5-pro --reasoning-effort high "complex task"
+llmx --model gpt-5-codex --reasoning-effort medium "code task"
+```
+- **gpt-5-pro**: minimal/low/medium/high effort
+- **gpt-5-codex**: low/medium/high (coding specialist)
+- Temperature fixed at 1.0
+
+### Gemini (Google)
+```bash
+llmx --model gemini-2.5-pro "general task"
+llmx --model gemini-2.5-flash "search query"  # Search ONLY
+```
+- **Pro**: General tasks, reasoning, code
+- **Flash**: Search/retrieval ONLY (warns if misused)
+
+### Claude (Anthropic)
+```bash
+llmx --model claude-sonnet-4-5 "your task"
+```
+- Best coding model, complex agents
+- Temperature 0.0-1.0
+
+### Kimi K2 (Moonshot)
+```bash
+llmx --model kimi-k2-thinking "complex reasoning"
+llmx --model moonshot/kimi-k2-0905-preview "fast task"
+```
+- **thinking**: Agentic reasoning, temp=1.0 fixed
+- **0905-preview**: Fast instruct, 256K context, variable temp
+
+### Cerebras
+```bash
+llmx --model cerebras/qwen-3-coder-480b "coding task"
+llmx --model cerebras/qwen-3-235b "general task"
+llmx --model cerebras/qwen-3-32b "fast reasoning"
+```
+- Ultra-fast inference (1400+ tokens/sec)
+- Free tier: 1M tokens/day
+
+## Options
 
 ```bash
-# GPT-5 Pro with reasoning
-llmx --provider openai --model gpt-5-pro --reasoning-effort high "your prompt"
-
-# Temperature is automatically adjusted to 1.0 (GPT-5 only supports temperature=1)
-llmx --provider openai --model gpt-5-pro "your prompt"  # temp auto-set to 1.0
+llmx --model MODEL --temperature 0.7 "prompt"
+llmx --model MODEL --stream "prompt"
+llmx --model MODEL --timeout 300 "prompt"
+llmx --model MODEL --json "prompt"
+llmx --model MODEL --debug "prompt"
+llmx --compare "prompt"  # Compare multiple providers
 ```
 
-**Important:**
-- GPT-5 models **only support temperature=1**
-- llmx automatically adjusts temperature to 1.0 for GPT-5 models
-- No manual override needed - just use GPT-5 and it works
-- Use `--reasoning-effort high` for deeper reasoning
+## Temperature
 
-### OpenRouter
+Auto-adjusted per model:
+- **GPT-5, Kimi K2 Thinking**: Fixed at 1.0
+- **Claude**: 0.0-1.0
+- **Cerebras**: 0.0-1.5
+- **Gemini**: 0.0-2.0
 
-Access 400+ models through OpenRouter:
+Warnings shown if override attempted.
 
-```bash
-# Use default model (GPT-4o via OpenRouter)
-llmx --provider openrouter "your prompt"
+## Providers
 
-# Use specific OpenRouter model
-llmx --provider openrouter --model "openrouter/anthropic/claude-3.5-sonnet" "your prompt"
-
-# Or just specify the model directly (auto-detected)
-llmx --model "openrouter/google/gemini-2.5-pro" "your prompt"
-```
-
-### Kimi K2
-
-Moonshot AI's Kimi K2 model (default: 0905 version with 256K context):
-
-```bash
-# Use latest Kimi K2 model (0905 - Sept 2025, 256K context)
-llmx --provider kimi "your prompt"
-
-# Use older Kimi K2 model (0711 - July 2025, 128K context)
-llmx --provider kimi --use-old "your prompt"
-
-# Use specific Kimi model version
-llmx --provider kimi --model "kimi-k2-0905-preview" "your prompt"
-
-# Or use moonshot prefix directly
-llmx --model "moonshot/kimi-k2-0905-preview" "your prompt"
-```
-
-### Advanced Options
-
-```bash
-# Custom temperature (non-GPT-5 models)
-llmx --provider google --temperature 0.3 "your prompt"
-
-# Streaming output
-llmx --provider openai --stream "your prompt"
-
-# JSON output
-llmx --provider openai --json "your prompt"
-
-# Debug logging
-llmx --provider openai --debug "your prompt"
-
-# Use older model version (currently only for Kimi K2)
-llmx --provider kimi --use-old "your prompt"
-
-# Compare specific providers
-llmx --compare --providers "google,openai,xai" "your prompt"
-```
-
-## Supported Providers
-
-- `google` - Gemini 2.5 Pro (default)
-- `openai` - GPT-4o, GPT-5 Pro, GPT-5 Codex, o1
-- `anthropic` - Claude 3.5 Sonnet
-- `xai` - Grok Beta
-- `deepseek` - DeepSeek Chat
-- `openrouter` - Access 400+ models through OpenRouter
-- `kimi` - Kimi K2 by Moonshot AI
-
-List all providers:
 ```bash
 llmx --list-providers
 ```
 
-## Environment Variables
+- `google` - Gemini 2.5
+- `openai` - GPT-5
+- `anthropic` - Claude Sonnet 4.5
+- `kimi` - Kimi K2
+- `cerebras` - Qwen 3
+- `xai` - Grok
+- `deepseek` - DeepSeek
+- `openrouter` - 400+ models
 
-Set API keys in `.env` or environment:
+## API Keys
+
+Set in `.env`:
+```bash
+OPENAI_API_KEY=...
+GEMINI_API_KEY=...
+ANTHROPIC_API_KEY=...
+MOONSHOT_API_KEY=...
+CEREBRAS_API_KEY=...
+```
+
+## Image Generation
+
+Generate images using Gemini 3 Pro Image (Nano Banana Pro):
 
 ```bash
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=...
-GOOGLE_API_KEY=...
-ANTHROPIC_API_KEY=...
-XAI_API_KEY=...
-GROK_API_KEY=...
-DEEPSEEK_API_KEY=...
-OPENROUTER_API_KEY=...
-MOONSHOT_API_KEY=...
-KIMI_API_KEY=...
+# Basic image generation
+llmx image "a cute robot mascot" -o robot.png
+
+# With options
+llmx image "pixel art knight" -o knight.png -r 2K          # 2K resolution
+llmx image "game background" -a 16:9                        # Aspect ratio
+llmx image "physics diagram" -m pro --debug                 # Debug mode
+
+# Generate SVGs
+llmx svg "momentum arrow icon" -o arrow.svg
 ```
 
-## Development
+### Image Options
+- `-o, --output` - Output file path (default: auto-generated)
+- `-m, --model` - `flash` or `pro` (both use gemini-3-pro-image-preview)
+- `-r, --resolution` - `1K`, `2K`, or `4K`
+- `-a, --aspect-ratio` - `1:1`, `16:9`, `9:16`, `4:3`, etc.
 
-The project uses LiteLLM under the hood for unified API access.
+**Note:** Requires `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variable.
 
-### Key Features
+## Features
 
-- **Auto-provider detection**: Infers provider from model name
-- **GPT-5 auto-adjustment**: Automatically sets temperature=1 for GPT-5 models
-- **Reasoning effort**: Supports OpenAI reasoning effort parameter
-- **Comparison mode**: Compare responses from multiple providers in parallel
-- **Streaming**: Optional streaming output
-- **JSON mode**: Structured JSON output for scripting
-
-### Code Structure
-
-```
-llmx/
-├── llmx/
-│   ├── __init__.py      # Version info
-│   ├── cli.py           # Main CLI interface
-│   ├── providers.py     # Provider configs and chat logic
-│   └── logger.py        # Structured logging
-├── pyproject.toml       # Package config
-└── README.md           # This file
-```
-
-## Usage in Scripts
-
-```python
-# Not recommended - use the CLI instead
-# This is a CLI tool, not a library
-```
-
-## License
-
-See project root for license information.
+- Auto-provider detection from model name
+- Temperature validation per model
+- Reasoning effort (GPT-5 only)
+- Compare mode (parallel requests)
+- Streaming & JSON output
+- Smart warnings (Flash misuse, etc)
+- **Image generation** (Gemini 3 Pro Image)
