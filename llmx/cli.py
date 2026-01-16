@@ -32,7 +32,7 @@ from .logger import configure_logger, logger
 console = Console()
 
 # Subcommand names for detection
-SUBCOMMANDS = {"image", "svg"}
+SUBCOMMANDS = {"image", "svg", "vision"}
 
 
 # ============================================================================
@@ -134,6 +134,74 @@ def svg_cmd(prompt, output, model, debug):
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+# ============================================================================
+# Vision Analysis Command
+# ============================================================================
+
+@click.command("vision")
+@click.argument("files", nargs=-1, required=True)
+@click.option("-p", "--prompt", default="Describe what you see in detail.", help="Analysis prompt")
+@click.option(
+    "-m", "--model",
+    type=click.Choice(["flash", "pro"]),
+    default="flash",
+    help="Model: 'flash' (fast, default) or 'pro' (better quality)"
+)
+@click.option("--sample", type=int, help="Sample N frames evenly (for many images)")
+@click.option("--json", "json_output", is_flag=True, help="Request JSON output")
+@click.option("--debug", is_flag=True, help="Debug logging")
+def vision_cmd(files, prompt, model, sample, json_output, debug):
+    """Analyze images or videos with Gemini vision.
+
+    Examples:
+        llmx vision screenshot.png -p "What UI issues do you see?"
+        llmx vision frame*.png -p "Summarize gameplay" --sample 5
+        llmx vision gameplay.mp4 -p "List all UI elements visible"
+        llmx vision img1.png img2.png -p "Compare these two images"
+    """
+    configure_logger(debug=debug)
+
+    # Expand glob patterns and collect files
+    from pathlib import Path
+    import glob as glob_module
+
+    file_list = []
+    for pattern in files:
+        # Check if it's a glob pattern
+        if '*' in pattern or '?' in pattern:
+            matches = sorted(glob_module.glob(pattern))
+            file_list.extend(matches)
+        else:
+            file_list.append(pattern)
+
+    if not file_list:
+        click.echo("Error: No files found matching the patterns.", err=True)
+        sys.exit(1)
+
+    logger.info(f"Analyzing {len(file_list)} file(s)")
+
+    try:
+        from .vision import analyze_media, analyze_frames
+
+        # Use analyze_frames if multiple images and sample requested
+        if sample and len(file_list) > 1:
+            result = analyze_frames(file_list, prompt, model, sample)
+        else:
+            result = analyze_media(file_list, prompt, model, json_output)
+
+        click.echo(result)
+
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        if debug:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
 
@@ -366,6 +434,7 @@ def cli():
 cli.add_command(chat_cmd, name="chat")
 cli.add_command(image_cmd, name="image")
 cli.add_command(svg_cmd, name="svg")
+cli.add_command(vision_cmd, name="vision")
 
 
 def main():
