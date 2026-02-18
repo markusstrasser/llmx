@@ -142,6 +142,35 @@ llmx svg "momentum arrow icon" -o arrow.svg
 
 **Note:** Requires `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variable.
 
+## Deep Research
+
+Run multi-step research using OpenAI's deep research models. Searches hundreds of sources and produces detailed reports with citations.
+
+```bash
+# Default: o3-deep-research (most powerful)
+llmx research "economic impact of semaglutide on healthcare"
+
+# Faster/cheaper: o4-mini-deep-research
+llmx research --mini "compare React vs Svelte in 2026"
+
+# Save report to file
+llmx research "CRISPR patent landscape" -o report.md
+
+# Enable code interpreter for data analysis
+llmx research --code-interpreter "global EV adoption trends"
+
+# Control cost (limit tool calls)
+llmx research --max-tool-calls 50 "query"
+```
+
+### Research Options
+- `--mini` - Use o4-mini-deep-research (faster, cheaper)
+- `--max-tool-calls N` - Limit total tool calls (controls cost/latency)
+- `--code-interpreter` - Enable code interpreter for data analysis
+- `-o, --output` - Save report to file (markdown)
+
+**Note:** Deep research runs in background mode and typically takes 2-10 minutes. Uses OpenAI Responses API directly (requires `OPENAI_API_KEY`).
+
 ## Features
 
 - Auto-provider detection from model name
@@ -151,3 +180,4 @@ llmx svg "momentum arrow icon" -o arrow.svg
 - Streaming & JSON output
 - Smart warnings (Flash misuse, etc)
 - **Image generation** (Gemini 3 Pro Image)
+- **Deep research** (OpenAI o3/o4-mini)

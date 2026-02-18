@@ -32,7 +32,7 @@ from .logger import configure_logger, logger
 console = Console()
 
 # Subcommand names for detection
-SUBCOMMANDS = {"image", "svg", "vision"}
+SUBCOMMANDS = {"image", "svg", "vision", "research"}
 
 
 # ============================================================================
@@ -202,6 +202,64 @@ def vision_cmd(files, prompt, model, sample, json_output, debug):
         if debug:
             import traceback
             traceback.print_exc()
+        sys.exit(1)
+
+
+# ============================================================================
+# Deep Research Command
+# ============================================================================
+
+@click.command("research")
+@click.argument("prompt", nargs=-1, required=True)
+@click.option(
+    "--mini",
+    is_flag=True,
+    help="Use o4-mini-deep-research (faster, cheaper)",
+)
+@click.option(
+    "--max-tool-calls",
+    type=int,
+    help="Limit total tool calls (controls cost/latency)",
+)
+@click.option(
+    "--code-interpreter",
+    is_flag=True,
+    help="Enable code interpreter for data analysis",
+)
+@click.option("-o", "--output", help="Save report to file (markdown)")
+@click.option("--debug", is_flag=True, help="Debug logging")
+def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
+    """Deep research using OpenAI o3/o4-mini.
+
+    Searches hundreds of sources and produces a detailed report with citations.
+    Runs in background mode (typically takes 2-10 minutes).
+
+    Examples:
+        llmx research "economic impact of semaglutide on healthcare"
+        llmx research --mini "compare React vs Svelte in 2026"
+        llmx research "analyze CRISPR patent landscape" -o report.md
+        llmx research --code-interpreter "global EV adoption trends with data"
+    """
+    configure_logger(debug=debug)
+
+    prompt_text = " ".join(prompt)
+    model = "o4-mini" if mini else "o3"
+
+    try:
+        from .research import research
+        research(
+            prompt=prompt_text,
+            model=model,
+            max_tool_calls=max_tool_calls,
+            code_interpreter=code_interpreter,
+            output_file=output,
+            debug=debug,
+        )
+    except KeyboardInterrupt:
+        logger.info("Research cancelled by user")
+        sys.exit(130)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
 
@@ -435,6 +493,7 @@ cli.add_command(chat_cmd, name="chat")
 cli.add_command(image_cmd, name="image")
 cli.add_command(svg_cmd, name="svg")
 cli.add_command(vision_cmd, name="vision")
+cli.add_command(research_cmd, name="research")
 
 
 def main():
