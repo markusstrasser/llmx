@@ -4,8 +4,8 @@ llmx - Unified LLM CLI via LiteLLM
 
 Usage:
     llmx "your prompt"
-    llmx --model gpt-5-pro "your prompt"
-    cat file.txt | llmx --model claude-sonnet-4-5 "review"
+    llmx --model gpt-5.2 "your prompt"
+    cat file.txt | llmx --model claude-sonnet-4-6 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
     llmx svg "physics momentum arrow icon" -o momentum.svg
@@ -272,7 +272,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5-pro', 'claude-sonnet-4-5', 'gemini-2.5-pro', 'kimi-k2-thinking', 'cerebras/qwen-3-coder-480b'.",
+    help="Model: 'gpt-5.2', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
 )
 @click.option(
     "-p",
@@ -290,7 +290,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 @click.option(
     "--reasoning-effort",
     type=click.Choice(["minimal", "low", "medium", "high"], case_sensitive=False),
-    help="GPT-5 only: minimal/low/medium/high.",
+    help="Thinking effort: GPT-5 defaults to high, Gemini defaults to high server-side. Use to override.",
 )
 @click.option(
     "--stream/--no-stream",
@@ -321,9 +321,19 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     help="List providers",
 )
 @click.option(
+    "--no-thinking",
+    is_flag=True,
+    help="Disable thinking/reasoning: Kimi switches to instruct model",
+)
+@click.option(
     "--use-old",
     is_flag=True,
-    help="Kimi: k2-0905-instruct (fast, non-reasoning)",
+    help="Use previous model version (e.g., Kimi K2 instead of K2.5)",
+)
+@click.option(
+    "--fast",
+    is_flag=True,
+    help="Use fast model variant: Gemini Flash with low reasoning effort",
 )
 @click.pass_context
 def chat_cmd(
@@ -340,7 +350,9 @@ def chat_cmd(
     debug,
     json_output,
     list_providers_flag,
+    no_thinking,
     use_old,
+    fast,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -411,6 +423,24 @@ def chat_cmd(
             return
 
         final_provider = provider
+
+        # --fast: override to Gemini Flash with low reasoning effort
+        if fast:
+            if not provider:
+                final_provider = "google"
+            if not model:
+                from .providers import PROVIDER_CONFIGS
+                fast_provider = final_provider or "google"
+                fast_model = PROVIDER_CONFIGS.get(fast_provider, {}).get("flash_model")
+                if fast_model:
+                    model = fast_model
+                    logger.info(f"--fast: using {model}")
+                else:
+                    logger.info(f"--fast: no fast model for {fast_provider}, using default")
+            if not reasoning_effort:
+                reasoning_effort = "low"
+                logger.info(f"--fast: reasoning_effort=low")
+
         if model and not provider:
             inferred = infer_provider_from_model(model)
             if inferred:
@@ -421,6 +451,17 @@ def chat_cmd(
                 logger.debug(f"Could not infer provider from model '{model}', using default: google")
         elif not provider:
             final_provider = "google"
+
+        # --no-thinking: switch to non-thinking model variant
+        if no_thinking:
+            if final_provider == "kimi" and not model:
+                model = "kimi-k2-thinking"  # Fall back to K2 non-thinking instruct
+                logger.info(f"Switching to non-thinking model: {model}")
+            elif final_provider == "kimi" and model and "k2.5" in model.lower():
+                model = "kimi-k2-thinking"  # K2 instruct as non-thinking fallback
+                logger.info(f"Switching to non-thinking model: {model}")
+            else:
+                logger.warn(f"--no-thinking has no effect for provider {final_provider}")
 
         logger.info(
             "Starting chat",
@@ -465,12 +506,22 @@ def chat_cmd(
 class LlmxGroup(click.Group):
     """Custom group that defaults to chat command when no subcommand is given."""
 
+    # Flags that belong to the group itself (not chat)
+    GROUP_FLAGS = {'--version', '--help', '-h'}
+
     def parse_args(self, ctx, args):
-        # If no args or first arg is not a subcommand, prepend 'chat'
-        if not args or (args[0] not in self.commands and not args[0].startswith('-')):
-            # Check if first arg looks like a subcommand
-            if not args or args[0] not in SUBCOMMANDS:
-                args = ['chat'] + list(args)
+        # If no args, default to chat
+        if not args:
+            args = ['chat']
+        # If first arg is a known subcommand, let Click handle it normally
+        elif args[0] in self.commands:
+            pass
+        # If first arg is a group-level flag (--version, --help), let Click handle it
+        elif args[0] in self.GROUP_FLAGS:
+            pass
+        # Otherwise (prompt text OR chat flags like -m, -p, -t), route to chat
+        else:
+            args = ['chat'] + list(args)
         return super().parse_args(ctx, args)
 
 
@@ -481,7 +532,7 @@ def cli():
 
     Examples:
         llmx "What is 2+2?"                                  # Text generation (default)
-        llmx --model gpt-5-pro "Explain Python"              # Specific model
+        llmx --model gpt-5.2 "Explain Python"                  # Specific model
         llmx image "a cute robot" -o robot.png               # Image generation
         llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
     """
