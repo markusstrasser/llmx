@@ -1,191 +1,169 @@
 # llmx
 
-Unified CLI for LLM providers via LiteLLM. Simple tool for calling LLM APIs from scripts.
+Unified CLI and Python API for LLM providers via [LiteLLM](https://github.com/BerriAI/litellm).
 
-## Installation
+## Install
 
 ```bash
+# From GitHub
+uv tool install git+https://github.com/markusstrasser/llmx
+
+# Local editable
 uv tool install --editable /path/to/llmx
 ```
 
-## Quick Start
+## CLI
 
 ```bash
-# Default (Gemini 3.1 Pro)
+# Default provider (Gemini 3.1 Pro)
 llmx "What is 2+2?"
 
-# Specify model (provider auto-inferred)
-llmx --model gpt-5.2 "Explain Python"
-llmx --model claude-opus-4-6 "Write code"
-llmx --model kimi-k2.5 "Complex task"
-llmx --model cerebras/qwen-3-coder-480b "Fast coding"
+# Model auto-infers provider
+llmx -m gpt-5.2 "Explain Python"
+llmx -m claude-opus-4-6 "Write code"
+llmx -m kimi-k2.5 "Complex task"
+llmx -m cerebras/qwen-3-coder-480b "Fast coding"
 
 # Pipe input
-cat code.txt | llmx --model claude-sonnet-4-6 "Review this"
+cat code.py | llmx -m claude-sonnet-4-6 "Review this"
 
-# Compare models
-llmx --compare "Which is better: tabs or spaces?"
-
-# Web search grounding
+# Web search grounding (Google, Anthropic)
 llmx --search "Latest news on fusion energy"
+
+# Fast mode (Gemini Flash + low reasoning effort)
+llmx --fast "Quick question"
+
+# Control thinking budget (OpenAI, Gemini)
+llmx -m gpt-5.2 --reasoning-effort low "Simple task"
+llmx -m gemini-3-flash --reasoning-effort high "Hard task"
+
+# Compare providers side-by-side
+llmx --compare "Tabs or spaces?"
+
+# Stream output
+llmx --stream "Tell me a story"
+
+# JSON output
+llmx --json "Generate {name, age}"
 ```
 
-## Models
-
-### GPT-5.x (OpenAI)
-```bash
-llmx -p openai "task"                              # GPT-5.2 (default)
-llmx --model gpt-5-pro --reasoning-effort high "complex task"
-llmx --model gpt-5-codex --reasoning-effort medium "code task"
-```
-- **gpt-5.2**: Default. minimal/low/medium/high effort
-- **gpt-5-pro**: Deep reasoning
-- **gpt-5-codex**: low/medium/high (coding specialist)
-- Temperature fixed at 1.0
-
-### Gemini 3.x (Google)
-```bash
-llmx "general task"                                 # Gemini 3.1 Pro (default)
-llmx --model gemini-3-flash "fast reasoning"        # Flash: Pro-grade at Flash speed
-llmx --reasoning-effort low "simple task"            # Control thinking budget
-```
-- **3.1 Pro**: Default. Thinking model, reasoning_effort low/medium/high
-- **3 Flash**: Fast thinking model, reasoning_effort minimal/low/medium/high
-- Temperature fixed at 1.0 for thinking models
-
-### Claude (Anthropic)
-```bash
-llmx --model claude-opus-4-6 "your task"
-llmx --model claude-sonnet-4-6 "fast task"
-```
-- Temperature 0.0-1.0
-
-### Kimi K2.5 (Moonshot)
-```bash
-llmx -p kimi "complex reasoning"                    # K2.5 (default)
-```
-- Thinking model, temp=1.0 fixed
-
-### Cerebras
-```bash
-llmx --model cerebras/qwen-3-coder-480b "coding task"
-llmx --model cerebras/qwen-3-235b "general task"
-llmx --model cerebras/qwen-3-32b "fast reasoning"
-```
-- Ultra-fast inference (1400+ tokens/sec)
-- Free tier: 1M tokens/day
-
-## Options
+### Subcommands
 
 ```bash
-llmx --model MODEL --temperature 0.7 "prompt"
-llmx --model MODEL --stream "prompt"
-llmx --model MODEL --timeout 300 "prompt"
-llmx --model MODEL --json "prompt"
-llmx --model MODEL --debug "prompt"
-llmx --fast "prompt"                    # Fast model variant (Gemini Flash, low effort)
-llmx --search "prompt"                  # Web search grounding (Google, Anthropic)
-llmx --reasoning-effort high "prompt"   # Control thinking budget (OpenAI, Gemini)
-llmx --compare "prompt"                 # Compare multiple providers
+# Image generation (Gemini 3 Pro Image)
+llmx image "a cute robot mascot" -o robot.png
+llmx image "pixel art knight" -r 2K -a 16:9
+
+# SVG generation
+llmx svg "momentum arrow icon" -o arrow.svg
+
+# Vision analysis (images + video)
+llmx vision screenshot.png -p "What UI issues do you see?"
+llmx vision gameplay.mp4 -p "List all UI elements"
+
+# Deep research (OpenAI o3/o4-mini, takes 2-10 min)
+llmx research "economic impact of semaglutide on healthcare"
+llmx research --mini "compare React vs Svelte" -o report.md
 ```
 
-## Temperature
+## Python API
 
-Auto-adjusted per model:
-- **GPT-5.x, Gemini 3.x, Kimi K2.5**: Fixed at 1.0 (thinking models)
-- **Claude**: 0.0-1.0
-- **Cerebras**: 0.0-1.5
-- **Gemini (non-thinking)**: 0.0-2.0
+```python
+from llmx import chat, LLM, batch
 
-Warnings shown if override attempted.
+# One-shot call
+response = chat("What is 2+2?", provider="openai")
+print(response.content)   # "4"
+print(response.usage)     # {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
+print(response.latency)   # 1.23
+
+# With system message and search
+response = chat("Latest on CRISPR?", provider="google", search=True, system="Be concise")
+
+# Stateful client
+llm = LLM(provider="anthropic", model="claude-sonnet-4-6", temperature=0.3)
+r1 = llm.chat("Explain Python")
+r2 = llm.chat("Now compare to Rust", temperature=0.7)  # override temp
+
+# Streaming
+for chunk in llm.stream("Tell me a story"):
+    print(chunk, end="", flush=True)
+
+# Batch (parallel)
+responses = batch(["Q1", "Q2", "Q3"], provider="google", parallel=3)
+```
+
+### Response object
+
+```python
+@dataclass
+class Response:
+    content: str           # LLM text output
+    provider: str          # "google", "openai", etc.
+    model: str             # Full model name
+    usage: dict            # {prompt_tokens, completion_tokens, total_tokens}
+    latency: float         # Seconds
+    raw: Any               # Raw LiteLLM response
+```
+
+### Inspection
+
+```python
+from llmx.inspect import stats, last_request, last_response, history, clear
+
+chat("Hello", provider="openai")
+chat("World", provider="google")
+
+stats()
+# {'total_calls': 2, 'total_tokens': 42, 'avg_latency': 1.5,
+#  'by_provider': {'openai': {'calls': 1, ...}, 'google': {'calls': 1, ...}}}
+
+last_request()   # {provider, model, messages, time}
+last_response()  # {content, usage, latency, time}
+history(limit=5) # List of trace dicts
+clear()          # Reset
+```
+
+### Helpers
+
+```python
+from llmx.helpers import retry, cache, validate_prompt
+
+@retry(max_attempts=3, backoff=2.0)
+def flaky_call():
+    return chat("prompt", provider="openai")
+
+@cache(ttl=3600)  # 1 hour
+def expensive_analysis(code):
+    return chat(f"Analyze: {code}", provider="anthropic")
+
+prompt = validate_prompt(user_input, min_length=5, max_length=10000)
+```
 
 ## Providers
 
-```bash
-llmx --list-providers
-```
+| Provider | Default model | Flag |
+|----------|--------------|------|
+| `google` | Gemini 3.1 Pro | (default) |
+| `openai` | GPT-5.2 | `-p openai` |
+| `anthropic` | Claude Opus 4.6 | `-p anthropic` |
+| `xai` | Grok 4 | `-p xai` |
+| `kimi` | Kimi K2.5 | `-p kimi` |
+| `cerebras` | Qwen 3 Coder 480B | `-p cerebras` |
+| `deepseek` | DeepSeek Chat | `-p deepseek` |
+| `openrouter` | 400+ models | `-p openrouter` |
 
-- `google` - Gemini 3.1 Pro
-- `openai` - GPT-5.2
-- `anthropic` - Claude Opus 4.6
-- `kimi` - Kimi K2.5
-- `cerebras` - Qwen 3
-- `xai` - Grok
-- `deepseek` - DeepSeek
-- `openrouter` - 400+ models
+All thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5) have temperature fixed at 1.0.
 
 ## API Keys
 
-Set in `.env`:
+Set in `.env` or environment:
+
 ```bash
-OPENAI_API_KEY=...
 GEMINI_API_KEY=...
+OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
 MOONSHOT_API_KEY=...
 CEREBRAS_API_KEY=...
+XAI_API_KEY=...
 ```
-
-## Image Generation
-
-Generate images using Gemini 3 Pro Image (Nano Banana Pro):
-
-```bash
-# Basic image generation
-llmx image "a cute robot mascot" -o robot.png
-
-# With options
-llmx image "pixel art knight" -o knight.png -r 2K          # 2K resolution
-llmx image "game background" -a 16:9                        # Aspect ratio
-llmx image "physics diagram" -m pro --debug                 # Debug mode
-
-# Generate SVGs
-llmx svg "momentum arrow icon" -o arrow.svg
-```
-
-### Image Options
-- `-o, --output` - Output file path (default: auto-generated)
-- `-m, --model` - `flash` or `pro` (both use gemini-3-pro-image-preview)
-- `-r, --resolution` - `1K`, `2K`, or `4K`
-- `-a, --aspect-ratio` - `1:1`, `16:9`, `9:16`, `4:3`, etc.
-
-**Note:** Requires `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variable.
-
-## Deep Research
-
-Run multi-step research using OpenAI's deep research models. Searches hundreds of sources and produces detailed reports with citations.
-
-```bash
-# Default: o3-deep-research (most powerful)
-llmx research "economic impact of semaglutide on healthcare"
-
-# Faster/cheaper: o4-mini-deep-research
-llmx research --mini "compare React vs Svelte in 2026"
-
-# Save report to file
-llmx research "CRISPR patent landscape" -o report.md
-
-# Enable code interpreter for data analysis
-llmx research --code-interpreter "global EV adoption trends"
-
-# Control cost (limit tool calls)
-llmx research --max-tool-calls 50 "query"
-```
-
-### Research Options
-- `--mini` - Use o4-mini-deep-research (faster, cheaper)
-- `--max-tool-calls N` - Limit total tool calls (controls cost/latency)
-- `--code-interpreter` - Enable code interpreter for data analysis
-- `-o, --output` - Save report to file (markdown)
-
-**Note:** Deep research runs in background mode and typically takes 2-10 minutes. Uses OpenAI Responses API directly (requires `OPENAI_API_KEY`).
-
-## Features
-
-- Auto-provider detection from model name
-- Temperature validation per model
-- Reasoning effort control (OpenAI, Gemini)
-- Web search grounding (`--search`)
-- Compare mode (parallel requests)
-- Streaming & JSON output
-- **Image generation** (Gemini 3 Pro Image)
-- **Deep research** (OpenAI o3/o4-mini)

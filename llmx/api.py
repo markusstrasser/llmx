@@ -1,20 +1,4 @@
-"""Programmatic API for llmx
-
-Usage:
-    from llmx import LLM, chat, batch
-
-    # Simple one-shot
-    response = chat("What is 2+2?", provider="openai")
-    print(response.content)
-
-    # Stateful client
-    llm = LLM(provider="google", model="gemini-2.5-pro")
-    r1 = llm.chat("First question")
-    r2 = llm.chat("Second question")
-
-    # Batch processing
-    responses = batch(["Q1", "Q2", "Q3"], provider="openai", parallel=3)
-"""
+"""Programmatic API for llmx"""
 
 import time
 from typing import Optional, List, Dict, Any, Iterator
