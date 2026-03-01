@@ -13,23 +13,31 @@ console = Console()
 
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
-    # OpenAI GPT-5.1 thinking models: temperature=1 only, support reasoning_effort
-    "gpt-5.1": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
-    "gpt-5.1-mini": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
+    # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
+    "gpt-5.2": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
+    "gpt-5.1": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
+    "gpt-5.1-mini": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
     # Legacy GPT-5 models
-    "gpt-5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
-    "gpt-5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
-    "gpt-5-codex": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},  # No minimal
-    # Kimi thinking models (only k2-thinking, not instruct variants)
-    "kimi-k2-thinking": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},  # No reasoning_effort support
-    # Note: kimi-k2-0905-preview (instruct) and kimi-k2-0711-preview do NOT have these restrictions
+    "gpt-5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
+    "gpt-5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
+    "gpt-5-codex": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"], "default_effort": "high"},  # No minimal
+    # Gemini 3.x thinking models: temperature=1 required (lower causes looping/degraded reasoning)
+    # LiteLLM maps reasoning_effort -> thinkingConfig.thinkingBudget natively
+    # Gemini 3.x defaults to thinkingLevel=high server-side, so no default_effort needed
+    "gemini-3.1-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
+    "gemini-3-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
+    "gemini-3-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
+    # Kimi K2.5 thinking model (Jan 2026)
+    "kimi-k2.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},  # No reasoning_effort support
+    # Legacy K2 variants
+    "kimi-k2-thinking": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},
 }
 
 # Provider configurations
 PROVIDER_CONFIGS = {
     "google": {
-        "model": "gemini/gemini-3-pro-preview",  # Default: Gemini 3 Pro (Nov 2025) - THINKING MODEL
-        "legacy_model": "gemini/gemini-2.5-pro",  # Legacy: Gemini 2.5 Pro
+        "model": "gemini/gemini-3.1-pro-preview",  # Default: Gemini 3.1 Pro (Feb 2026) - THINKING MODEL
+        "legacy_model": "gemini/gemini-3-pro-preview",  # Legacy: Gemini 3 Pro (Nov 2025)
         "env_var": "GEMINI_API_KEY or GOOGLE_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -37,15 +45,15 @@ PROVIDER_CONFIGS = {
         "flash_lite_model": "gemini/gemini-2.5-flash-lite",  # Budget: file/semantic search only
     },
     "openai": {
-        "model": "gpt-5.1",  # Default: GPT-5.1 THINKING model (Nov 2025)
-        "legacy_model": "gpt-4o",  # Legacy: GPT-4o
+        "model": "gpt-5.2",  # Default: GPT-5.2 THINKING model (Dec 2025)
+        "legacy_model": "gpt-5.1",  # Legacy: GPT-5.1
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
     },
     "anthropic": {
-        "model": "anthropic/claude-opus-4-5",  # Default: Claude 4.5 Opus THINKING model (Nov 2025)
-        "legacy_model": "anthropic/claude-sonnet-4-5",  # Legacy: Claude Sonnet 4.5
+        "model": "anthropic/claude-opus-4-6",  # Default: Claude Opus 4.6 (Feb 2026)
+        "legacy_model": "anthropic/claude-sonnet-4-6",  # Legacy: Claude Sonnet 4.6
         "env_var": "ANTHROPIC_API_KEY",
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
@@ -72,8 +80,8 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "kimi": {
-        "model": "moonshot/kimi-k2-thinking",  # Default: Nov 2025, reasoning/thinking model
-        "old_model": "moonshot/kimi-k2-0905-preview",  # Instruct (non-thinking): Sept 2025, 256K context, faster
+        "model": "moonshot/kimi-k2.5",  # Default: Kimi K2.5 (Jan 2026), thinking model
+        "old_model": "moonshot/kimi-k2-thinking",  # Legacy: K2 thinking (Nov 2025)
         "legacy_model": "moonshot/kimi-k2-0711-preview",  # Legacy: July 2025, 128K context
         "env_var": "MOONSHOT_API_KEY or KIMI_API_KEY",
         "temperature_range": (0.0, 1.0),
@@ -258,6 +266,33 @@ def check_api_key(provider: str) -> None:
     raise RuntimeError(error_msg)
 
 
+def _build_search_kwargs(provider: str, model_name: str) -> dict:
+    """Build provider-specific kwargs for web search grounding.
+
+    Returns dict to merge into completion_kwargs. Warns if provider unsupported.
+    """
+    if provider == "google":
+        return {"tools": [{"googleSearch": {}}]}
+    elif provider == "anthropic":
+        return {"web_search_options": {"search_context_size": "medium"}}
+    elif provider == "xai":
+        # xAI web search requires Responses API (/v1/responses), but LiteLLM completion()
+        # still routes to /v1/chat/completions. Not supported until LiteLLM fixes routing.
+        logger.warn(
+            "xAI web search requires the Responses API which LiteLLM completion() doesn't support yet — ignoring --search"
+        )
+        return {}
+    elif provider == "openai":
+        logger.warn(
+            "OpenAI web search requires search-specific models (gpt-4o-search-preview). "
+            "Use 'llmx research' for OpenAI deep research instead."
+        )
+        return {}
+    else:
+        logger.warn(f"Web search not supported for provider '{provider}' — ignoring --search")
+        return {}
+
+
 def chat(
     prompt: str,
     provider: str,
@@ -270,6 +305,7 @@ def chat(
     use_old: bool = False,
     user_specified_temp: bool = False,
     timeout: int = 120,
+    search: bool = False,
 ) -> None:
     """Execute chat with single provider"""
     start_time = time.time()
@@ -322,11 +358,12 @@ def chat(
             },
         )
 
-        # Tip for models that support reasoning_effort
-        if restriction and restriction.get("reasoning_effort") and not reasoning_effort and provider == "openai":
-            logger.info(
-                f"Tip: {model_name} supports --reasoning-effort (low/medium/high) for better results"
-            )
+        # Default reasoning_effort for thinking models that support it
+        if restriction and restriction.get("reasoning_effort") and not reasoning_effort:
+            default_effort = restriction.get("default_effort")
+            if default_effort:
+                reasoning_effort = default_effort
+                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -338,10 +375,17 @@ def chat(
             "timeout": timeout,
         }
 
-        # Add reasoning_effort for OpenAI models if specified
-        if reasoning_effort and provider == "openai":
+        # Add reasoning_effort for models that support it (OpenAI, Gemini)
+        # LiteLLM maps reasoning_effort to thinkingConfig for Gemini natively
+        if reasoning_effort and provider in ("openai", "google"):
             completion_kwargs["reasoning_effort"] = reasoning_effort
             logger.debug(f"Using reasoning_effort: {reasoning_effort}")
+
+        # Add web search grounding
+        if search:
+            search_kwargs = _build_search_kwargs(provider, model_name)
+            completion_kwargs.update(search_kwargs)
+            logger.debug(f"Web search enabled", {"provider": provider, "search_kwargs": search_kwargs})
 
         if stream:
             # Streaming mode
@@ -441,6 +485,7 @@ def compare(
     use_old: bool = False,
     user_specified_temp: bool = False,
     timeout: int = 120,
+    search: bool = False,
 ) -> None:
     """Compare responses from multiple providers"""
     import concurrent.futures
@@ -473,10 +518,15 @@ def compare(
                 "timeout": timeout,
             }
 
-            # Add reasoning_effort for OpenAI models if specified
-            if reasoning_effort and provider == "openai":
+            # Add reasoning_effort for models that support it
+            if reasoning_effort and provider in ("openai", "google"):
                 completion_kwargs["reasoning_effort"] = reasoning_effort
                 logger.debug(f"Using reasoning_effort: {reasoning_effort}")
+
+            # Add web search grounding
+            if search:
+                search_kwargs = _build_search_kwargs(provider, model_name)
+                completion_kwargs.update(search_kwargs)
 
             response = completion(**completion_kwargs)
 

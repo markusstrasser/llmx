@@ -20,7 +20,7 @@ import time
 from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
-from .providers import get_model_name, check_api_key
+from .providers import get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model
 
 # Import litellm directly for API calls
 try:
@@ -75,6 +75,7 @@ class LLM:
         provider: str = "google",
         model: Optional[str] = None,
         temperature: float = 0.7,
+        search: bool = False,
         **kwargs
     ):
         """Initialize LLM client
@@ -83,6 +84,7 @@ class LLM:
             provider: Provider name (google, openai, anthropic, xai, deepseek)
             model: Model name (overrides provider default)
             temperature: Temperature 0-1 (default: 0.7)
+            search: Enable web search grounding (google, anthropic, xai)
             **kwargs: Additional provider-specific arguments
 
         Raises:
@@ -92,6 +94,7 @@ class LLM:
         self.provider = provider
         self.model = model or get_model_name(provider)
         self.temperature = temperature
+        self.search = search
         self.kwargs = kwargs
 
         # Validate API key on init
@@ -123,6 +126,11 @@ class LLM:
         # Merge kwargs
         call_kwargs = {**self.kwargs, **kwargs}
         temp = temperature if temperature is not None else self.temperature
+
+        # Add web search grounding
+        if self.search:
+            search_kwargs = _build_search_kwargs(self.provider, self.model)
+            call_kwargs.update(search_kwargs)
 
         # Build messages
         messages = []
@@ -215,6 +223,7 @@ def chat(
     model: Optional[str] = None,
     system: Optional[str] = None,
     temperature: float = 0.7,
+    search: bool = False,
     **kwargs
 ) -> Response:
     """Simple chat function - one-shot calls
@@ -225,6 +234,7 @@ def chat(
         model: Model name (overrides provider default)
         system: System message (optional)
         temperature: Temperature 0-1 (default: 0.7)
+        search: Enable web search grounding (google, anthropic, xai)
         **kwargs: Additional provider arguments
 
     Returns:
@@ -238,7 +248,7 @@ def chat(
         >>> print(response.usage)
         {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
     """
-    llm = LLM(provider=provider, model=model, temperature=temperature, **kwargs)
+    llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
     return llm.chat(prompt, system=system)
 
 

@@ -83,7 +83,7 @@ def cache(ttl: Optional[int] = None):
         >>>
         >>> @cache(ttl=3600)  # Cache for 1 hour
         >>> def expensive_analysis(code):
-        ...     return chat(f"Analyze this code: {code}", provider="gpt-5-pro")
+        ...     return chat(f"Analyze this code: {code}", provider="openai")
         >>>
         >>> result1 = expensive_analysis("def foo(): pass")  # Calls LLM
         >>> result2 = expensive_analysis("def foo(): pass")  # Returns cached result

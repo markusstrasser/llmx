@@ -335,6 +335,11 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     is_flag=True,
     help="Use fast model variant: Gemini Flash with low reasoning effort",
 )
+@click.option(
+    "--search",
+    is_flag=True,
+    help="Ground response with web search (google, anthropic, xai)",
+)
 @click.pass_context
 def chat_cmd(
     ctx,
@@ -353,6 +358,7 @@ def chat_cmd(
     no_thinking,
     use_old,
     fast,
+    search,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -419,6 +425,7 @@ def chat_cmd(
                 use_old,
                 user_specified_temp,
                 timeout,
+                search,
             )
             return
 
@@ -479,6 +486,7 @@ def chat_cmd(
             use_old,
             user_specified_temp,
             timeout,
+            search,
         )
 
     except KeyboardInterrupt:

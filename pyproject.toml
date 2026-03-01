@@ -5,7 +5,7 @@ description = "Unified API wrapper for LLM providers using LiteLLM"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "litellm>=1.40.0",
+    "litellm>=1.79.0",
     "openai>=1.50.0",
     "click>=8.1.7",
     "python-dotenv>=1.0.0",
