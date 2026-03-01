@@ -11,55 +11,60 @@ uv tool install --editable /path/to/llmx
 ## Quick Start
 
 ```bash
-# Default (Gemini)
+# Default (Gemini 3.1 Pro)
 llmx "What is 2+2?"
 
 # Specify model (provider auto-inferred)
-llmx --model gpt-5-pro "Explain Python"
-llmx --model claude-sonnet-4-5 "Write code"
-llmx --model kimi-k2-thinking "Complex task"
+llmx --model gpt-5.2 "Explain Python"
+llmx --model claude-opus-4-6 "Write code"
+llmx --model kimi-k2.5 "Complex task"
 llmx --model cerebras/qwen-3-coder-480b "Fast coding"
 
 # Pipe input
-cat code.txt | llmx --model claude-sonnet-4-5 "Review this"
+cat code.txt | llmx --model claude-sonnet-4-6 "Review this"
 
 # Compare models
 llmx --compare "Which is better: tabs or spaces?"
+
+# Web search grounding
+llmx --search "Latest news on fusion energy"
 ```
 
 ## Models
 
-### GPT-5 (OpenAI)
+### GPT-5.x (OpenAI)
 ```bash
+llmx -p openai "task"                              # GPT-5.2 (default)
 llmx --model gpt-5-pro --reasoning-effort high "complex task"
 llmx --model gpt-5-codex --reasoning-effort medium "code task"
 ```
-- **gpt-5-pro**: minimal/low/medium/high effort
+- **gpt-5.2**: Default. minimal/low/medium/high effort
+- **gpt-5-pro**: Deep reasoning
 - **gpt-5-codex**: low/medium/high (coding specialist)
 - Temperature fixed at 1.0
 
-### Gemini (Google)
+### Gemini 3.x (Google)
 ```bash
-llmx --model gemini-2.5-pro "general task"
-llmx --model gemini-2.5-flash "search query"  # Search ONLY
+llmx "general task"                                 # Gemini 3.1 Pro (default)
+llmx --model gemini-3-flash "fast reasoning"        # Flash: Pro-grade at Flash speed
+llmx --reasoning-effort low "simple task"            # Control thinking budget
 ```
-- **Pro**: General tasks, reasoning, code
-- **Flash**: Search/retrieval ONLY (warns if misused)
+- **3.1 Pro**: Default. Thinking model, reasoning_effort low/medium/high
+- **3 Flash**: Fast thinking model, reasoning_effort minimal/low/medium/high
+- Temperature fixed at 1.0 for thinking models
 
 ### Claude (Anthropic)
 ```bash
-llmx --model claude-sonnet-4-5 "your task"
+llmx --model claude-opus-4-6 "your task"
+llmx --model claude-sonnet-4-6 "fast task"
 ```
-- Best coding model, complex agents
 - Temperature 0.0-1.0
 
-### Kimi K2 (Moonshot)
+### Kimi K2.5 (Moonshot)
 ```bash
-llmx --model kimi-k2-thinking "complex reasoning"
-llmx --model moonshot/kimi-k2-0905-preview "fast task"
+llmx -p kimi "complex reasoning"                    # K2.5 (default)
 ```
-- **thinking**: Agentic reasoning, temp=1.0 fixed
-- **0905-preview**: Fast instruct, 256K context, variable temp
+- Thinking model, temp=1.0 fixed
 
 ### Cerebras
 ```bash
@@ -78,16 +83,19 @@ llmx --model MODEL --stream "prompt"
 llmx --model MODEL --timeout 300 "prompt"
 llmx --model MODEL --json "prompt"
 llmx --model MODEL --debug "prompt"
-llmx --compare "prompt"  # Compare multiple providers
+llmx --fast "prompt"                    # Fast model variant (Gemini Flash, low effort)
+llmx --search "prompt"                  # Web search grounding (Google, Anthropic)
+llmx --reasoning-effort high "prompt"   # Control thinking budget (OpenAI, Gemini)
+llmx --compare "prompt"                 # Compare multiple providers
 ```
 
 ## Temperature
 
 Auto-adjusted per model:
-- **GPT-5, Kimi K2 Thinking**: Fixed at 1.0
+- **GPT-5.x, Gemini 3.x, Kimi K2.5**: Fixed at 1.0 (thinking models)
 - **Claude**: 0.0-1.0
 - **Cerebras**: 0.0-1.5
-- **Gemini**: 0.0-2.0
+- **Gemini (non-thinking)**: 0.0-2.0
 
 Warnings shown if override attempted.
 
@@ -97,10 +105,10 @@ Warnings shown if override attempted.
 llmx --list-providers
 ```
 
-- `google` - Gemini 2.5
-- `openai` - GPT-5
-- `anthropic` - Claude Sonnet 4.5
-- `kimi` - Kimi K2
+- `google` - Gemini 3.1 Pro
+- `openai` - GPT-5.2
+- `anthropic` - Claude Opus 4.6
+- `kimi` - Kimi K2.5
 - `cerebras` - Qwen 3
 - `xai` - Grok
 - `deepseek` - DeepSeek
@@ -175,9 +183,9 @@ llmx research --max-tool-calls 50 "query"
 
 - Auto-provider detection from model name
 - Temperature validation per model
-- Reasoning effort (GPT-5 only)
+- Reasoning effort control (OpenAI, Gemini)
+- Web search grounding (`--search`)
 - Compare mode (parallel requests)
 - Streaming & JSON output
-- Smart warnings (Flash misuse, etc)
 - **Image generation** (Gemini 3 Pro Image)
 - **Deep research** (OpenAI o3/o4-mini)
