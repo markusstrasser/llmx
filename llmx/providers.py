@@ -306,6 +306,8 @@ def chat(
     user_specified_temp: bool = False,
     timeout: int = 120,
     search: bool = False,
+    system: Optional[str] = None,
+    schema: Optional[dict] = None,
 ) -> None:
     """Execute chat with single provider"""
     start_time = time.time()
@@ -365,7 +367,10 @@ def chat(
                 reasoning_effort = default_effort
                 logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
 
-        messages = [{"role": "user", "content": prompt}]
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
         # Build completion kwargs
         completion_kwargs = {
@@ -380,6 +385,15 @@ def chat(
         if reasoning_effort and provider in ("openai", "google"):
             completion_kwargs["reasoning_effort"] = reasoning_effort
             logger.debug(f"Using reasoning_effort: {reasoning_effort}")
+
+        # Add JSON schema for structured output
+        # LiteLLM handles translation to provider-native format (OpenAI, Gemini, etc.)
+        if schema:
+            completion_kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": schema},
+            }
+            logger.debug("Structured output enabled", {"provider": provider})
 
         # Add web search grounding
         if search:

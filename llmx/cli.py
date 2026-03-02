@@ -340,6 +340,22 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     is_flag=True,
     help="Ground response with web search (google, anthropic, xai)",
 )
+@click.option(
+    "-s", "--system",
+    help="System message for the model",
+)
+@click.option(
+    "-f", "--file",
+    "file_path",
+    type=click.Path(exists=True),
+    help="Read file contents as context (prepended to prompt, like stdin)",
+)
+@click.option(
+    "--schema",
+    "schema_path",
+    type=click.Path(exists=True),
+    help="JSON schema file for structured output",
+)
 @click.pass_context
 def chat_cmd(
     ctx,
@@ -359,6 +375,9 @@ def chat_cmd(
     use_old,
     fast,
     search,
+    system,
+    file_path,
+    schema_path,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -377,6 +396,7 @@ def chat_cmd(
     # Get prompt from args or stdin
     prompt_text = " ".join(prompt) if prompt else None
     stdin_text = None
+    file_text = None
 
     # Read from stdin if available
     if not sys.stdin.isatty():
@@ -384,12 +404,18 @@ def chat_cmd(
         stdin_text = sys.stdin.read().strip()
         logger.debug(f"Read {len(stdin_text)} chars from stdin")
 
-    # Combine stdin and prompt
-    if stdin_text and prompt_text:
-        prompt_text = f"{stdin_text}\n\n{prompt_text}"
-        logger.debug("Combined stdin context with prompt")
-    elif stdin_text:
-        prompt_text = stdin_text
+    # Read from file if specified
+    if file_path:
+        file_text = Path(file_path).read_text().strip()
+        logger.debug(f"Read {len(file_text)} chars from {file_path}")
+
+    # Combine context sources: file > stdin > prompt
+    context_parts = [p for p in [file_text, stdin_text] if p]
+    if context_parts and prompt_text:
+        prompt_text = "\n\n".join(context_parts) + f"\n\n{prompt_text}"
+        logger.debug("Combined context with prompt")
+    elif context_parts:
+        prompt_text = "\n\n".join(context_parts)
     elif not prompt_text:
         click.echo(ctx.get_help())
         return
@@ -398,6 +424,12 @@ def chat_cmd(
         logger.error("Empty prompt")
         click.echo("Error: Empty prompt.", err=True)
         sys.exit(1)
+
+    # Load JSON schema if specified
+    schema = None
+    if schema_path:
+        schema = json.loads(Path(schema_path).read_text())
+        logger.debug(f"Loaded JSON schema from {schema_path}")
 
     user_specified_temp = temperature is not None
     final_temperature = temperature if temperature is not None else 0.7
@@ -487,6 +519,8 @@ def chat_cmd(
             user_specified_temp,
             timeout,
             search,
+            system=system,
+            schema=schema,
         )
 
     except KeyboardInterrupt:

@@ -165,11 +165,12 @@ class LLM:
                 trace.set_error(e)
                 raise
 
-    def stream(self, prompt: str, **kwargs) -> Iterator[str]:
+    def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> Iterator[str]:
         """Stream response chunks
 
         Args:
             prompt: User prompt
+            system: System message (optional)
             **kwargs: Override any init kwargs
 
         Yields:
@@ -177,11 +178,14 @@ class LLM:
 
         Example:
             >>> llm = LLM(provider="openai")
-            >>> for chunk in llm.stream("Tell me a story"):
+            >>> for chunk in llm.stream("Tell me a story", system="Be concise"):
             ...     print(chunk, end="", flush=True)
         """
         # Build messages
-        messages = [{"role": "user", "content": prompt}]
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
         # Call LiteLLM with streaming
         response = completion(
@@ -240,6 +244,7 @@ def batch(
     prompts: List[str],
     provider: str = "google",
     model: Optional[str] = None,
+    system: Optional[str] = None,
     parallel: int = 3,
     **kwargs
 ) -> List[Response]:
@@ -249,6 +254,7 @@ def batch(
         prompts: List of prompts to process
         provider: Provider name (default: google)
         model: Model name (overrides provider default)
+        system: System message applied to all prompts (optional)
         parallel: Number of parallel requests (default: 3)
         **kwargs: Additional provider arguments
 
@@ -258,19 +264,19 @@ def batch(
     Example:
         >>> from llmx import batch
         >>> prompts = ["What is 2+2?", "What is 3+3?", "What is 4+4?"]
-        >>> responses = batch(prompts, provider="google", parallel=2)
+        >>> responses = batch(prompts, provider="google", system="Answer concisely", parallel=2)
         >>> for r in responses:
         ...     print(r.content)
-        4
-        6
-        8
     """
     from concurrent.futures import ThreadPoolExecutor
 
     llm = LLM(provider=provider, model=model, **kwargs)
 
+    def _chat_with_system(prompt: str) -> Response:
+        return llm.chat(prompt, system=system)
+
     with ThreadPoolExecutor(max_workers=parallel) as executor:
-        return list(executor.map(llm.chat, prompts))
+        return list(executor.map(_chat_with_system, prompts))
 
 
 # Export public API
