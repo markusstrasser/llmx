@@ -5,6 +5,8 @@ from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
 from .providers import get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model
+from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat
+from .logger import logger
 
 # Import litellm directly for API calls
 try:
@@ -76,13 +78,16 @@ class LLM:
             RuntimeError: If API key not found
         """
         self.provider = provider
-        self.model = model or get_model_name(provider)
+        self._is_cli = provider in CLI_PROVIDERS
         self.temperature = temperature
         self.search = search
         self.kwargs = kwargs
 
-        # Validate API key on init
-        check_api_key(provider)
+        if self._is_cli:
+            self.model = model  # CLI uses its own default if None
+        else:
+            self.model = model or get_model_name(provider)
+            check_api_key(provider)
 
     def chat(
         self,
@@ -107,6 +112,35 @@ class LLM:
             >>> response = llm.chat("Explain Python", system="You are a teacher")
             >>> print(response.content)
         """
+        # CLI backend — try CLI first, fall back to API
+        if self._is_cli:
+            schema = kwargs.get("response_format")
+            reasoning_effort = kwargs.get("reasoning_effort")
+            fallback_reason = needs_api_fallback(
+                self.provider, schema, system, self.search, False, reasoning_effort
+            )
+            if not fallback_reason:
+                start_time = time.time()
+                text = cli_chat(self.provider, prompt, self.model, kwargs.get("timeout", 120))
+                if text is not None:
+                    latency = time.time() - start_time
+                    return Response(
+                        content=text,
+                        provider=self.provider,
+                        model=self.model or self.provider,
+                        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                        latency=latency,
+                        raw=None,
+                    )
+            # Fall back to API provider
+            api_provider = CLI_PROVIDERS[self.provider]["api_fallback"]
+            logger.info(f"[cli→api] {self.provider} → {api_provider} ({fallback_reason or 'CLI error'})")
+            fallback = LLM(
+                provider=api_provider, model=self.model,
+                temperature=self.temperature, search=self.search, **self.kwargs
+            )
+            return fallback.chat(prompt, system=system, temperature=temperature, **kwargs)
+
         # Merge kwargs
         call_kwargs = {**self.kwargs, **kwargs}
         temp = temperature if temperature is not None else self.temperature
@@ -236,6 +270,30 @@ def chat(
         >>> print(response.usage)
         {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
     """
+    # CLI providers — try CLI first, fall back transparently
+    if provider in CLI_PROVIDERS:
+        fallback_reason = needs_api_fallback(
+            provider, kwargs.get("response_format"), system, search, False,
+            kwargs.get("reasoning_effort"),
+        )
+        if not fallback_reason:
+            start_time = time.time()
+            text = cli_chat(provider, prompt, model, kwargs.get("timeout", 120))
+            if text is not None:
+                latency = time.time() - start_time
+                return Response(
+                    content=text,
+                    provider=provider,
+                    model=model or provider,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    latency=latency,
+                    raw=None,
+                )
+        # Fall back to API
+        api_provider = CLI_PROVIDERS[provider]["api_fallback"]
+        logger.info(f"[cli→api] {provider} → {api_provider} ({fallback_reason or 'CLI error'})")
+        provider = api_provider
+
     llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
     return llm.chat(prompt, system=system)
 

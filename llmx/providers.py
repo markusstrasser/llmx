@@ -93,6 +93,21 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.5),
         "supports_streaming": True,
     },
+    # CLI-backed providers: shell out to subscription CLIs instead of per-token API
+    "gemini-cli": {
+        "model": None,  # CLI uses its own default
+        "env_var": None,  # Google account auth
+        "temperature_range": (0.0, 2.0),
+        "supports_streaming": False,
+        "api_fallback": "google",
+    },
+    "codex-cli": {
+        "model": None,
+        "env_var": None,  # ChatGPT subscription auth
+        "temperature_range": (0.0, 2.0),
+        "supports_streaming": False,
+        "api_fallback": "openai",
+    },
 }
 
 
@@ -248,6 +263,10 @@ def check_api_key(provider: str) -> None:
     if not config:
         raise ValueError(f"Unknown provider: {provider}. Use --list-providers to see available providers.")
 
+    # CLI providers use subscription auth, no API key needed
+    if config.get("env_var") is None:
+        return
+
     # Check common environment variables
     key_vars = config["env_var"].replace(" or ", ",").split(",")
     for var in key_vars:
@@ -310,6 +329,29 @@ def chat(
     schema: Optional[dict] = None,
 ) -> None:
     """Execute chat with single provider"""
+    # CLI backend handling — intercept before any LiteLLM-specific logic
+    from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat
+
+    if provider in CLI_PROVIDERS:
+        fallback_reason = needs_api_fallback(
+            provider, schema, system, search, stream, reasoning_effort
+        )
+        if fallback_reason:
+            api_provider = CLI_PROVIDERS[provider]["api_fallback"]
+            logger.info(f"[cli→api] {provider} → {api_provider} ({fallback_reason})")
+            provider = api_provider
+            # Fall through to normal LiteLLM flow
+        else:
+            text = cli_chat(provider, prompt, model, timeout)
+            if text is not None:
+                print(text)
+                return
+            # CLI failed — fall back to API
+            api_provider = CLI_PROVIDERS[provider]["api_fallback"]
+            logger.info(f"[cli→api] {provider} → {api_provider} (CLI returned error)")
+            provider = api_provider
+            # Fall through to normal LiteLLM flow
+
     start_time = time.time()
     model_name = model or "default"  # Initialize for error handling
 

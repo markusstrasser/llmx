@@ -278,7 +278,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     "-p",
     "--provider",
     default=None,
-    help="Provider: openai, anthropic, kimi, cerebras, google",
+    help="Provider: openai, anthropic, kimi, cerebras, google, gemini-cli, codex-cli",
 )
 @click.option(
     "-t",
