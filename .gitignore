@@ -34,3 +34,4 @@ __pycache__/
 .env.*
 # The '!' is escaped to prevent issues if script is sourced in zsh
 \!.env.example
+.context/*.xml
