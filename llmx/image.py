@@ -2,7 +2,7 @@
 
 Models:
 - gemini-3-pro-image-preview: High-quality image generation with reasoning
-- gemini-2.5-flash-image: Fast image generation (fallback)
+- gemini-3-flash-preview: Fast image generation (fallback)
 
 Reference: https://ai.google.dev/gemini-api/docs/image-generation
 """
@@ -267,7 +267,7 @@ Output the raw SVG code starting with <svg and ending with </svg>."""
         # Fallback to text model if image model doesn't work for text
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3-flash-preview",
                 contents=[svg_prompt],
             )
         except Exception as e2:

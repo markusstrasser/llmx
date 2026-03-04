@@ -42,7 +42,7 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
         "flash_model": "gemini/gemini-3-flash-preview",  # Gemini 3 Flash: Pro-grade reasoning with Flash speed
-        "flash_lite_model": "gemini/gemini-2.5-flash-lite",  # Budget: file/semantic search only
+        "flash_lite_model": "gemini/gemini-3.1-flash-lite-preview",  # Budget: file/semantic search only
     },
     "openai": {
         "model": "gpt-5.2",  # Default: GPT-5.2 THINKING model (Dec 2025)
@@ -146,7 +146,7 @@ def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
         return
 
     # Only warn for lite/budget flash models
-    if "lite" not in model_name.lower() and "2.5-flash" not in model_name.lower():
+    if "lite" not in model_name.lower():
         return
 
     # Check if prompt looks like a search task

@@ -283,7 +283,7 @@ def last_request() -> Optional[Dict[str, Any]]:
         >>> from llmx.inspect import last_request
         >>> chat("Hello")
         >>> print(last_request())
-        {'provider': 'google', 'model': 'gemini-2.5-pro', 'messages': [...], 'time': '2025-10-30T...'}
+        {'provider': 'google', 'model': 'gemini-3.1-pro-preview', 'messages': [...], 'time': '2025-10-30T...'}
     """
     return _inspector.last_request()
 
