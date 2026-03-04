@@ -337,5 +337,54 @@ def batch(
         return list(executor.map(_chat_with_system, prompts))
 
 
+
+# ============================================================================
+# Gemini Batch API (async, 50% discount)
+# ============================================================================
+
+def batch_submit(
+    input_file: str,
+    model: str = "gemini-3-flash-preview",
+    display_name: Optional[str] = None,
+) -> str:
+    """Submit a Gemini batch job from a JSONL file. Returns job name.
+
+    Args:
+        input_file: Path to JSONL file with requests
+        model: Model name (default: gemini-3-flash-preview)
+        display_name: Optional human-readable name
+
+    Returns:
+        Job name string (e.g. "batches/abc123")
+    """
+    from .gemini_batch import parse_input_jsonl, submit
+    requests = parse_input_jsonl(input_file)
+    return submit(requests, model=model, display_name=display_name)
+
+
+def batch_status(job_name: str) -> Dict[str, Any]:
+    """Get batch job status. Returns dict with name, state, timestamps."""
+    from .gemini_batch import status
+    return status(job_name)
+
+
+def batch_get(job_name: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Fetch results from a completed batch job.
+
+    Args:
+        job_name: The batch job name/ID
+        keys: Optional list of original request keys for correlation
+
+    Returns:
+        List of dicts with key, content, and/or error fields
+    """
+    from .gemini_batch import fetch
+    results = fetch(job_name, original_keys=keys)
+    return [
+        {"key": r.key, **({"content": r.content} if r.content else {}), **({"error": r.error} if r.error else {})}
+        for r in results
+    ]
+
+
 # Export public API
-__all__ = ["LLM", "Response", "chat", "batch"]
+__all__ = ["LLM", "Response", "chat", "batch", "batch_submit", "batch_status", "batch_get"]

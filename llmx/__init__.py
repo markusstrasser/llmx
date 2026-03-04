@@ -16,7 +16,7 @@ Python:
 __version__ = "0.5.0"
 
 # Import public API
-from .api import LLM, Response, chat, batch
+from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get
 from .providers import (
     LlmxError, RateLimitError, TimeoutError_, ApiKeyError, ModelError,
     EXIT_SUCCESS, EXIT_GENERAL, EXIT_API_KEY, EXIT_RATE_LIMIT, EXIT_TIMEOUT, EXIT_MODEL_ERROR,
@@ -32,6 +32,9 @@ __all__ = [
     "Response",
     "chat",
     "batch",
+    "batch_submit",
+    "batch_status",
+    "batch_get",
     # Error types
     "LlmxError",
     "RateLimitError",

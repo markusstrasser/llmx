@@ -36,7 +36,7 @@ from .logger import configure_logger, logger
 console = Console()
 
 # Subcommand names for detection
-SUBCOMMANDS = {"image", "svg", "vision", "research"}
+SUBCOMMANDS = {"image", "svg", "vision", "research", "batch"}
 
 
 # ============================================================================
@@ -645,6 +645,10 @@ cli.add_command(image_cmd, name="image")
 cli.add_command(svg_cmd, name="svg")
 cli.add_command(vision_cmd, name="vision")
 cli.add_command(research_cmd, name="research")
+
+# Batch (Gemini Batch API)
+from .batch_cmd import batch_group
+cli.add_command(batch_group, name="batch")
 
 
 def main():
