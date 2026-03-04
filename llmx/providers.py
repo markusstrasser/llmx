@@ -27,6 +27,9 @@ MODEL_RESTRICTIONS = {
     "gemini-3.1-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     "gemini-3-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     "gemini-3-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
+    "gemini-3.1-flash-lite": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
+    # OpenAI GPT-5.3 (Mar 2026): "Instant" variant, reduced hallucination, max reasoning_effort=medium
+    "gpt-5.3": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["medium"], "default_effort": "medium"},
     # Kimi K2.5 thinking model (Jan 2026)
     "kimi-k2.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},  # No reasoning_effort support
     # Legacy K2 variants
@@ -137,32 +140,22 @@ def infer_provider_from_model(model: str) -> Optional[str]:
 
 
 def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
-    """Warn if using Gemini Flash Lite for non-search tasks (Gemini 3 Flash is OK for general use)"""
+    """Info log when using Flash Lite for awareness (3.1 Flash-Lite is capable: 1432 Elo, 86.9% GPQA)"""
     if not model_name or "flash" not in model_name.lower():
         return
 
-    # Gemini 3 Flash (preview) is a full-capability model, no warning needed
+    # Gemini 3 Flash (preview) is a full-capability model, no note needed
     if "gemini-3-flash" in model_name.lower() or "3-flash" in model_name.lower():
         return
 
-    # Only warn for lite/budget flash models
+    # Only note for lite models
     if "lite" not in model_name.lower():
         return
 
-    # Check if prompt looks like a search task
-    search_keywords = ["search", "find", "lookup", "retrieve", "locate", "query", "semantic", "similar"]
-    prompt_lower = prompt.lower()
-
-    is_search_task = any(keyword in prompt_lower for keyword in search_keywords)
-
-    if not is_search_task:
-        logger.warn(
-            "Flash Lite models should ONLY be used for file/semantic search tasks",
-            {"model": model_name, "note": "Use gemini-3-flash or gemini-3-pro-preview for reasoning/analysis"}
-        )
-        logger.warn(
-            "⚠️  Flash Lite will underperform on this task. Consider using gemini-3-flash instead."
-        )
+    logger.debug(
+        "Using Flash Lite",
+        {"model": model_name, "note": "$0.25/M in, $1.50/M out, 1M context"}
+    )
 
 
 def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = False) -> str:
