@@ -11,6 +11,72 @@ from .logger import logger
 
 console = Console()
 
+
+# ============================================================================
+# Structured Error Types — distinct exit codes for agent consumption
+# ============================================================================
+
+# Exit codes: callers (agents, scripts) can branch on these
+EXIT_SUCCESS = 0
+EXIT_GENERAL = 1
+EXIT_API_KEY = 2
+EXIT_RATE_LIMIT = 3    # 429, 503, quota exhausted
+EXIT_TIMEOUT = 4
+EXIT_MODEL_ERROR = 5   # context too large, model not found, invalid request
+
+
+class LlmxError(RuntimeError):
+    """Base error with structured diagnostics."""
+    exit_code = EXIT_GENERAL
+
+    def __init__(self, message: str, *, provider: str = "", model: str = "",
+                 status_code: int = 0, error_type: str = "general"):
+        super().__init__(message)
+        self.provider = provider
+        self.model = model
+        self.status_code = status_code
+        self.error_type = error_type
+
+    def diagnostic_line(self) -> str:
+        """Parseable one-liner for stderr. Agents can grep for [llmx:ERROR]."""
+        parts = [f"[llmx:ERROR] type={self.error_type}"]
+        if self.provider:
+            parts.append(f"provider={self.provider}")
+        if self.model:
+            parts.append(f"model={self.model}")
+        if self.status_code:
+            parts.append(f"status={self.status_code}")
+        parts.append(f"exit={self.exit_code}")
+        return " ".join(parts)
+
+
+class RateLimitError(LlmxError):
+    exit_code = EXIT_RATE_LIMIT
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, error_type="rate_limit", **kwargs)
+
+
+class TimeoutError_(LlmxError):
+    exit_code = EXIT_TIMEOUT
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, error_type="timeout", **kwargs)
+
+
+class ApiKeyError(LlmxError):
+    exit_code = EXIT_API_KEY
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, error_type="api_key", **kwargs)
+
+
+class ModelError(LlmxError):
+    exit_code = EXIT_MODEL_ERROR
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, error_type="model_error", **kwargs)
+
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
@@ -490,38 +556,56 @@ def chat(
             f"Request timeout after {elapsed:.1f}s",
             {"provider": provider, "model": model_name, "timeout": timeout}
         )
-        raise RuntimeError(
-            f"Request timed out after {timeout}s. The model may be overloaded or the prompt too complex. "
-            f"Try again or use a different model."
+        raise TimeoutError_(
+            f"Request timed out after {timeout}s. Model may be overloaded or prompt too large.",
+            provider=provider, model=model_name, status_code=0,
         ) from error
     except Exception as error:
         elapsed = time.time() - start_time
         error_type = error.__class__.__name__
         error_msg = str(error)
 
-        # Provide helpful error messages
-        if "rate_limit" in error_msg.lower() or "429" in error_msg:
+        # Classify error and raise typed exception
+        if "rate_limit" in error_msg.lower() or "429" in error_msg or "503" in error_msg:
+            status = 429 if "429" in error_msg else 503 if "503" in error_msg else 429
             logger.error("Rate limit exceeded", {"provider": provider, "model": model_name})
-            raise RuntimeError(
-                f"Rate limit exceeded for {provider}. Wait a moment and try again."
+            raise RateLimitError(
+                f"Rate limit exceeded for {provider}/{model_name}. Wait or use --fallback.",
+                provider=provider, model=model_name, status_code=status,
             ) from error
         elif "invalid" in error_msg.lower() and "api" in error_msg.lower():
             logger.error("Invalid API key", {"provider": provider})
-            raise RuntimeError(
-                f"Invalid API key for {provider}. Check your API key configuration."
+            raise ApiKeyError(
+                f"Invalid API key for {provider}. Check your API key configuration.",
+                provider=provider, model=model_name,
+            ) from error
+        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            logger.error("Timeout", {"provider": provider, "model": model_name})
+            raise TimeoutError_(
+                f"Request timed out for {provider}/{model_name}.",
+                provider=provider, model=model_name,
+            ) from error
+        elif "context" in error_msg.lower() and ("too" in error_msg.lower() or "length" in error_msg.lower()):
+            logger.error("Context too large", {"provider": provider, "model": model_name})
+            raise ModelError(
+                f"Context too large for {model_name}: {error_msg}",
+                provider=provider, model=model_name,
             ) from error
         elif "temperature" in error_msg.lower():
             logger.error("Temperature parameter error", {"provider": provider, "model": model_name})
-            raise RuntimeError(
-                f"Temperature error with {model_name}: {error_msg}\n"
-                f"Some models have restrictions. Try without --temperature or use --debug for details."
+            raise ModelError(
+                f"Temperature error with {model_name}: {error_msg}",
+                provider=provider, model=model_name,
             ) from error
         else:
             logger.error(
                 "Chat failed",
                 {"provider": provider, "model": model_name, "error_type": error_type, "elapsed": f"{elapsed:.1f}s"}
             )
-            raise RuntimeError(f"{error_type}: {error_msg}") from error
+            raise LlmxError(
+                f"{error_type}: {error_msg}",
+                provider=provider, model=model_name,
+            ) from error
 
 
 def compare(

@@ -13,10 +13,14 @@ Python:
     print(response.content)
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # Import public API
 from .api import LLM, Response, chat, batch
+from .providers import (
+    LlmxError, RateLimitError, TimeoutError_, ApiKeyError, ModelError,
+    EXIT_SUCCESS, EXIT_GENERAL, EXIT_API_KEY, EXIT_RATE_LIMIT, EXIT_TIMEOUT, EXIT_MODEL_ERROR,
+)
 
 # Import for convenience (optional, can be imported from submodules)
 from . import inspect
@@ -28,6 +32,19 @@ __all__ = [
     "Response",
     "chat",
     "batch",
+    # Error types
+    "LlmxError",
+    "RateLimitError",
+    "TimeoutError_",
+    "ApiKeyError",
+    "ModelError",
+    # Exit codes
+    "EXIT_SUCCESS",
+    "EXIT_GENERAL",
+    "EXIT_API_KEY",
+    "EXIT_RATE_LIMIT",
+    "EXIT_TIMEOUT",
+    "EXIT_MODEL_ERROR",
     # Version
     "__version__",
     # Submodules (for from llmx.inspect import ...)

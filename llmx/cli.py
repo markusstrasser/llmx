@@ -26,7 +26,11 @@ load_dotenv(Path.cwd().parent / ".env")
 load_dotenv(Path.cwd().parent.parent / ".env")
 
 from . import __version__
-from .providers import chat, compare as compare_providers, list_providers, infer_provider_from_model
+from .providers import (
+    chat, compare as compare_providers, list_providers, infer_provider_from_model,
+    LlmxError, RateLimitError, TimeoutError_, EXIT_GENERAL,
+    PROVIDER_CONFIGS,
+)
 from .logger import configure_logger, logger
 
 console = Console()
@@ -356,6 +360,11 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     type=click.Path(exists=True),
     help="JSON schema file for structured output",
 )
+@click.option(
+    "--fallback",
+    "fallback_model",
+    help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
+)
 @click.pass_context
 def chat_cmd(
     ctx,
@@ -378,6 +387,7 @@ def chat_cmd(
     system,
     file_path,
     schema_path,
+    fallback_model,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -526,19 +536,67 @@ def chat_cmd(
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(130)
-    except Exception as error:
+    except (RateLimitError, TimeoutError_) as error:
+        # Emit structured diagnostic
+        click.echo(error.diagnostic_line(), err=True)
+
+        # Try fallback if configured
+        if fallback_model:
+            click.echo(f"[llmx:FALLBACK] {error.error_type} → retrying with {fallback_model}", err=True)
+            logger.info(f"Falling back to {fallback_model} after {error.error_type}")
+            try:
+                fb_provider = infer_provider_from_model(fallback_model) or final_provider
+                chat(
+                    prompt_text,
+                    fb_provider,
+                    fallback_model,
+                    final_temperature,
+                    reasoning_effort if fb_provider in ("openai", "google") else None,
+                    stream,
+                    debug,
+                    json_output,
+                    use_old,
+                    user_specified_temp,
+                    timeout,
+                    search,
+                    system=system,
+                    schema=schema,
+                )
+                return  # Fallback succeeded
+            except Exception as fb_error:
+                click.echo(f"[llmx:FALLBACK_FAILED] {fb_error}", err=True)
+                # Fall through to original error exit
+
         if json_output:
-            error_data = {
-                "error": error.__class__.__name__,
-                "message": str(error),
-                "code": getattr(error, "code", "UNKNOWN_ERROR"),
-            }
-            click.echo(json.dumps(error_data, indent=2), err=True)
+            click.echo(json.dumps({
+                "error": error.error_type, "message": str(error),
+                "exit_code": error.exit_code, "model": error.model,
+            }, indent=2), err=True)
         else:
             click.echo(f"Error: {error}", err=True)
-
-        exit_code = 2 if "api key" in str(error).lower() else 1
-        sys.exit(exit_code)
+        sys.exit(error.exit_code)
+    except LlmxError as error:
+        click.echo(error.diagnostic_line(), err=True)
+        if json_output:
+            click.echo(json.dumps({
+                "error": error.error_type, "message": str(error),
+                "exit_code": error.exit_code, "model": error.model,
+            }, indent=2), err=True)
+        else:
+            click.echo(f"Error: {error}", err=True)
+        sys.exit(error.exit_code)
+    except Exception as error:
+        # Untyped error — emit generic diagnostic
+        click.echo(f"[llmx:ERROR] type=unknown exit={EXIT_GENERAL}", err=True)
+        if json_output:
+            click.echo(json.dumps({
+                "error": error.__class__.__name__,
+                "message": str(error),
+                "exit_code": EXIT_GENERAL,
+            }, indent=2), err=True)
+        else:
+            click.echo(f"Error: {error}", err=True)
+        sys.exit(EXIT_GENERAL)
 
 
 # ============================================================================
