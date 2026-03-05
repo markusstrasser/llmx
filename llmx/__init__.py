@@ -13,7 +13,7 @@ Python:
     print(response.content)
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 # Import public API
 from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get

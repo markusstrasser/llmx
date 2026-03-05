@@ -4,7 +4,7 @@ llmx - Unified LLM CLI via LiteLLM
 
 Usage:
     llmx "your prompt"
-    llmx --model gpt-5.2 "your prompt"
+    llmx --model gpt-5.4 "your prompt"
     cat file.txt | llmx --model claude-sonnet-4-6 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
@@ -29,8 +29,9 @@ from . import __version__
 from .providers import (
     chat, compare as compare_providers, list_providers, infer_provider_from_model,
     LlmxError, RateLimitError, TimeoutError_, EXIT_GENERAL,
-    PROVIDER_CONFIGS,
+    PROVIDER_CONFIGS, get_model_name, get_model_restriction,
 )
+from .cli_backends import preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS
 from .logger import configure_logger, logger
 
 console = Console()
@@ -276,7 +277,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5.2', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
+    help="Model: 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
 )
 @click.option(
     "-p",
@@ -293,8 +294,8 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 )
 @click.option(
     "--reasoning-effort",
-    type=click.Choice(["minimal", "low", "medium", "high"], case_sensitive=False),
-    help="Thinking effort: GPT-5 defaults to high, Gemini defaults to high server-side. Use to override.",
+    type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh"], case_sensitive=False),
+    help="Thinking effort override. GPT-5.4 supports up to xhigh; llmx defaults GPT-5.4 to high on API fallback.",
 )
 @click.option(
     "--stream/--no-stream",
@@ -512,10 +513,61 @@ def chat_cmd(
             else:
                 logger.warn(f"--no-thinking has no effect for provider {final_provider}")
 
-        logger.info(
-            "Starting chat",
-            {"provider": final_provider, "model": model or "default", "stream": stream, "reasoning_effort": reasoning_effort},
-        )
+        requested_reasoning_effort = reasoning_effort
+        cli_provider = preferred_cli_provider(final_provider)
+        cli_fallback_reason = None
+
+        if cli_provider:
+            logical_provider = (
+                CLI_PROVIDERS[cli_provider]["api_fallback"]
+                if final_provider in CLI_PROVIDERS
+                else final_provider
+            )
+            planned_model = model or get_model_name(logical_provider, None, use_old)
+            cli_fallback_reason = needs_api_fallback(
+                cli_provider, schema, system, search, stream, requested_reasoning_effort
+            )
+            if cli_fallback_reason:
+                planned_transport = f"{CLI_PROVIDERS[cli_provider]['api_fallback']}-api"
+            else:
+                planned_transport = cli_provider
+        else:
+            planned_model = get_model_name(final_provider, model, use_old)
+            planned_transport = f"{final_provider}-api"
+
+        effective_reasoning_effort = requested_reasoning_effort
+        reasoning_effort_source = "user" if requested_reasoning_effort else None
+
+        if planned_transport.endswith("-api"):
+            restriction = get_model_restriction(planned_model)
+            if not effective_reasoning_effort and restriction and restriction.get("reasoning_effort"):
+                default_effort = restriction.get("default_effort")
+                if default_effort:
+                    effective_reasoning_effort = default_effort
+                    reasoning_effort_source = "api-default"
+                else:
+                    effective_reasoning_effort = "provider-default"
+                    reasoning_effort_source = "provider-default"
+        else:
+            if not effective_reasoning_effort:
+                effective_reasoning_effort = "cli-default"
+                reasoning_effort_source = "cli-default"
+            else:
+                reasoning_effort_source = "user-requested-cli-may-ignore"
+
+        log_payload = {
+            "provider": final_provider,
+            "transport": planned_transport,
+            "model": planned_model,
+            "stream": stream,
+            "requested_reasoning_effort": requested_reasoning_effort,
+            "effective_reasoning_effort": effective_reasoning_effort,
+            "reasoning_effort_source": reasoning_effort_source,
+        }
+        if cli_fallback_reason:
+            log_payload["cli_fallback_reason"] = cli_fallback_reason
+
+        logger.info("Starting chat", log_payload)
         chat(
             prompt_text,
             final_provider,
@@ -632,7 +684,7 @@ def cli():
 
     Examples:
         llmx "What is 2+2?"                                  # Text generation (default)
-        llmx --model gpt-5.2 "Explain Python"                  # Specific model
+        llmx --model gpt-5.4 "Explain Python"                # Specific model
         llmx image "a cute robot" -o robot.png               # Image generation
         llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
     """

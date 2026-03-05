@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
 from .providers import get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model
-from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat
+from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat, preferred_cli_provider
 from .logger import logger
 
 # Import litellm directly for API calls
@@ -79,14 +79,28 @@ class LLM:
         """
         self.provider = provider
         self._is_cli = provider in CLI_PROVIDERS
+        self._cli_provider = preferred_cli_provider(provider)
         self.temperature = temperature
         self.search = search
         self.kwargs = kwargs
 
-        if self._is_cli:
-            self.model = model  # CLI uses its own default if None
+        if model is not None:
+            if self._is_cli:
+                self.model = model
+            else:
+                self.model = get_model_name(provider, model)
         else:
-            self.model = model or get_model_name(provider)
+            if self._cli_provider:
+                logical_provider = (
+                    provider if not self._is_cli else CLI_PROVIDERS[self._cli_provider]["api_fallback"]
+                )
+                self.model = get_model_name(logical_provider)
+            elif self._is_cli:
+                self.model = None
+            else:
+                self.model = get_model_name(provider)
+
+        if not self._cli_provider and not self._is_cli:
             check_api_key(provider)
 
     def chat(
@@ -113,28 +127,36 @@ class LLM:
             >>> print(response.content)
         """
         # CLI backend — try CLI first, fall back to API
-        if self._is_cli:
+        if self._cli_provider:
             schema = kwargs.get("response_format")
             reasoning_effort = kwargs.get("reasoning_effort")
             fallback_reason = needs_api_fallback(
-                self.provider, schema, system, self.search, False, reasoning_effort
+                self._cli_provider, schema, system, self.search, False, reasoning_effort
             )
             if not fallback_reason:
                 start_time = time.time()
-                text = cli_chat(self.provider, prompt, self.model, kwargs.get("timeout", 120))
+                text = cli_chat(
+                    self._cli_provider,
+                    prompt,
+                    self.model,
+                    kwargs.get("timeout", 120),
+                    schema=schema,
+                )
                 if text is not None:
                     latency = time.time() - start_time
                     return Response(
                         content=text,
-                        provider=self.provider,
+                        provider=self._cli_provider,
                         model=self.model or self.provider,
                         usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                         latency=latency,
                         raw=None,
                     )
             # Fall back to API provider
-            api_provider = CLI_PROVIDERS[self.provider]["api_fallback"]
-            logger.info(f"[cli→api] {self.provider} → {api_provider} ({fallback_reason or 'CLI error'})")
+            api_provider = CLI_PROVIDERS[self._cli_provider]["api_fallback"]
+            logger.info(
+                f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason or 'CLI error'})"
+            )
             fallback = LLM(
                 provider=api_provider, model=self.model,
                 temperature=self.temperature, search=self.search, **self.kwargs
@@ -270,30 +292,6 @@ def chat(
         >>> print(response.usage)
         {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
     """
-    # CLI providers — try CLI first, fall back transparently
-    if provider in CLI_PROVIDERS:
-        fallback_reason = needs_api_fallback(
-            provider, kwargs.get("response_format"), system, search, False,
-            kwargs.get("reasoning_effort"),
-        )
-        if not fallback_reason:
-            start_time = time.time()
-            text = cli_chat(provider, prompt, model, kwargs.get("timeout", 120))
-            if text is not None:
-                latency = time.time() - start_time
-                return Response(
-                    content=text,
-                    provider=provider,
-                    model=model or provider,
-                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                    latency=latency,
-                    raw=None,
-                )
-        # Fall back to API
-        api_provider = CLI_PROVIDERS[provider]["api_fallback"]
-        logger.info(f"[cli→api] {provider} → {api_provider} ({fallback_reason or 'CLI error'})")
-        provider = api_provider
-
     llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
     return llm.chat(prompt, system=system)
 

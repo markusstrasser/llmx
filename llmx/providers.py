@@ -80,6 +80,7 @@ class ModelError(LlmxError):
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
+    "gpt-5.4": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
     "gpt-5.2": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
     "gpt-5.1": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
     "gpt-5.1-mini": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
@@ -114,8 +115,8 @@ PROVIDER_CONFIGS = {
         "flash_lite_model": "gemini/gemini-3.1-flash-lite-preview",  # Budget: file/semantic search only
     },
     "openai": {
-        "model": "gpt-5.2",  # Default: GPT-5.2 THINKING model (Dec 2025)
-        "legacy_model": "gpt-5.1",  # Legacy: GPT-5.1
+        "model": "gpt-5.4",  # Default: GPT-5.4 (Mar 2026)
+        "legacy_model": "gpt-5.2",  # Legacy: GPT-5.2
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -389,26 +390,38 @@ def chat(
 ) -> None:
     """Execute chat with single provider"""
     # CLI backend handling — intercept before any LiteLLM-specific logic
-    from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat
+    from .cli_backends import (
+        CLI_PROVIDERS,
+        needs_api_fallback,
+        cli_chat,
+        preferred_cli_provider,
+    )
 
-    if provider in CLI_PROVIDERS:
+    cli_provider = preferred_cli_provider(provider)
+    if cli_provider:
+        logical_provider = (
+            provider if provider not in CLI_PROVIDERS else CLI_PROVIDERS[cli_provider]["api_fallback"]
+        )
+        cli_model = model or get_model_name(logical_provider, None, use_old)
         fallback_reason = needs_api_fallback(
-            provider, schema, system, search, stream, reasoning_effort
+            cli_provider, schema, system, search, stream, reasoning_effort
         )
         if fallback_reason:
-            api_provider = CLI_PROVIDERS[provider]["api_fallback"]
-            logger.info(f"[cli→api] {provider} → {api_provider} ({fallback_reason})")
+            api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+            logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
             provider = api_provider
+            model = cli_model
             # Fall through to normal LiteLLM flow
         else:
-            text = cli_chat(provider, prompt, model, timeout)
+            text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema)
             if text is not None:
                 print(text)
                 return
             # CLI failed — fall back to API
-            api_provider = CLI_PROVIDERS[provider]["api_fallback"]
-            logger.info(f"[cli→api] {provider} → {api_provider} (CLI returned error)")
+            api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+            logger.info(f"[cli→api] {cli_provider} → {api_provider} (CLI returned error)")
             provider = api_provider
+            model = cli_model
             # Fall through to normal LiteLLM flow
 
     start_time = time.time()
@@ -417,6 +430,7 @@ def chat(
     try:
         check_api_key(provider)
         model_name = get_model_name(provider, model, use_old)
+        requested_reasoning_effort = reasoning_effort
 
         # Validate and adjust temperature
         adjusted_temp, was_adjusted = validate_and_adjust_temperature(
@@ -450,6 +464,13 @@ def chat(
                         f"Use one of the supported values."
                     )
 
+        # Default reasoning_effort for thinking models that support it
+        if restriction and restriction.get("reasoning_effort") and not reasoning_effort:
+            default_effort = restriction.get("default_effort")
+            if default_effort:
+                reasoning_effort = default_effort
+                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
+
         logger.debug(
             "Starting chat",
             {
@@ -458,15 +479,10 @@ def chat(
                 "temperature": adjusted_temp,
                 "stream": stream,
                 "prompt_length": len(prompt),
+                "requested_reasoning_effort": requested_reasoning_effort,
+                "effective_reasoning_effort": reasoning_effort,
             },
         )
-
-        # Default reasoning_effort for thinking models that support it
-        if restriction and restriction.get("reasoning_effort") and not reasoning_effort:
-            default_effort = restriction.get("default_effort")
-            if default_effort:
-                reasoning_effort = default_effort
-                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
 
         messages = []
         if system:

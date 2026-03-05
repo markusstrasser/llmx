@@ -15,11 +15,11 @@ uv tool install --editable /path/to/llmx
 ## CLI
 
 ```bash
-# Default provider (Gemini 3.1 Pro)
+# Default provider (Gemini 3.1 Pro via Gemini CLI when installed)
 llmx "What is 2+2?"
 
 # Model auto-infers provider
-llmx -m gpt-5.2 "Explain Python"
+llmx -m gpt-5.4 "Explain Python"
 llmx -m claude-opus-4-6 "Write code"
 llmx -m kimi-k2.5 "Complex task"
 llmx -m cerebras/qwen-3-coder-480b "Fast coding"
@@ -34,8 +34,12 @@ llmx --search "Latest news on fusion energy"
 llmx --fast "Quick question"
 
 # Control thinking budget (OpenAI, Gemini)
-llmx -m gpt-5.2 --reasoning-effort low "Simple task"
+llmx -m gpt-5.4 --reasoning-effort xhigh "Hard task"
 llmx -m gemini-3-flash --reasoning-effort high "Hard task"
+
+# Force direct APIs instead of subscription CLIs
+llmx -p openai -s "You are terse" "Reply with OK"
+llmx -p google --search "Latest news on fusion energy"
 
 # Compare providers side-by-side
 llmx --compare "Tabs or spaces?"
@@ -145,13 +149,19 @@ prompt = validate_prompt(user_input, min_length=5, max_length=10000)
 | Provider | Default model | Flag |
 |----------|--------------|------|
 | `google` | Gemini 3.1 Pro | (default) |
-| `openai` | GPT-5.2 | `-p openai` |
+| `openai` | GPT-5.4 | `-p openai` |
 | `anthropic` | Claude Opus 4.6 | `-p anthropic` |
 | `xai` | Grok 4 | `-p xai` |
 | `kimi` | Kimi K2.5 | `-p kimi` |
 | `cerebras` | Qwen 3 Coder 480B | `-p cerebras` |
 | `deepseek` | DeepSeek Chat | `-p deepseek` |
 | `openrouter` | 400+ models | `-p openrouter` |
+
+Transport defaults:
+
+- `google` prefers `gemini` CLI when installed, then falls back to the Gemini API.
+- `openai` prefers `codex exec` when installed, then falls back to the OpenAI API.
+- `codex-cli` supports JSON schema output via `codex exec --output-schema`.
 
 All thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5) have temperature fixed at 1.0.
 
