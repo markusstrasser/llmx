@@ -383,7 +383,7 @@ def chat(
     json_output: bool,
     use_old: bool = False,
     user_specified_temp: bool = False,
-    timeout: int = 120,
+    timeout: int = 300,
     search: bool = False,
     system: Optional[str] = None,
     schema: Optional[dict] = None,
@@ -639,7 +639,7 @@ def compare(
     json_output: bool,
     use_old: bool = False,
     user_specified_temp: bool = False,
-    timeout: int = 120,
+    timeout: int = 300,
     search: bool = False,
 ) -> None:
     """Compare responses from multiple providers"""

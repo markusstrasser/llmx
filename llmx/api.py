@@ -139,7 +139,7 @@ class LLM:
                     self._cli_provider,
                     prompt,
                     self.model,
-                    kwargs.get("timeout", 120),
+                    kwargs.get("timeout", 300),
                     schema=schema,
                 )
                 if text is not None:

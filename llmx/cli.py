@@ -313,9 +313,9 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 )
 @click.option(
     "--timeout",
-    default=120,
+    default=300,
     type=int,
-    help="Timeout seconds (default: 120)",
+    help="Timeout seconds (default: 300)",
 )
 @click.option("--debug", is_flag=True, help="Debug logging")
 @click.option("--json", "json_output", is_flag=True, help="JSON output")
@@ -453,9 +453,9 @@ def chat_cmd(
     user_specified_temp = temperature is not None
     final_temperature = temperature if temperature is not None else 0.7
 
-    if timeout < 1 or timeout > 600:
+    if timeout < 1 or timeout > 900:
         logger.error(f"Invalid timeout: {timeout}")
-        click.echo("Error: Timeout must be between 1 and 600 seconds.", err=True)
+        click.echo("Error: Timeout must be between 1 and 900 seconds.", err=True)
         sys.exit(1)
 
     try:
