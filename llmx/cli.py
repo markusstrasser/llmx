@@ -362,6 +362,13 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     help="JSON schema file for structured output",
 )
 @click.option(
+    "--max-tokens",
+    "max_tokens",
+    type=int,
+    default=None,
+    help="Max output tokens (Gemini defaults to 8K without this — set 65536 for long outputs).",
+)
+@click.option(
     "--fallback",
     "fallback_model",
     help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
@@ -388,6 +395,7 @@ def chat_cmd(
     system,
     file_path,
     schema_path,
+    max_tokens,
     fallback_model,
 ):
     """Text generation with LLMs (default command)."""
@@ -583,6 +591,7 @@ def chat_cmd(
             search,
             system=system,
             schema=schema,
+            max_tokens=max_tokens,
         )
 
     except KeyboardInterrupt:
@@ -613,6 +622,7 @@ def chat_cmd(
                     search,
                     system=system,
                     schema=schema,
+                    max_tokens=max_tokens,
                 )
                 return  # Fallback succeeded
             except Exception as fb_error:

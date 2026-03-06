@@ -387,6 +387,7 @@ def chat(
     search: bool = False,
     system: Optional[str] = None,
     schema: Optional[dict] = None,
+    max_tokens: Optional[int] = None,
 ) -> None:
     """Execute chat with single provider"""
     # CLI backend handling — intercept before any LiteLLM-specific logic
@@ -496,6 +497,11 @@ def chat(
             "temperature": adjusted_temp,
             "timeout": timeout,
         }
+
+        # Max output tokens (critical for Gemini which defaults to 8K)
+        if max_tokens:
+            completion_kwargs["max_tokens"] = max_tokens
+            logger.debug(f"Using max_tokens: {max_tokens}")
 
         # Add reasoning_effort for models that support it (OpenAI, Gemini)
         # LiteLLM maps reasoning_effort to thinkingConfig for Gemini natively
