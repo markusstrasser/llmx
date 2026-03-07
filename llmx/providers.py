@@ -1,6 +1,7 @@
 """Provider management using LiteLLM"""
 
 import os
+import signal
 import sys
 import time
 from typing import Optional, Dict, Any
@@ -10,6 +11,11 @@ from rich.console import Console
 from .logger import logger
 
 console = Console()
+
+
+class _WallClockTimeout(Exception):
+    """Raised by SIGALRM when wall-clock deadline is exceeded."""
+    pass
 
 
 # ============================================================================
@@ -428,6 +434,14 @@ def chat(
     start_time = time.time()
     model_name = model or "default"  # Initialize for error handling
 
+    # Wall-clock timeout: SIGALRM fires after `timeout` real seconds.
+    # Catches cases where httpx socket timeout doesn't fire (streaming
+    # keepalives, chunked transfer, server holding connection open).
+    def _alarm_handler(signum, frame):
+        raise _WallClockTimeout(f"Wall-clock timeout after {timeout}s")
+    _alarm_handler_prev = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(timeout)
+
     try:
         check_api_key(provider)
         model_name = get_model_name(provider, model, use_old)
@@ -572,6 +586,16 @@ def chat(
                 {"response_length": len(text), "elapsed_sec": round(elapsed, 2)},
             )
 
+    except _WallClockTimeout:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"Wall-clock timeout after {elapsed:.1f}s",
+            {"provider": provider, "model": model_name, "timeout": timeout}
+        )
+        raise TimeoutError_(
+            f"Request timed out after {timeout}s (wall-clock). Model may be overloaded or prompt too large.",
+            provider=provider, model=model_name, status_code=0,
+        )
     except TimeoutError as error:
         elapsed = time.time() - start_time
         logger.error(
@@ -628,6 +652,9 @@ def chat(
                 f"{error_type}: {error_msg}",
                 provider=provider, model=model_name,
             ) from error
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, _alarm_handler_prev)
 
 
 def compare(
