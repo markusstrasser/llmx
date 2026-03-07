@@ -560,7 +560,7 @@ def chat_cmd(
             )
             planned_model = model or get_model_name(logical_provider, None, use_old)
             cli_fallback_reason = needs_api_fallback(
-                cli_provider, schema, system, search, stream, requested_reasoning_effort
+                cli_provider, schema, system, search, stream, requested_reasoning_effort, max_tokens
             )
             if cli_fallback_reason:
                 planned_transport = f"{CLI_PROVIDERS[cli_provider]['api_fallback']}-api"

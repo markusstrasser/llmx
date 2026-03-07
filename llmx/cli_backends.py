@@ -81,6 +81,7 @@ def needs_api_fallback(
     search: bool,
     stream: bool,
     reasoning_effort: Optional[str],
+    max_tokens: Optional[int] = None,
 ) -> Optional[str]:
     """Check if request requires features the CLI can't handle.
 
@@ -99,6 +100,8 @@ def needs_api_fallback(
         return "web search not supported by CLI"
     if stream:
         return "streaming not supported by CLI"
+    if max_tokens:
+        return "max_tokens not supported by CLI (Gemini defaults to 8K)"
     # CLIs use their own default reasoning (high/thinking). Don't fall back just
     # because the caller asked for a specific effort — the CLI will ignore it,
     # which is fine for the "same model, free tier" use case.

@@ -405,7 +405,7 @@ def chat(
         )
         cli_model = model or get_model_name(logical_provider, None, use_old)
         fallback_reason = needs_api_fallback(
-            cli_provider, schema, system, search, stream, reasoning_effort
+            cli_provider, schema, system, search, stream, reasoning_effort, max_tokens
         )
         if fallback_reason:
             api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
