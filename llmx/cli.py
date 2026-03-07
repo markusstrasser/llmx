@@ -36,6 +36,26 @@ from .logger import configure_logger, logger
 
 console = Console()
 
+
+class _TeeWriter:
+    """Write to both stdout and a file simultaneously."""
+    def __init__(self, stdout, file):
+        self._stdout = stdout
+        self._file = file
+
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+        self._file.flush()
+
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stdout, name)
+
+
 # Subcommand names for detection
 SUBCOMMANDS = {"image", "svg", "vision", "research", "batch"}
 
@@ -369,6 +389,12 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     help="Max output tokens (Gemini defaults to 8K without this — set 65536 for long outputs).",
 )
 @click.option(
+    "-o", "--output",
+    "output_path",
+    type=click.Path(),
+    help="Write output to file (unbuffered — no shell redirect needed).",
+)
+@click.option(
     "--fallback",
     "fallback_model",
     help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
@@ -396,6 +422,7 @@ def chat_cmd(
     file_path,
     schema_path,
     max_tokens,
+    output_path,
     fallback_model,
 ):
     """Text generation with LLMs (default command)."""
@@ -575,6 +602,15 @@ def chat_cmd(
         if cli_fallback_reason:
             log_payload["cli_fallback_reason"] = cli_fallback_reason
 
+        # --output: tee stdout to file (unbuffered)
+        _output_file = None
+        _original_stdout = None
+        if output_path:
+            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+            _output_file = open(output_path, "w")
+            _original_stdout = sys.stdout
+            sys.stdout = _TeeWriter(sys.stdout, _output_file)
+
         logger.info("Starting chat", log_payload)
         chat(
             prompt_text,
@@ -659,6 +695,11 @@ def chat_cmd(
         else:
             click.echo(f"Error: {error}", err=True)
         sys.exit(EXIT_GENERAL)
+    finally:
+        if _output_file:
+            sys.stdout = _original_stdout
+            _output_file.close()
+            logger.debug(f"Output written to {output_path}")
 
 
 # ============================================================================
