@@ -1,6 +1,6 @@
 [project]
 name = "llmx"
-version = "0.5.2"
+version = "0.5.3"
 description = "Unified API wrapper for LLM providers using LiteLLM"
 readme = "README.md"
 requires-python = ">=3.10"

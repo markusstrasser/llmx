@@ -162,20 +162,50 @@ def cli_chat(
             return None
 
         start = time.time()
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            input=stdin_input,
-        )
-        elapsed = time.time() - start
+        # Use Popen with process group + threading timer for reliable timeout.
+        # subprocess.run(timeout=) and SIGALRM both fail to interrupt blocking
+        # waitpid() on macOS when the child spawns its own subprocesses.
+        import os as _os
+        import signal as _signal
+        import threading as _threading
 
-        if result.returncode != 0:
-            stderr = result.stderr.strip()[:300] if result.stderr else ""
-            stdout_hint = result.stdout.strip()[:200] if result.stdout else ""
-            detail = stderr or stdout_hint or "unknown error"
-            logger.info(f"[cli→api] {binary} exited {result.returncode}: {detail}")
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, stdin=subprocess.PIPE,
+            start_new_session=True,  # new process group for clean kill
+        )
+
+        timed_out = False
+
+        def _kill_on_timeout():
+            nonlocal timed_out
+            timed_out = True
+            try:
+                _os.killpg(proc.pid, _signal.SIGKILL)
+            except OSError:
+                proc.kill()
+
+        timer = _threading.Timer(timeout, _kill_on_timeout)
+        timer.start()
+        try:
+            stdout, stderr = proc.communicate(input=stdin_input)
+        finally:
+            timer.cancel()
+
+        if timed_out:
+            logger.info(f"[cli→api] {binary} timed out after {timeout}s (killed process group)")
             return None
 
-        text = result.stdout.strip()
+        elapsed = time.time() - start
+
+        if proc.returncode != 0:
+            stderr_hint = stderr.strip()[:300] if stderr else ""
+            stdout_hint = stdout.strip()[:200] if stdout else ""
+            detail = stderr_hint or stdout_hint or "unknown error"
+            logger.info(f"[cli→api] {binary} exited {proc.returncode}: {detail}")
+            return None
+
+        text = stdout.strip()
         if not text:
             logger.info(f"[cli→api] {binary} returned empty output")
             return None

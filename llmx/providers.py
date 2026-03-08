@@ -396,53 +396,58 @@ def chat(
     max_tokens: Optional[int] = None,
 ) -> None:
     """Execute chat with single provider"""
-    # CLI backend handling — intercept before any LiteLLM-specific logic
-    from .cli_backends import (
-        CLI_PROVIDERS,
-        needs_api_fallback,
-        cli_chat,
-        preferred_cli_provider,
-    )
-
-    cli_provider = preferred_cli_provider(provider)
-    if cli_provider:
-        logical_provider = (
-            provider if provider not in CLI_PROVIDERS else CLI_PROVIDERS[cli_provider]["api_fallback"]
-        )
-        cli_model = model or get_model_name(logical_provider, None, use_old)
-        fallback_reason = needs_api_fallback(
-            cli_provider, schema, system, search, stream, reasoning_effort, max_tokens
-        )
-        if fallback_reason:
-            api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-            logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
-            provider = api_provider
-            model = cli_model
-            # Fall through to normal LiteLLM flow
-        else:
-            text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema)
-            if text is not None:
-                print(text)
-                return
-            # CLI failed — fall back to API
-            api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-            logger.info(f"[cli→api] {cli_provider} → {api_provider} (CLI returned error)")
-            provider = api_provider
-            model = cli_model
-            # Fall through to normal LiteLLM flow
-
     start_time = time.time()
-    model_name = model or "default"  # Initialize for error handling
+    model_name = model or "default"  # Initialize early for error handlers
 
     # Wall-clock timeout: SIGALRM fires after `timeout` real seconds.
-    # Catches cases where httpx socket timeout doesn't fire (streaming
-    # keepalives, chunked transfer, server holding connection open).
+    # Wraps BOTH CLI backend and API paths — CLI subprocess.run(timeout=)
+    # can fail to kill child processes that spawn their own subprocesses.
     def _alarm_handler(signum, frame):
         raise _WallClockTimeout(f"Wall-clock timeout after {timeout}s")
     _alarm_handler_prev = signal.signal(signal.SIGALRM, _alarm_handler)
     signal.alarm(timeout)
 
     try:
+
+        # CLI backend handling — intercept before any LiteLLM-specific logic
+        from .cli_backends import (
+            CLI_PROVIDERS,
+            needs_api_fallback,
+            cli_chat,
+            preferred_cli_provider,
+        )
+
+        cli_provider = preferred_cli_provider(provider)
+        if cli_provider:
+            logical_provider = (
+                provider if provider not in CLI_PROVIDERS else CLI_PROVIDERS[cli_provider]["api_fallback"]
+            )
+            cli_model = model or get_model_name(logical_provider, None, use_old)
+            fallback_reason = needs_api_fallback(
+                cli_provider, schema, system, search, stream, reasoning_effort, max_tokens
+            )
+            if fallback_reason:
+                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+                logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
+                provider = api_provider
+                model = cli_model
+                # Fall through to normal LiteLLM flow
+            else:
+                text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema)
+                if text is not None:
+                    print(text)
+                    return
+                # CLI failed — fall back to API.
+                # Reset alarm for remaining time.
+                elapsed_cli = int(time.time() - start_time)
+                remaining = max(timeout - elapsed_cli, 5)
+                signal.alarm(remaining)
+                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+                logger.info(f"[cli→api] {cli_provider} → {api_provider} (CLI returned error, {remaining}s remaining)")
+                provider = api_provider
+                model = cli_model
+                # Fall through to normal LiteLLM flow
+
         check_api_key(provider)
         model_name = get_model_name(provider, model, use_old)
         requested_reasoning_effort = reasoning_effort
