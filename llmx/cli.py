@@ -485,6 +485,8 @@ def chat_cmd(
         click.echo("Error: Timeout must be between 1 and 900 seconds.", err=True)
         sys.exit(1)
 
+    _output_file = None
+    _original_stdout = None
     try:
         if compare:
             provider_list = (
@@ -603,8 +605,6 @@ def chat_cmd(
             log_payload["cli_fallback_reason"] = cli_fallback_reason
 
         # --output: tee stdout to file (unbuffered)
-        _output_file = None
-        _original_stdout = None
         if output_path:
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             _output_file = open(output_path, "w")
