@@ -1,21 +1,17 @@
 """Programmatic API for llmx"""
 
+import io
+import sys
 import time
 from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
-from .providers import get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model
+from .providers import (
+    get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model,
+    _normalize_model, _get_api_key, _google_chat, _openai_chat, OPENAI_COMPAT_URLS,
+)
 from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat, preferred_cli_provider
 from .logger import logger
-
-# Import litellm directly for API calls
-try:
-    from litellm import completion
-except ImportError:
-    raise ImportError(
-        "litellm not installed. Install llmx with: uv tool install llmx"
-    )
-
 from .inspect import capture_call
 
 
@@ -50,7 +46,7 @@ class LLM:
     """Stateful LLM client for multiple calls
 
     Example:
-        >>> llm = LLM(provider="openai", model="gpt-4o", temperature=0.7)
+        >>> llm = LLM(provider="openai", model="gpt-5.4", temperature=0.7)
         >>> response = llm.chat("What is 2+2?")
         >>> print(response.content)
         4
@@ -64,19 +60,6 @@ class LLM:
         search: bool = False,
         **kwargs
     ):
-        """Initialize LLM client
-
-        Args:
-            provider: Provider name (google, openai, anthropic, xai, deepseek)
-            model: Model name (overrides provider default)
-            temperature: Temperature 0-1 (default: 0.7)
-            search: Enable web search grounding (google, anthropic, xai)
-            **kwargs: Additional provider-specific arguments
-
-        Raises:
-            ValueError: If provider is unknown
-            RuntimeError: If API key not found
-        """
         self.provider = provider
         self._is_cli = provider in CLI_PROVIDERS
         self._cli_provider = preferred_cli_provider(provider)
@@ -110,22 +93,7 @@ class LLM:
         temperature: Optional[float] = None,
         **kwargs
     ) -> Response:
-        """Send chat message
-
-        Args:
-            prompt: User prompt
-            system: System message (optional)
-            temperature: Override default temperature
-            **kwargs: Override any init kwargs
-
-        Returns:
-            Response object with content and metadata
-
-        Example:
-            >>> llm = LLM(provider="openai")
-            >>> response = llm.chat("Explain Python", system="You are a teacher")
-            >>> print(response.content)
-        """
+        """Send chat message and return Response."""
         # CLI backend — try CLI first, fall back to API
         if self._cli_provider:
             schema = kwargs.get("response_format")
@@ -152,7 +120,7 @@ class LLM:
                         latency=latency,
                         raw=None,
                     )
-            # Fall back to API provider
+            # Fall back to API provider — disable CLI on fallback to prevent recursion
             api_provider = CLI_PROVIDERS[self._cli_provider]["api_fallback"]
             logger.info(
                 f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason or 'CLI error'})"
@@ -161,47 +129,53 @@ class LLM:
                 provider=api_provider, model=self.model,
                 temperature=self.temperature, search=self.search, **self.kwargs
             )
+            fallback._cli_provider = None  # prevent infinite fallback loop
             return fallback.chat(prompt, system=system, temperature=temperature, **kwargs)
 
-        # Merge kwargs
+        # Native SDK call
         call_kwargs = {**self.kwargs, **kwargs}
         temp = temperature if temperature is not None else self.temperature
 
-        # Add web search grounding
-        if self.search:
-            search_kwargs = _build_search_kwargs(self.provider, self.model)
-            call_kwargs.update(search_kwargs)
-
-        # Build messages
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        # Call LiteLLM with inspection
         start_time = time.time()
 
         with capture_call(self.provider, self.model, messages) as trace:
             try:
-                # Call LiteLLM completion
-                response = completion(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temp,
-                    stream=False,
-                    **call_kwargs
-                )
+                # Capture stdout — native backends print directly
+                old_stdout = sys.stdout
+                sys.stdout = io.StringIO()
+                try:
+                    if self.provider == "google":
+                        content = _google_chat(
+                            prompt=prompt, model=self.model, system=system,
+                            temperature=temp, timeout=call_kwargs.get("timeout", 300),
+                            stream=False, max_tokens=call_kwargs.get("max_tokens"),
+                            search=self.search, schema=call_kwargs.get("response_format"),
+                            reasoning_effort=call_kwargs.get("reasoning_effort"),
+                        )
+                    else:
+                        if self.search:
+                            _build_search_kwargs(self.provider, self.model)
+                        content = _openai_chat(
+                            prompt=prompt, model=self.model, provider=self.provider,
+                            system=system, temperature=temp,
+                            timeout=call_kwargs.get("timeout", 300),
+                            stream=False, max_tokens=call_kwargs.get("max_tokens"),
+                            schema=call_kwargs.get("response_format"),
+                            reasoning_effort=call_kwargs.get("reasoning_effort"),
+                        )
+                finally:
+                    sys.stdout = old_stdout
 
-                # Extract content and metadata
-                content = response.choices[0].message.content
-                usage = {
-                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
-                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0,
-                    "total_tokens": response.usage.total_tokens if hasattr(response, 'usage') else 0,
-                }
                 latency = time.time() - start_time
 
-                # Update trace
+                # Usage not available from native SDKs in this path
+                usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
                 trace.set_response({
                     "content": content,
                     "usage": usage,
@@ -214,7 +188,7 @@ class LLM:
                     model=self.model,
                     usage=usage,
                     latency=latency,
-                    raw=response
+                    raw=None,
                 )
 
             except Exception as e:
@@ -222,41 +196,63 @@ class LLM:
                 raise
 
     def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> Iterator[str]:
-        """Stream response chunks
+        """Stream response chunks."""
+        temp = self.temperature
 
-        Args:
-            prompt: User prompt
-            system: System message (optional)
-            **kwargs: Override any init kwargs
+        if self.provider == "google":
+            from google import genai
+            from google.genai import types
 
-        Yields:
-            Response chunks as they arrive
+            timeout = kwargs.get("timeout", 300)
+            client = genai.Client(
+                http_options=types.HttpOptions(
+                    timeout=max(timeout * 1000, 10_000) if timeout else 300_000
+                )
+            )
+            config = types.GenerateContentConfig(temperature=temp)
+            if system:
+                config.system_instruction = system
 
-        Example:
-            >>> llm = LLM(provider="openai")
-            >>> for chunk in llm.stream("Tell me a story", system="Be concise"):
-            ...     print(chunk, end="", flush=True)
-        """
-        # Build messages
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+            for chunk in client.models.generate_content_stream(
+                model=self.model, contents=prompt, config=config
+            ):
+                if chunk.text:
+                    yield chunk.text
+        else:
+            from openai import OpenAI
 
-        # Call LiteLLM with streaming
-        response = completion(
-            model=self.model,
-            messages=messages,
-            temperature=self.temperature,
-            stream=True,
-            **kwargs
-        )
+            base_url = OPENAI_COMPAT_URLS.get(self.provider)
+            api_key = _get_api_key(self.provider)
+            timeout = kwargs.get("timeout", 300)
 
-        for chunk in response:
-            if hasattr(chunk.choices[0].delta, "content"):
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=float(timeout) if timeout else 300.0,
+            )
+
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+
+            model = self.model
+            if self.provider == "anthropic" and not model.startswith("anthropic/"):
+                model = f"anthropic/{model}"
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temp,
+                stream=True,
+            )
+
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
 
 
 # Simple function API
@@ -270,28 +266,7 @@ def chat(
     search: bool = False,
     **kwargs
 ) -> Response:
-    """Simple chat function - one-shot calls
-
-    Args:
-        prompt: User prompt
-        provider: Provider name (default: google)
-        model: Model name (overrides provider default)
-        system: System message (optional)
-        temperature: Temperature 0-1 (default: 0.7)
-        search: Enable web search grounding (google, anthropic, xai)
-        **kwargs: Additional provider arguments
-
-    Returns:
-        Response object
-
-    Example:
-        >>> from llmx import chat
-        >>> response = chat("What is 2+2?", provider="openai")
-        >>> print(response.content)
-        4
-        >>> print(response.usage)
-        {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
-    """
+    """Simple chat function - one-shot calls"""
     llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
     return llm.chat(prompt, system=system)
 
@@ -304,26 +279,7 @@ def batch(
     parallel: int = 3,
     **kwargs
 ) -> List[Response]:
-    """Process multiple prompts in parallel
-
-    Args:
-        prompts: List of prompts to process
-        provider: Provider name (default: google)
-        model: Model name (overrides provider default)
-        system: System message applied to all prompts (optional)
-        parallel: Number of parallel requests (default: 3)
-        **kwargs: Additional provider arguments
-
-    Returns:
-        List of Response objects (same order as input prompts)
-
-    Example:
-        >>> from llmx import batch
-        >>> prompts = ["What is 2+2?", "What is 3+3?", "What is 4+4?"]
-        >>> responses = batch(prompts, provider="google", system="Answer concisely", parallel=2)
-        >>> for r in responses:
-        ...     print(r.content)
-    """
+    """Process multiple prompts in parallel"""
     from concurrent.futures import ThreadPoolExecutor
 
     llm = LLM(provider=provider, model=model, **kwargs)
@@ -345,37 +301,20 @@ def batch_submit(
     model: str = "gemini-3-flash-preview",
     display_name: Optional[str] = None,
 ) -> str:
-    """Submit a Gemini batch job from a JSONL file. Returns job name.
-
-    Args:
-        input_file: Path to JSONL file with requests
-        model: Model name (default: gemini-3-flash-preview)
-        display_name: Optional human-readable name
-
-    Returns:
-        Job name string (e.g. "batches/abc123")
-    """
+    """Submit a Gemini batch job from a JSONL file. Returns job name."""
     from .gemini_batch import parse_input_jsonl, submit
     requests = parse_input_jsonl(input_file)
     return submit(requests, model=model, display_name=display_name)
 
 
 def batch_status(job_name: str) -> Dict[str, Any]:
-    """Get batch job status. Returns dict with name, state, timestamps."""
+    """Get batch job status."""
     from .gemini_batch import status
     return status(job_name)
 
 
 def batch_get(job_name: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """Fetch results from a completed batch job.
-
-    Args:
-        job_name: The batch job name/ID
-        keys: Optional list of original request keys for correlation
-
-    Returns:
-        List of dicts with key, content, and/or error fields
-    """
+    """Fetch results from a completed batch job."""
     from .gemini_batch import fetch
     results = fetch(job_name, original_keys=keys)
     return [

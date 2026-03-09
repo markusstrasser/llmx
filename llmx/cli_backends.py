@@ -1,6 +1,6 @@
 """CLI-backed providers: gemini-cli, codex-cli.
 
-Shell out to Gemini CLI / Codex CLI instead of LiteLLM for subscription/free-tier pricing.
+Shell out to Gemini CLI / Codex CLI instead of API for subscription/free-tier pricing.
 Fall back to API transparently when CLI can't handle requested features.
 
 CLI flag reference (verified 2026-03):

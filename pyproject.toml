@@ -1,11 +1,10 @@
 [project]
 name = "llmx"
-version = "0.5.3"
-description = "Unified API wrapper for LLM providers using LiteLLM"
+version = "0.6.0"
+description = "Unified CLI and API for LLM providers via native SDKs"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "litellm>=1.79.0",
     "openai>=1.50.0",
     "click>=8.1.7",
     "python-dotenv>=1.0.0",

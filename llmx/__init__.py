@@ -1,4 +1,4 @@
-"""llmx - Unified API wrapper for 100+ LLM providers
+"""llmx - Unified CLI and API for LLM providers via native SDKs
 
 Simple tool for calling LLM APIs from scripts, skills, and Python code.
 
@@ -13,7 +13,7 @@ Python:
     print(response.content)
 """
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 
 # Import public API
 from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get

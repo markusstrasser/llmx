@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llmx - Unified LLM CLI via LiteLLM
+llmx - Unified LLM CLI via native SDKs
 
 Usage:
     llmx "your prompt"

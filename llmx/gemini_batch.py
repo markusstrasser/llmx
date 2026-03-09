@@ -48,7 +48,7 @@ def _get_client():
 
 
 def _strip_model_prefix(model: str) -> str:
-    """Strip 'gemini/' prefix that llmx uses internally (LiteLLM convention)."""
+    """Strip 'gemini/' prefix if present (legacy convention)."""
     if model.startswith("gemini/"):
         return model[7:]
     return model
