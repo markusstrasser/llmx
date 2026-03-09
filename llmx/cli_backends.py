@@ -169,9 +169,18 @@ def cli_chat(
         import signal as _signal
         import threading as _threading
 
+        # Run gemini-cli in bare mode: skip MCP servers, extensions, skills.
+        # Uses ~/.gemini-bare with admin overrides + oauth creds only.
+        env = None
+        if binary == "gemini":
+            bare_home = os.path.join(os.path.expanduser("~"), ".gemini-bare")
+            if os.path.isdir(bare_home):
+                env = {**os.environ, "HOME": bare_home}
+                logger.debug(f"[cli] using bare HOME={bare_home}")
+
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, stdin=subprocess.PIPE,
+            text=True, stdin=subprocess.PIPE, env=env,
             start_new_session=True,  # new process group for clean kill
         )
 
