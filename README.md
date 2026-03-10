@@ -41,6 +41,9 @@ llmx -m gemini-3-flash --reasoning-effort high "Hard task"
 llmx -p openai "Reply with OK"
 llmx -p google --search "Latest news on fusion energy"
 
+# System prompt (works with both CLI and API transport)
+llmx -s "You are terse" "Reply with OK"
+
 # Compare providers side-by-side
 llmx --compare "Tabs or spaces?"
 
