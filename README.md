@@ -1,6 +1,6 @@
 # llmx
 
-Unified CLI and Python API for LLM providers via [LiteLLM](https://github.com/BerriAI/litellm).
+Unified CLI and Python API for LLM providers.
 
 ## Install
 
@@ -38,7 +38,7 @@ llmx -m gpt-5.4 --reasoning-effort xhigh "Hard task"
 llmx -m gemini-3-flash --reasoning-effort high "Hard task"
 
 # Force direct APIs instead of subscription CLIs
-llmx -p openai -s "You are terse" "Reply with OK"
+llmx -p openai "Reply with OK"
 llmx -p google --search "Latest news on fusion energy"
 
 # Compare providers side-by-side
@@ -107,7 +107,7 @@ class Response:
     model: str             # Full model name
     usage: dict            # {prompt_tokens, completion_tokens, total_tokens}
     latency: float         # Seconds
-    raw: Any               # Raw LiteLLM response
+    raw: Any               # Raw provider response
 ```
 
 ### Inspection
@@ -162,6 +162,7 @@ Transport defaults:
 - `google` prefers `gemini` CLI when installed, then falls back to the Gemini API.
 - `openai` prefers `codex exec` when installed, then falls back to the OpenAI API.
 - `codex-cli` supports JSON schema output via `codex exec --output-schema`.
+- `-s` (system messages) works with CLI transports — they're folded into the prompt as `<system>` XML.
 
 All thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5) have temperature fixed at 1.0.
 
