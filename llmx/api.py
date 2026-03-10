@@ -109,6 +109,7 @@ class LLM:
                     self.model,
                     kwargs.get("timeout", 300),
                     schema=schema,
+                    system=system,
                 )
                 if text is not None:
                     latency = time.time() - start_time

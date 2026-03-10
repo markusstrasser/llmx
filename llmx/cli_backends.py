@@ -94,8 +94,7 @@ def needs_api_fallback(
         return f"{binary} not found in PATH"
     if schema and provider != "codex-cli":
         return "structured output not supported by CLI"
-    if system:
-        return "system messages not supported by CLI"
+    # system messages: folded into prompt as <system> XML tag (no CLI flag needed)
     if search:
         return "web search not supported by CLI"
     if stream:
@@ -116,12 +115,17 @@ def cli_chat(
     timeout: int,
     *,
     schema=None,
+    system: Optional[str] = None,
 ) -> Optional[str]:
     """Execute one-shot chat via CLI binary.
 
     Returns response text on success, None on failure (caller should fall back to API).
     For long prompts (>100KB), pipes via stdin to avoid ARG_MAX limits.
     """
+    # Fold system message into prompt — CLIs don't have a system flag
+    if system:
+        prompt = f"<system>\n{system}\n</system>\n\n{prompt}"
+
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
     stdin_input = None

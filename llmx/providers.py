@@ -637,7 +637,7 @@ def chat(
                 provider = api_provider
                 model = cli_model
             else:
-                text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema)
+                text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema, system=system)
                 if text is not None:
                     print(text)
                     return
