@@ -598,7 +598,11 @@ def chat(
     start_time = time.time()
     model_name = model or "default"  # Initialize early for error handlers
 
-    # Wall-clock timeout via SIGALRM (main thread only)
+    # Wall-clock timeout: SIGALRM + thread-based join for SDK calls.
+    # SIGALRM alone fails when C-level SSL reads block the signal handler —
+    # the signal fires but can't raise a Python exception across the C boundary.
+    # We run SDK calls in a daemon thread and join(remaining_time) so the main
+    # thread can always raise _WallClockTimeout, preserving --fallback logic.
     use_alarm = threading.current_thread() is threading.main_thread()
 
     def _alarm_handler(signum, frame):
@@ -704,24 +708,44 @@ def chat(
             },
         )
 
-        # Dispatch to native SDK backend
-        if provider == "google":
-            _google_chat(
-                prompt=prompt, model=model_name, system=system,
-                temperature=adjusted_temp, timeout=timeout, stream=stream,
-                max_tokens=max_tokens, search=search, schema=schema,
-                reasoning_effort=reasoning_effort,
+        # Dispatch to native SDK backend in a daemon thread.
+        # thread.join(remaining) ensures the main thread regains control
+        # even if the SDK is blocked in C-level SSL reads where SIGALRM
+        # can't interrupt.
+        _sdk_error = [None]  # mutable container for thread result
+
+        def _sdk_call():
+            try:
+                if provider == "google":
+                    _google_chat(
+                        prompt=prompt, model=model_name, system=system,
+                        temperature=adjusted_temp, timeout=timeout, stream=stream,
+                        max_tokens=max_tokens, search=search, schema=schema,
+                        reasoning_effort=reasoning_effort,
+                    )
+                else:
+                    if search:
+                        _build_search_kwargs(provider, model_name)
+                    _openai_chat(
+                        prompt=prompt, model=model_name, provider=provider,
+                        system=system, temperature=adjusted_temp, timeout=timeout,
+                        stream=stream, max_tokens=max_tokens, schema=schema,
+                        reasoning_effort=reasoning_effort,
+                    )
+            except Exception as e:
+                _sdk_error[0] = e
+
+        _sdk_thread = threading.Thread(target=_sdk_call, daemon=True)
+        _sdk_thread.start()
+        remaining = max(timeout - (time.time() - start_time), 5)
+        _sdk_thread.join(remaining)
+
+        if _sdk_thread.is_alive():
+            raise _WallClockTimeout(
+                f"Wall-clock timeout after {timeout}s (SDK blocked in C — thread abandoned)"
             )
-        else:
-            # All non-google providers go through OpenAI-compatible SDK
-            if search:
-                _build_search_kwargs(provider, model_name)  # logs warning for unsupported
-            _openai_chat(
-                prompt=prompt, model=model_name, provider=provider,
-                system=system, temperature=adjusted_temp, timeout=timeout,
-                stream=stream, max_tokens=max_tokens, schema=schema,
-                reasoning_effort=reasoning_effort,
-            )
+        if _sdk_error[0] is not None:
+            raise _sdk_error[0]
 
         elapsed = time.time() - start_time
         logger.debug("Generation complete", {"elapsed_sec": round(elapsed, 2)})
