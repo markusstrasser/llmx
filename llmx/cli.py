@@ -444,9 +444,10 @@ def chat_cmd(
     stdin_text = None
     file_text = None
 
-    # Read from stdin if available
-    if not sys.stdin.isatty():
-        logger.debug("Reading from stdin")
+    # Read from stdin if available — but only if we don't already have a prompt.
+    # When launched by agents (Bash tool), stdin is a pipe but empty — read() blocks forever.
+    if not sys.stdin.isatty() and not prompt_text:
+        logger.debug("Reading from stdin (no prompt provided)")
         stdin_text = sys.stdin.read().strip()
         logger.debug(f"Read {len(stdin_text)} chars from stdin")
 
