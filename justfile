@@ -1,8 +1,8 @@
 # llmx task runner
 
-# Reinstall globally after code changes
+# Reinstall globally (editable — source changes take effect immediately)
 install:
-    uv tool install --force --reinstall .
+    uv tool install --force --editable .
 
 # Quick test: verify GPT and Gemini work
 test:
