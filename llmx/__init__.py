@@ -18,8 +18,8 @@ __version__ = "0.6.0"
 # Import public API
 from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get
 from .providers import (
-    LlmxError, RateLimitError, TimeoutError_, ApiKeyError, ModelError,
-    EXIT_SUCCESS, EXIT_GENERAL, EXIT_API_KEY, EXIT_RATE_LIMIT, EXIT_TIMEOUT, EXIT_MODEL_ERROR,
+    LlmxError, RateLimitError, QuotaError, TimeoutError_, ApiKeyError, ModelError,
+    EXIT_SUCCESS, EXIT_GENERAL, EXIT_API_KEY, EXIT_RATE_LIMIT, EXIT_TIMEOUT, EXIT_MODEL_ERROR, EXIT_QUOTA,
 )
 
 # Import for convenience (optional, can be imported from submodules)
@@ -38,6 +38,7 @@ __all__ = [
     # Error types
     "LlmxError",
     "RateLimitError",
+    "QuotaError",
     "TimeoutError_",
     "ApiKeyError",
     "ModelError",
@@ -48,6 +49,7 @@ __all__ = [
     "EXIT_RATE_LIMIT",
     "EXIT_TIMEOUT",
     "EXIT_MODEL_ERROR",
+    "EXIT_QUOTA",
     # Version
     "__version__",
     # Submodules (for from llmx.inspect import ...)

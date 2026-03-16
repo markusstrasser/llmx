@@ -28,7 +28,7 @@ load_dotenv(Path.cwd().parent.parent / ".env")
 from . import __version__
 from .providers import (
     chat, compare as compare_providers, list_providers, infer_provider_from_model,
-    LlmxError, RateLimitError, TimeoutError_, EXIT_GENERAL,
+    LlmxError, RateLimitError, QuotaError, TimeoutError_, EXIT_GENERAL,
     PROVIDER_CONFIGS, get_model_name, get_model_restriction,
 )
 from .cli_backends import preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS
@@ -633,6 +633,11 @@ def chat_cmd(
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(130)
+    except QuotaError as error:
+        # Quota exhaustion is permanent — no fallback, no retry, just tell the user clearly
+        click.echo(error.diagnostic_line(), err=True)
+        click.echo(f"Error: {error}", err=True)
+        sys.exit(error.exit_code)
     except (RateLimitError, TimeoutError_) as error:
         # Emit structured diagnostic
         click.echo(error.diagnostic_line(), err=True)

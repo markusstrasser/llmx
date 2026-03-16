@@ -32,9 +32,10 @@ class _WallClockTimeout(Exception):
 EXIT_SUCCESS = 0
 EXIT_GENERAL = 1
 EXIT_API_KEY = 2
-EXIT_RATE_LIMIT = 3    # 429, 503, quota exhausted
+EXIT_RATE_LIMIT = 3    # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5   # context too large, model not found, invalid request
+EXIT_QUOTA = 6         # insufficient_quota, billing exhausted (permanent until topped up)
 
 
 class LlmxError(RuntimeError):
@@ -67,6 +68,14 @@ class RateLimitError(LlmxError):
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, error_type="rate_limit", **kwargs)
+
+
+class QuotaError(LlmxError):
+    """Billing/quota exhausted — not transient, won't resolve with retries."""
+    exit_code = EXIT_QUOTA
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, error_type="quota_exhausted", **kwargs)
 
 
 class TimeoutError_(LlmxError):
@@ -766,8 +775,14 @@ def chat(
     except genai_errors.ClientError as e:
         msg = str(e)
         if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+            # Distinguish quota exhaustion from transient rate limits
+            if "quota" in msg.lower() or "billing" in msg.lower():
+                raise QuotaError(
+                    f"BILLING EXHAUSTED for google/{model_name}. Check Google Cloud billing.",
+                    provider="google", model=model_name, status_code=429,
+                ) from e
             raise RateLimitError(
-                f"Rate limit exceeded for google/{model_name}. Wait or use --fallback.",
+                f"Rate limit exceeded for google/{model_name}. Wait and retry, or use --stream for API transport.",
                 provider="google", model=model_name, status_code=429,
             ) from e
         elif "404" in msg:
@@ -785,8 +800,17 @@ def chat(
             ) from e
         raise LlmxError(str(e), provider="google", model=model_name) from e
     except openai_module.RateLimitError as e:
+        # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
+        # Parse the error body to distinguish them.
+        err_body = getattr(e, 'body', {}) or {}
+        err_code = err_body.get('error', {}).get('code', '') if isinstance(err_body, dict) else ''
+        if err_code == 'insufficient_quota':
+            raise QuotaError(
+                f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",
+                provider=provider, model=model_name, status_code=429,
+            ) from e
         raise RateLimitError(
-            f"Rate limit exceeded for {provider}/{model_name}. Wait or use --fallback.",
+            f"Rate limit exceeded for {provider}/{model_name}. Wait and retry.",
             provider=provider, model=model_name, status_code=429,
         ) from e
     except openai_module.APITimeoutError as e:
@@ -806,8 +830,8 @@ def chat(
         ) from e
     except openai_module.APIStatusError as e:
         if e.status_code == 402:
-            raise RateLimitError(
-                f"Insufficient credits for {provider}: {e}",
+            raise QuotaError(
+                f"BILLING EXHAUSTED for {provider}/{model_name}. Top up your account.",
                 provider=provider, model=model_name, status_code=402,
             ) from e
         raise LlmxError(str(e), provider=provider, model=model_name) from e

@@ -33,9 +33,11 @@ CLI_PROVIDERS = {
 }
 
 # Prefer subscription/free CLIs for logical providers when available.
+# codex-cli disabled: 10+s startup (loads sandbox/MCP), no cost advantage over API,
+# causes silent timeouts on short-timeout calls. OpenAI goes direct to API.
 CLI_PROVIDER_ALIASES = {
     "google": "gemini-cli",
-    "openai": "codex-cli",
+    # "openai": "codex-cli",  # disabled — startup overhead causes timeouts
 }
 
 # Max bytes for command-line argument before switching to stdin.
