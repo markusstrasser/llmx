@@ -382,8 +382,100 @@ def validate_and_adjust_temperature(
     return temperature, False
 
 
+# ============================================================================
+# macOS Keychain integration (fallback after env vars)
+# ============================================================================
+
+KEYCHAIN_SERVICE = "llmx"
+
+
+def _keychain_available() -> bool:
+    """Check if macOS Keychain is available."""
+    return sys.platform == "darwin"
+
+
+def _keychain_get(key_name: str) -> Optional[str]:
+    """Read a key from macOS Keychain. Returns None if not found or not macOS."""
+    if not _keychain_available():
+        return None
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name, "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _keychain_set(key_name: str, value: str) -> bool:
+    """Store a key in macOS Keychain. Returns True on success."""
+    if not _keychain_available():
+        return False
+    import subprocess
+    # Delete existing entry first (update = delete + add)
+    subprocess.run(
+        ["security", "delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name],
+        capture_output=True, timeout=5,
+    )
+    result = subprocess.run(
+        ["security", "add-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name, "-w", value],
+        capture_output=True, text=True, timeout=5,
+    )
+    return result.returncode == 0
+
+
+def _keychain_delete(key_name: str) -> bool:
+    """Delete a key from macOS Keychain. Returns True if deleted."""
+    if not _keychain_available():
+        return False
+    import subprocess
+    result = subprocess.run(
+        ["security", "delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name],
+        capture_output=True, timeout=5,
+    )
+    return result.returncode == 0
+
+
+def _keychain_list() -> list:
+    """List all llmx keys in macOS Keychain."""
+    if not _keychain_available():
+        return []
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["security", "dump-keychain"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+        # Parse: look for entries where "acct"="llmx" and extract "svce" (key name)
+        keys = []
+        lines = result.stdout.split('\n')
+        in_llmx_entry = False
+        for line in lines:
+            if '"acct"' in line and f'"{KEYCHAIN_SERVICE}"' in line:
+                in_llmx_entry = True
+            elif '"svce"' in line and in_llmx_entry:
+                # Extract the service name (our key name)
+                # Format: "svce"<blob>="KEY_NAME"
+                import re
+                m = re.search(r'"svce".*?="(.+?)"', line)
+                if m:
+                    keys.append(m.group(1))
+                in_llmx_entry = False
+            elif 'keychain:' in line.lower() or line.startswith('class:'):
+                in_llmx_entry = False
+        return keys
+    except Exception:
+        return []
+
+
 def check_api_key(provider: str) -> None:
-    """Check if API key is available for provider"""
+    """Check if API key is available for provider (env vars → Keychain)."""
     config = PROVIDER_CONFIGS.get(provider)
     if not config:
         raise ValueError(f"Unknown provider: {provider}. Use --list-providers to see available providers.")
@@ -400,22 +492,42 @@ def check_api_key(provider: str) -> None:
             logger.debug(f"Found API key: {var}")
             return
 
+    # Fallback: check macOS Keychain
+    for var in key_vars:
+        var = var.strip()
+        val = _keychain_get(var)
+        if val:
+            # Promote to env var so SDK clients pick it up
+            os.environ[var] = val
+            logger.debug(f"Loaded API key from Keychain: {var}")
+            return
+
     # No key found - provide helpful error
     logger.error(f"API key missing for {provider}", {"env_var": config["env_var"]})
 
     error_msg = f"API key not found for provider '{provider}'.\n"
     error_msg += f"Set one of these environment variables: {config['env_var']}\n"
     error_msg += f"Example: export {key_vars[0].strip()}=your-key-here"
+    if _keychain_available():
+        error_msg += f"\n   or: llmx keys set {key_vars[0].strip()}"
 
     raise RuntimeError(error_msg)
 
 
 def _get_api_key(provider: str) -> Optional[str]:
-    """Resolve the API key for a provider."""
+    """Resolve the API key for a provider (env vars → Keychain)."""
     # Check overrides first (e.g., anthropic -> OPENROUTER_API_KEY)
     key_env = API_KEY_OVERRIDES.get(provider)
     if key_env:
-        return os.environ.get(key_env)
+        val = os.environ.get(key_env)
+        if val:
+            return val
+        # Try Keychain
+        val = _keychain_get(key_env)
+        if val:
+            os.environ[key_env] = val
+            return val
+        return None
 
     config = PROVIDER_CONFIGS.get(provider)
     if not config or not config.get("env_var"):
@@ -426,6 +538,13 @@ def _get_api_key(provider: str) -> Optional[str]:
         var = var.strip()
         val = os.getenv(var)
         if val:
+            return val
+    # Fallback: Keychain
+    for var in key_vars:
+        var = var.strip()
+        val = _keychain_get(var)
+        if val:
+            os.environ[var] = val
             return val
     return None
 

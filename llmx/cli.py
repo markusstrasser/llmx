@@ -760,6 +760,116 @@ from .batch_cmd import batch_group
 cli.add_command(batch_group, name="batch")
 
 
+# ── Keys management (macOS Keychain) ────────────────────────
+
+@click.group("keys")
+def keys_group():
+    """Manage API keys in macOS Keychain."""
+    pass
+
+
+@keys_group.command("set")
+@click.argument("key_name")
+@click.option("--value", "-v", help="Key value (prompted securely if omitted)")
+def keys_set(key_name, value):
+    """Store an API key in macOS Keychain.
+
+    Examples:
+        llmx keys set OPENAI_API_KEY
+        llmx keys set GEMINI_API_KEY --value AIza...
+    """
+    from .providers import _keychain_available, _keychain_set
+
+    if not _keychain_available():
+        console.print("[red]Keychain is only available on macOS.[/red]")
+        raise SystemExit(1)
+
+    if not value:
+        import getpass
+        value = getpass.getpass(f"Enter value for {key_name}: ")
+        if not value:
+            console.print("[red]No value provided.[/red]")
+            raise SystemExit(1)
+
+    if _keychain_set(key_name, value):
+        console.print(f"[green]Stored {key_name} in Keychain[/green]")
+    else:
+        console.print(f"[red]Failed to store {key_name}[/red]")
+        raise SystemExit(1)
+
+
+@keys_group.command("list")
+def keys_list():
+    """List API keys stored in macOS Keychain."""
+    from .providers import _keychain_available, _keychain_list, PROVIDER_CONFIGS
+
+    if not _keychain_available():
+        console.print("[red]Keychain is only available on macOS.[/red]")
+        raise SystemExit(1)
+
+    stored = _keychain_list()
+
+    # Also collect all known env var names
+    all_key_names = set()
+    for config in PROVIDER_CONFIGS.values():
+        env_var = config.get("env_var")
+        if env_var:
+            for var in env_var.replace(" or ", ",").split(","):
+                all_key_names.add(var.strip())
+
+    if not stored:
+        console.print("No llmx keys in Keychain.")
+        console.print(f"\nKnown key names: {', '.join(sorted(all_key_names))}")
+        return
+
+    console.print("[bold]Keys in Keychain:[/bold]")
+    for key in sorted(stored):
+        # Mask the value
+        console.print(f"  {key}")
+
+    # Show which providers are covered
+    missing = all_key_names - set(stored)
+    if missing:
+        console.print(f"\n[dim]Not in Keychain: {', '.join(sorted(missing))}[/dim]")
+
+
+@keys_group.command("delete")
+@click.argument("key_name")
+def keys_delete(key_name):
+    """Remove an API key from macOS Keychain."""
+    from .providers import _keychain_available, _keychain_delete
+
+    if not _keychain_available():
+        console.print("[red]Keychain is only available on macOS.[/red]")
+        raise SystemExit(1)
+
+    if _keychain_delete(key_name):
+        console.print(f"[green]Deleted {key_name} from Keychain[/green]")
+    else:
+        console.print(f"[yellow]{key_name} not found in Keychain[/yellow]")
+
+
+@keys_group.command("get")
+@click.argument("key_name")
+def keys_get(key_name):
+    """Show where an API key is resolved from (env, keychain, or missing)."""
+    import os
+    from .providers import _keychain_get
+
+    env_val = os.environ.get(key_name)
+    kc_val = _keychain_get(key_name)
+
+    if env_val:
+        console.print(f"{key_name}: [green]env[/green] ({key_name}={env_val[:8]}...)")
+    elif kc_val:
+        console.print(f"{key_name}: [blue]keychain[/blue] ({kc_val[:8]}...)")
+    else:
+        console.print(f"{key_name}: [red]not found[/red]")
+
+
+cli.add_command(keys_group, name="keys")
+
+
 def main():
     """Entry point for the CLI"""
     cli()
