@@ -171,13 +171,45 @@ All thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5) have temperature fixed at 1
 
 ## API Keys
 
-Set in `.env` or environment:
+Three ways to provide keys (checked in order):
+
+### 1. Environment variables
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+### 2. `.env` file
+```bash
+# .env in current directory (auto-loaded)
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
+```
+
+### 3. macOS Keychain (recommended)
+```bash
+llmx keys set OPENAI_API_KEY      # prompts securely
+llmx keys set GEMINI_API_KEY --value AIza...
+llmx keys list                     # show stored keys
+llmx keys get OPENAI_API_KEY       # show where a key resolves from
+llmx keys delete OPENAI_API_KEY    # remove from Keychain
+```
+
+Keys in Keychain are encrypted at rest and loaded automatically. Add this to your `.zshrc` to export them to env on shell start (so other tools like `codex` and `gemini` pick them up):
 
 ```bash
-GEMINI_API_KEY=...
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-MOONSHOT_API_KEY=...
-CEREBRAS_API_KEY=...
-XAI_API_KEY=...
+for _k in OPENAI_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY XAI_API_KEY MOONSHOT_API_KEY; do
+    [ -z "${!_k:-}" ] && val=$(security find-generic-password -a "llmx" -s "$_k" -w 2>/dev/null) && export "$_k=$val"
+done
 ```
+
+### Required keys
+
+| Provider | Env var | Get key |
+|----------|---------|---------|
+| Google | `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| OpenAI | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+| xAI | `XAI_API_KEY` | [console.x.ai](https://console.x.ai/) |
+| Kimi | `MOONSHOT_API_KEY` | [platform.moonshot.cn/console/api-keys](https://platform.moonshot.cn/console/api-keys) |
+| Cerebras | `CEREBRAS_API_KEY` | [cloud.cerebras.ai](https://cloud.cerebras.ai/) |
+| OpenRouter | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
