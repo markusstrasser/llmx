@@ -13,7 +13,11 @@ Python:
     print(response.content)
 """
 
-__version__ = "0.6.0"
+try:
+    from importlib.metadata import version as _get_version
+    __version__ = _get_version("llmx")
+except Exception:
+    __version__ = "0.0.0"
 
 # Import public API
 from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get

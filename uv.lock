@@ -492,7 +492,6 @@ wheels = [
 
 [[package]]
 name = "llmx"
-version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
