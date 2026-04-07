@@ -887,9 +887,14 @@ def chat(
         _sdk_thread.join(remaining)
 
         if _sdk_thread.is_alive():
-            raise _WallClockTimeout(
-                f"Wall-clock timeout after {timeout}s (SDK blocked in C — thread abandoned)"
-            )
+            # Grace period: with streaming, the thread may be flushing the
+            # last chunk. Give it 2s to finish before abandoning. If it
+            # completes in time, accept the output instead of raising timeout.
+            _sdk_thread.join(2)
+            if _sdk_thread.is_alive():
+                raise _WallClockTimeout(
+                    f"Wall-clock timeout after {timeout}s (SDK blocked in C — thread abandoned)"
+                )
         if _sdk_error[0] is not None:
             raise _sdk_error[0]
 
