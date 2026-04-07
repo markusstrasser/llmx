@@ -551,6 +551,14 @@ def chat_cmd(
             else:
                 logger.warn(f"--no-thinking has no effect for provider {final_provider}")
 
+        # --output: force streaming so chunks reach the file incrementally.
+        # Non-streaming holds all output until full response, so a timeout or
+        # error produces a 0-byte file. Must run before transport planning so
+        # CLI backends correctly fall back to API (CLI rejects --stream).
+        if output_path and not stream:
+            stream = True
+            logger.info("-o set: auto-enabling streaming for incremental file writes")
+
         requested_reasoning_effort = reasoning_effort
         cli_provider = preferred_cli_provider(final_provider)
         cli_fallback_reason = None
@@ -708,7 +716,10 @@ def chat_cmd(
         if _output_file:
             sys.stdout = _original_stdout
             _output_file.close()
-            logger.debug(f"Output written to {output_path}")
+            if os.path.getsize(output_path) == 0:
+                click.echo(f"[llmx:WARN] -o {output_path} is 0 bytes — model likely errored before producing output", err=True)
+            else:
+                logger.debug(f"Output written to {output_path}")
 
 
 # ============================================================================
