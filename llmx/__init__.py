@@ -22,7 +22,7 @@ except Exception:
 # Import public API
 from .api import LLM, Response, chat, batch, batch_submit, batch_status, batch_get
 from .providers import (
-    LlmxError, RateLimitError, QuotaError, TimeoutError_, ApiKeyError, ModelError,
+    LlmxError, RateLimitError, QuotaError, TimeoutError_, ApiKeyError, ModelError, SearchUnavailableError,
     EXIT_SUCCESS, EXIT_GENERAL, EXIT_API_KEY, EXIT_RATE_LIMIT, EXIT_TIMEOUT, EXIT_MODEL_ERROR, EXIT_QUOTA,
 )
 

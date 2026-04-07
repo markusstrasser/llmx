@@ -681,23 +681,41 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
     return result_text
 
 
-def _build_search_kwargs(provider: str, model_name: str) -> dict:
+class SearchUnavailableError(Exception):
+    """Raised when --search is requested but not supported for the provider/model."""
+    pass
+
+
+def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False) -> dict:
     """Build provider-specific kwargs for web search grounding.
     Only meaningful for legacy callers — search is handled natively in _google_chat.
+
+    Args:
+        strict: If True, raise SearchUnavailableError instead of warning.
+                CLI sets this to True so agents get a clear failure signal.
     """
     if provider == "google":
         return {}  # handled in _google_chat via config.tools
     elif provider == "xai":
-        logger.warn("xAI web search not yet supported via OpenAI SDK — ignoring --search")
+        msg = "xAI web search not yet supported via OpenAI SDK — ignoring --search"
+        if strict:
+            raise SearchUnavailableError(msg)
+        logger.warn(msg)
         return {}
     elif provider == "openai":
-        logger.warn(
+        msg = (
             "OpenAI web search requires search-specific models (gpt-4o-search-preview). "
             "Use 'llmx research' for OpenAI deep research instead."
         )
+        if strict:
+            raise SearchUnavailableError(msg)
+        logger.warn(msg)
         return {}
     else:
-        logger.warn(f"Web search not supported for provider '{provider}' — ignoring --search")
+        msg = f"Web search not supported for provider '{provider}' — ignoring --search"
+        if strict:
+            raise SearchUnavailableError(msg)
+        logger.warn(msg)
         return {}
 
 
@@ -853,7 +871,7 @@ def chat(
                     )
                 else:
                     if search:
-                        _build_search_kwargs(provider, model_name)
+                        _build_search_kwargs(provider, model_name, strict=True)
                     _openai_chat(
                         prompt=prompt, model=model_name, provider=provider,
                         system=system, temperature=adjusted_temp, timeout=timeout,

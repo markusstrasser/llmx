@@ -28,8 +28,8 @@ load_dotenv(Path.cwd().parent.parent / ".env")
 from . import __version__
 from .providers import (
     chat, compare as compare_providers, list_providers, infer_provider_from_model,
-    LlmxError, RateLimitError, QuotaError, TimeoutError_, EXIT_GENERAL,
-    PROVIDER_CONFIGS, get_model_name, get_model_restriction,
+    LlmxError, RateLimitError, QuotaError, TimeoutError_, SearchUnavailableError,
+    EXIT_GENERAL, PROVIDER_CONFIGS, get_model_name, get_model_restriction,
 )
 from .cli_backends import preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS
 from .logger import configure_logger, logger
@@ -634,6 +634,9 @@ def chat_cmd(
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(130)
+    except SearchUnavailableError as error:
+        click.echo(f"⚠ {error}", err=True)
+        sys.exit(5)  # exit 5 = model-error (search not available for this model)
     except QuotaError as error:
         # Quota exhaustion is permanent — no fallback, no retry, just tell the user clearly
         click.echo(error.diagnostic_line(), err=True)
