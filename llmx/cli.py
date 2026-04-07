@@ -313,7 +313,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     help="Temperature 0-2 (default 0.7).",
 )
 @click.option(
-    "--reasoning-effort",
+    "-e", "--reasoning-effort", "--effort",
     type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh"], case_sensitive=False),
     help="Thinking effort override. GPT-5.4 supports up to xhigh; llmx defaults GPT-5.4 to high on API fallback.",
 )
