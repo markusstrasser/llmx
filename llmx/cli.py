@@ -373,7 +373,8 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     "-f", "--file",
     "file_path",
     type=click.Path(exists=True),
-    help="Read file contents as context (prepended to prompt, like stdin)",
+    multiple=True,
+    help="Read file contents as context (repeatable: -f a.md -f b.md). Prepended to prompt.",
 )
 @click.option(
     "--schema",
@@ -451,10 +452,15 @@ def chat_cmd(
         stdin_text = sys.stdin.read().strip()
         logger.debug(f"Read {len(stdin_text)} chars from stdin")
 
-    # Read from file if specified
+    # Read from file(s) if specified — -f is repeatable, file_path is a tuple
     if file_path:
-        file_text = Path(file_path).read_text().strip()
-        logger.debug(f"Read {len(file_text)} chars from {file_path}")
+        file_parts = []
+        for fp in file_path:
+            part = Path(fp).read_text().strip()
+            logger.debug(f"Read {len(part)} chars from {fp}")
+            file_parts.append(part)
+        file_text = "\n\n".join(file_parts)
+        logger.debug(f"Combined {len(file_path)} file(s): {len(file_text)} chars total")
 
     # Combine context sources: file > stdin > prompt
     context_parts = [p for p in [file_text, stdin_text] if p]
