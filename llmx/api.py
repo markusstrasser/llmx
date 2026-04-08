@@ -95,7 +95,7 @@ class LLM:
     ) -> Response:
         """Send chat message and return Response."""
         # CLI backend — try CLI first, fall back to API
-        if self._cli_provider:
+        if self._cli_provider and not kwargs.pop("api_only", False):
             schema = kwargs.get("response_format")
             reasoning_effort = kwargs.get("reasoning_effort")
             fallback_reason = needs_api_fallback(
@@ -268,8 +268,9 @@ def chat(
     **kwargs
 ) -> Response:
     """Simple chat function - one-shot calls"""
+    api_only = kwargs.pop("api_only", False)
     llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
-    return llm.chat(prompt, system=system)
+    return llm.chat(prompt, system=system, api_only=api_only)
 
 
 def batch(
