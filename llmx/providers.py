@@ -259,6 +259,30 @@ _KNOWN_MODELS = {
 }
 
 
+# Deprecated → current model upgrades. Auto-applied with warning.
+_MODEL_UPGRADES = {
+    "gemini-2.5-pro": "gemini-3.1-pro-preview",
+    "gemini-2.5-flash": "gemini-3-flash-preview",
+    "gemini-2.0-flash": "gemini-3-flash-preview",
+    "gemini-pro": "gemini-3.1-pro-preview",
+    "gemini-flash": "gemini-3-flash-preview",
+    "gpt-4o": "gpt-5.4",
+    "gpt-4o-mini": "gpt-5.1-mini",
+    "gpt-4": "gpt-5.4",
+    "gpt-4-turbo": "gpt-5.4",
+    "claude-3.5-sonnet": "claude-sonnet-4-6",
+    "claude-3-opus": "claude-opus-4-6",
+}
+
+
+def _auto_upgrade_model(model: str) -> str:
+    """Auto-upgrade deprecated model names. Returns upgraded name or original."""
+    upgraded = _MODEL_UPGRADES.get(model)
+    if upgraded:
+        logger.warn(f"Model '{model}' is deprecated — auto-upgrading to '{upgraded}'")
+    return upgraded or model
+
+
 def _warn_unknown_model(model: str, provider: str):
     """Warn about potentially misspelled model names. Never hard-fail."""
     known = _KNOWN_MODELS.get(provider)
@@ -739,9 +763,12 @@ def chat(
     system: Optional[str] = None,
     schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
-) -> None:
-    """Execute chat with single provider"""
+) -> Optional[str]:
+    """Execute chat with single provider.  Returns response text (or None)."""
     start_time = time.time()
+    # Auto-upgrade deprecated model names before any other logic
+    if model:
+        model = _auto_upgrade_model(model)
     model_name = model or "default"  # Initialize early for error handlers
 
     # Wall-clock timeout: SIGALRM + thread-based join for SDK calls.
@@ -786,7 +813,7 @@ def chat(
                 text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema, system=system)
                 if text is not None:
                     print(text)
-                    return
+                    return text
                 # CLI failed — fall back to API
                 elapsed_cli = int(time.time() - start_time)
                 remaining = max(timeout - elapsed_cli, 5)
@@ -859,11 +886,12 @@ def chat(
         # even if the SDK is blocked in C-level SSL reads where SIGALRM
         # can't interrupt.
         _sdk_error = [None]  # mutable container for thread result
+        _sdk_result = [None]  # captured return text from SDK call
 
         def _sdk_call():
             try:
                 if provider == "google":
-                    _google_chat(
+                    _sdk_result[0] = _google_chat(
                         prompt=prompt, model=model_name, system=system,
                         temperature=adjusted_temp, timeout=timeout, stream=stream,
                         max_tokens=max_tokens, search=search, schema=schema,
@@ -872,7 +900,7 @@ def chat(
                 else:
                     if search:
                         _build_search_kwargs(provider, model_name, strict=True)
-                    _openai_chat(
+                    _sdk_result[0] = _openai_chat(
                         prompt=prompt, model=model_name, provider=provider,
                         system=system, temperature=adjusted_temp, timeout=timeout,
                         stream=stream, max_tokens=max_tokens, schema=schema,
@@ -900,6 +928,7 @@ def chat(
 
         elapsed = time.time() - start_time
         logger.debug("Generation complete", {"elapsed_sec": round(elapsed, 2)})
+        return _sdk_result[0]
 
     except _WallClockTimeout:
         elapsed = time.time() - start_time
