@@ -177,8 +177,9 @@ def svg_cmd(prompt, output, model, debug):
 )
 @click.option("--sample", type=int, help="Sample N frames evenly (for many images)")
 @click.option("--json", "json_output", is_flag=True, help="Request JSON output")
+@click.option("-o", "--output", type=click.Path(), help="Write result to FILE instead of stdout")
 @click.option("--debug", is_flag=True, help="Debug logging")
-def vision_cmd(files, prompt, model, sample, json_output, debug):
+def vision_cmd(files, prompt, model, sample, json_output, output, debug):
     """Analyze images or videos with Gemini vision.
 
     Examples:
@@ -186,6 +187,7 @@ def vision_cmd(files, prompt, model, sample, json_output, debug):
         llmx vision frame*.png -p "Summarize gameplay" --sample 5
         llmx vision gameplay.mp4 -p "List all UI elements visible"
         llmx vision img1.png img2.png -p "Compare these two images"
+        llmx vision report.png -p "Extract table" -o result.md
     """
     configure_logger(debug=debug)
 
@@ -217,7 +219,15 @@ def vision_cmd(files, prompt, model, sample, json_output, debug):
         else:
             result = analyze_media(file_list, prompt, model, json_output)
 
-        click.echo(result)
+        if output:
+            from pathlib import Path
+            out_path = Path(output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(result or "")
+            if not result:
+                click.echo(f"[llmx:WARN] vision returned empty result — wrote 0 bytes to {output}", err=True)
+        else:
+            click.echo(result)
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
@@ -456,7 +466,24 @@ def chat_cmd(
     if file_path:
         file_parts = []
         for fp in file_path:
-            part = Path(fp).read_text().strip()
+            try:
+                part = Path(fp).read_text().strip()
+            except UnicodeDecodeError as e:
+                suffix = Path(fp).suffix.lower()
+                hint = ""
+                if suffix == ".pdf":
+                    hint = (
+                        "\n  PDF detected. For text-only: convert first with "
+                        "`uvx 'markitdown[pdf]' FILE.pdf > FILE.md` then pass FILE.md via -f.\n"
+                        "  For visual/layout: convert pages to PNG with "
+                        "`pdftoppm -png -r 200 FILE.pdf out` then use `llmx vision out-*.png`."
+                    )
+                elif suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".mp4", ".mov"}:
+                    hint = f"\n  Image/video detected. Use `llmx vision {fp}` instead — -f is for text context only."
+                else:
+                    hint = "\n  -f expects UTF-8 text. Convert binary files to text first (e.g. markitdown, pdftotext, base64)."
+                click.echo(f"Error: cannot read {fp} as text ({e}).{hint}", err=True)
+                sys.exit(1)
             logger.debug(f"Read {len(part)} chars from {fp}")
             file_parts.append(part)
         file_text = "\n\n".join(file_parts)
@@ -494,6 +521,7 @@ def chat_cmd(
 
     _output_file = None
     _original_stdout = None
+    _result_text = None
     try:
         if compare:
             provider_list = (
@@ -557,13 +585,11 @@ def chat_cmd(
             else:
                 logger.warn(f"--no-thinking has no effect for provider {final_provider}")
 
-        # --output: force streaming so chunks reach the file incrementally.
-        # Non-streaming holds all output until full response, so a timeout or
-        # error produces a 0-byte file. Must run before transport planning so
-        # CLI backends correctly fall back to API (CLI rejects --stream).
-        if output_path and not stream:
-            stream = True
-            logger.info("-o set: auto-enabling streaming for incremental file writes")
+        # --output: When streaming is explicitly enabled, chunks are tee'd to the
+        # file via _TeeWriter.  When streaming is off (the default), the response
+        # text returned from chat() is written to the file directly.  This avoids
+        # forcing streaming (which breaks reasoning models whose delta.content is
+        # empty during the thinking phase) while still capturing output reliably.
 
         requested_reasoning_effort = reasoning_effort
         cli_provider = preferred_cli_provider(final_provider)
@@ -627,7 +653,7 @@ def chat_cmd(
             sys.stdout = _TeeWriter(sys.stdout, _output_file)
 
         logger.info("Starting chat", log_payload)
-        chat(
+        _result_text = chat(
             prompt_text,
             final_provider,
             model,
@@ -666,7 +692,7 @@ def chat_cmd(
             logger.info(f"Falling back to {fallback_model} after {error.error_type}")
             try:
                 fb_provider = infer_provider_from_model(fallback_model) or final_provider
-                chat(
+                _result_text = chat(
                     prompt_text,
                     fb_provider,
                     fallback_model,
@@ -722,7 +748,16 @@ def chat_cmd(
         if _output_file:
             sys.stdout = _original_stdout
             _output_file.close()
-            if os.path.getsize(output_path) == 0:
+            # Fallback: if _TeeWriter didn't capture anything (streaming path
+            # where delta.content was empty, e.g. reasoning models), write the
+            # returned result text directly.
+            if os.path.getsize(output_path) == 0 and _result_text:
+                with open(output_path, "w") as fallback_fh:
+                    fallback_fh.write(_result_text)
+                    if not _result_text.endswith("\n"):
+                        fallback_fh.write("\n")
+                logger.debug(f"Output written to {output_path} (fallback write)")
+            elif os.path.getsize(output_path) == 0:
                 click.echo(f"[llmx:WARN] -o {output_path} is 0 bytes — model likely errored before producing output", err=True)
             else:
                 logger.debug(f"Output written to {output_path}")
