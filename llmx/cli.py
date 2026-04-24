@@ -4,7 +4,7 @@ llmx - Unified LLM CLI via native SDKs
 
 Usage:
     llmx "your prompt"
-    llmx --model gpt-5.4 "your prompt"
+    llmx --model gpt-5.5 "your prompt"
     cat file.txt | llmx --model claude-sonnet-4-6 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
@@ -307,7 +307,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5.4', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
+    help="Model: 'gpt-5.5', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
 )
 @click.option(
     "-p",
@@ -325,7 +325,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
 @click.option(
     "-e", "--reasoning-effort", "--effort",
     type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh"], case_sensitive=False),
-    help="Thinking effort override. GPT-5.4 supports up to xhigh; llmx defaults GPT-5.4 to high on API fallback.",
+    help="Thinking effort override. GPT-5.5 supports up to xhigh; llmx defaults GPT-5.5 to high on API fallback.",
 )
 @click.option(
     "--stream/--no-stream",
@@ -796,7 +796,7 @@ def cli():
 
     Examples:
         llmx "What is 2+2?"                                  # Text generation (default)
-        llmx --model gpt-5.4 "Explain Python"                # Specific model
+        llmx --model gpt-5.5 "Explain Python"                # Specific model
         llmx image "a cute robot" -o robot.png               # Image generation
         llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
     """

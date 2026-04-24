@@ -101,6 +101,8 @@ class ModelError(LlmxError):
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
+    "gpt-5.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
+    "gpt-5.5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
     "gpt-5.4": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
     "gpt-5.2": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
     "gpt-5.1": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
@@ -137,8 +139,8 @@ PROVIDER_CONFIGS = {
         "flash_lite_model": "gemini-3.1-flash-lite-preview",
     },
     "openai": {
-        "model": "gpt-5.4",
-        "legacy_model": "gpt-5.2",
+        "model": "gpt-5.5",
+        "legacy_model": "gpt-5.4",
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -251,7 +253,7 @@ def _normalize_model(provider: str, model: str) -> str:
 # Known models for typo detection
 _KNOWN_MODELS = {
     "google": ["gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
-    "openai": ["gpt-5.4", "gpt-5.3", "gpt-5.2", "gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-pro", "gpt-5-codex"],
+    "openai": ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.3", "gpt-5.2", "gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-pro", "gpt-5-codex"],
     "xai": ["grok-4", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-beta"],
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
     "deepseek": ["deepseek-chat"],
@@ -266,10 +268,10 @@ _MODEL_UPGRADES = {
     "gemini-2.0-flash": "gemini-3-flash-preview",
     "gemini-pro": "gemini-3.1-pro-preview",
     "gemini-flash": "gemini-3-flash-preview",
-    "gpt-4o": "gpt-5.4",
+    "gpt-4o": "gpt-5.5",
     "gpt-4o-mini": "gpt-5.1-mini",
-    "gpt-4": "gpt-5.4",
-    "gpt-4-turbo": "gpt-5.4",
+    "gpt-4": "gpt-5.5",
+    "gpt-4-turbo": "gpt-5.5",
     "claude-3.5-sonnet": "claude-sonnet-4-6",
     "claude-3-opus": "claude-opus-4-6",
 }
