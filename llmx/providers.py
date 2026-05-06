@@ -582,6 +582,9 @@ def _get_api_key(provider: str) -> Optional[str]:
 def _google_chat(prompt, model, system, temperature, timeout, stream,
                  max_tokens, search, schema, reasoning_effort):
     """Google Gemini via google-genai SDK. Returns response text."""
+    import time as _time
+    from .usage_log import log_usage
+
     client = genai.Client(
         http_options=types.HttpOptions(
             timeout=max(timeout * 1000, 10_000) if timeout else 300_000
@@ -607,30 +610,47 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
 
     result_text = ""
     finish_reason = None
+    response = None
+    started = _time.time()
 
-    if stream:
-        for chunk in client.models.generate_content_stream(
-            model=model, contents=prompt, config=config
-        ):
-            if chunk.text:
-                sys.stdout.write(chunk.text)
-                sys.stdout.flush()
-                result_text += chunk.text
-        sys.stdout.write("\n")
-    else:
-        response = client.models.generate_content(
-            model=model, contents=prompt, config=config
-        )
-        # Guard empty candidates from safety filter
-        if not response.candidates:
-            feedback = getattr(response, 'prompt_feedback', None)
-            raise ModelError(
-                f"Response blocked by safety filter: {feedback}",
-                provider="google", model=model,
+    try:
+        if stream:
+            for chunk in client.models.generate_content_stream(
+                model=model, contents=prompt, config=config
+            ):
+                if chunk.text:
+                    sys.stdout.write(chunk.text)
+                    sys.stdout.flush()
+                    result_text += chunk.text
+                response = chunk  # last chunk carries usage_metadata
+            sys.stdout.write("\n")
+        else:
+            response = client.models.generate_content(
+                model=model, contents=prompt, config=config
             )
-        result_text = response.text
-        finish_reason = str(response.candidates[0].finish_reason)
-        print(result_text)
+            # Guard empty candidates from safety filter
+            if not response.candidates:
+                feedback = getattr(response, 'prompt_feedback', None)
+                raise ModelError(
+                    f"Response blocked by safety filter: {feedback}",
+                    provider="google", model=model,
+                )
+            result_text = response.text
+            finish_reason = str(response.candidates[0].finish_reason)
+            print(result_text)
+    finally:
+        usage = getattr(response, "usage_metadata", None) if response is not None else None
+        log_usage(
+            provider="google",
+            model=model,
+            transport="api",
+            reasoning_effort=reasoning_effort,
+            prompt_tokens=getattr(usage, "prompt_token_count", None),
+            completion_tokens=getattr(usage, "candidates_token_count", None),
+            reasoning_tokens=getattr(usage, "thoughts_token_count", None),
+            cached_tokens=getattr(usage, "cached_content_token_count", None),
+            latency_s=_time.time() - started,
+        )
 
     # Truncation detection
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
@@ -642,6 +662,9 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
 def _openai_chat(prompt, model, provider, system, temperature, timeout,
                  stream, max_tokens, schema, reasoning_effort):
     """OpenAI-compatible API via openai SDK. Returns response text."""
+    import time as _time
+    from .usage_log import log_usage
+
     base_url = OPENAI_COMPAT_URLS.get(provider)
     api_key = _get_api_key(provider)
 
@@ -673,32 +696,54 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
 
     result_text = ""
     finish_reason = None
+    usage = None
+    started = _time.time()
 
-    if stream:
-        for chunk in client.chat.completions.create(**kwargs, stream=True):
-            # Guard empty choices from OpenRouter keepalive chunks
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta and delta.content:
-                sys.stdout.write(delta.content)
-                sys.stdout.flush()
-                result_text += delta.content
-            if chunk.choices[0].finish_reason:
-                finish_reason = chunk.choices[0].finish_reason
-        sys.stdout.write("\n")
-    else:
-        response = client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        if content is None:
-            refusal = getattr(response.choices[0].message, 'refusal', None)
-            raise ModelError(
-                f"Model returned no content. Refusal: {refusal}",
-                provider=provider, model=model,
-            )
-        result_text = content
-        finish_reason = response.choices[0].finish_reason
-        print(result_text)
+    try:
+        if stream:
+            for chunk in client.chat.completions.create(
+                **kwargs, stream=True, stream_options={"include_usage": True}
+            ):
+                # Final usage chunk has empty choices and a populated `usage` field.
+                if getattr(chunk, "usage", None) is not None:
+                    usage = chunk.usage
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    sys.stdout.write(delta.content)
+                    sys.stdout.flush()
+                    result_text += delta.content
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
+            sys.stdout.write("\n")
+        else:
+            response = client.chat.completions.create(**kwargs)
+            usage = getattr(response, "usage", None)
+            content = response.choices[0].message.content
+            if content is None:
+                refusal = getattr(response.choices[0].message, 'refusal', None)
+                raise ModelError(
+                    f"Model returned no content. Refusal: {refusal}",
+                    provider=provider, model=model,
+                )
+            result_text = content
+            finish_reason = response.choices[0].finish_reason
+            print(result_text)
+    finally:
+        details = getattr(usage, "completion_tokens_details", None) if usage else None
+        cached = getattr(usage, "prompt_tokens_details", None) if usage else None
+        log_usage(
+            provider=provider,
+            model=model,
+            transport="api",
+            reasoning_effort=reasoning_effort,
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            reasoning_tokens=getattr(details, "reasoning_tokens", None),
+            cached_tokens=getattr(cached, "cached_tokens", None),
+            latency_s=_time.time() - started,
+        )
 
     # Truncation detection
     if finish_reason == "length":
