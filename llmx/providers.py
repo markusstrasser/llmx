@@ -101,7 +101,7 @@ class ModelError(LlmxError):
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
-    "gpt-5.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
+    "gpt-5.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "medium"},
     "gpt-5.5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
     "gpt-5.4": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
     "gpt-5.2": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
