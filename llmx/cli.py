@@ -31,7 +31,10 @@ from .providers import (
     LlmxError, RateLimitError, QuotaError, TimeoutError_, SearchUnavailableError,
     EXIT_GENERAL, PROVIDER_CONFIGS, get_model_name, get_model_restriction,
 )
-from .cli_backends import preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS
+from .cli_backends import (
+    preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS,
+    lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
+)
 from .logger import configure_logger, logger
 
 console = Console()
@@ -730,6 +733,26 @@ def chat_cmd(
 
         if lite:
             log_payload["lite"] = lite
+            if not lite_model_allowed(planned_model):
+                allowed = ", ".join(sorted(LITE_ALLOWED_MODELS))
+                click.echo(
+                    f"Error: --lite is restricted to the frontier models: {allowed}.\n"
+                    f"Got model={planned_model!r}. Drop --lite to use other models.",
+                    err=True,
+                )
+                sys.exit(2)
+            if lite == "research" and final_provider == "anthropic":
+                click.echo(
+                    "Error: --lite research is not supported for Claude — Claude has no "
+                    "CLI transport in llmx, so research-MCP isn't reachable. Use Claude "
+                    "Code (which has the research MCP configured) for Claude+research, "
+                    "or pick gpt-5.5 / gemini-3.1-pro-preview here.",
+                    err=True,
+                )
+                sys.exit(2)
+            # Inject env-notice prefix so the model knows what tools exist.
+            # Done here (not in cli_chat) so Anthropic API path also gets it.
+            prompt_text = LITE_PROMPT_PREFIX[lite] + prompt_text
         logger.info("Starting chat", log_payload)
         _result_text = chat(
             prompt_text,

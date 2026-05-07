@@ -59,7 +59,7 @@ _LITE_CODEX_HOMES = {
     "research": os.path.expanduser("~/.codex-research"),
 }
 
-_LITE_PROMPT_PREFIX = {
+LITE_PROMPT_PREFIX = {
     "bare": (
         "[Environment: no tools, no web search, no file access. "
         "Answer from training knowledge only.]\n\n"
@@ -71,6 +71,30 @@ _LITE_PROMPT_PREFIX = {
         "No other tools.]\n\n"
     ),
 }
+
+# Lite mode is restricted to three frontier models. Anthropic has no CLI
+# transport in llmx (Claude Code is the CLI for Claude), so claude-opus-4-7
+# in lite mode is API + prompt prefix only — research-MCP is unavailable
+# (use Claude Code with research-mcp configured instead).
+LITE_ALLOWED_MODELS = {
+    "gpt-5.5",
+    "gemini-3.1-pro-preview",
+    "claude-opus-4-7",
+}
+
+
+def lite_model_allowed(model: Optional[str]) -> bool:
+    """Return True if the resolved model is on the lite allowlist.
+
+    Lenient match — `gemini-3.1-pro` and `gemini-3.1-pro-preview` both pass.
+    """
+    if not model:
+        return False
+    for allowed in LITE_ALLOWED_MODELS:
+        base = allowed.removesuffix("-preview")
+        if model == allowed or model == base or model.startswith(base + "-"):
+            return True
+    return False
 
 # Max bytes for command-line argument before switching to stdin.
 # macOS ARG_MAX is ~260KB but shells/tools choke earlier.
@@ -169,9 +193,9 @@ def cli_chat(
     if system:
         prompt = f"<system>\n{system}\n</system>\n\n{prompt}"
 
-    # Lite mode: prepend environment notice so the model knows what tools exist.
-    if lite and lite in _LITE_PROMPT_PREFIX:
-        prompt = _LITE_PROMPT_PREFIX[lite] + prompt
+    # Note: lite-mode prompt prefix is injected in cli.py before chat() so
+    # the Anthropic API path gets it too. Don't double-prefix here.
+    _ = lite  # used for HOME / cwd routing below
 
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
