@@ -810,8 +810,13 @@ def chat(
     system: Optional[str] = None,
     schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
+    lite: Optional[str] = None,
 ) -> Optional[str]:
-    """Execute chat with single provider.  Returns response text (or None)."""
+    """Execute chat with single provider.  Returns response text (or None).
+
+    `lite` ('bare' or 'research') routes via stripped-down CLI profile —
+    no MCPs (bare) or research-MCP only (research). Cost-saving mode.
+    """
     start_time = time.time()
     # Auto-upgrade deprecated model names before any other logic
     if model:
@@ -842,7 +847,7 @@ def chat(
             preferred_cli_provider,
         )
 
-        cli_provider = preferred_cli_provider(provider)
+        cli_provider = preferred_cli_provider(provider, lite=lite)
         if cli_provider:
             logical_provider = (
                 provider if provider not in CLI_PROVIDERS else CLI_PROVIDERS[cli_provider]["api_fallback"]
@@ -857,7 +862,11 @@ def chat(
                 provider = api_provider
                 model = cli_model
             else:
-                text = cli_chat(cli_provider, prompt, cli_model, timeout, schema=schema, system=system)
+                text = cli_chat(
+                    cli_provider, prompt, cli_model, timeout,
+                    schema=schema, system=system, lite=lite,
+                    reasoning_effort=reasoning_effort,
+                )
                 if text is not None:
                     print(text)
                     return text

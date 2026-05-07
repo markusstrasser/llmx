@@ -68,47 +68,112 @@ SUBCOMMANDS = {"image", "svg", "vision", "research", "batch"}
 @click.argument("prompt", nargs=-1, required=True)
 @click.option("-o", "--output", help="Output file path (default: auto-generated)")
 @click.option(
+    "-p", "--provider",
+    type=click.Choice(["openai", "google"]),
+    default="openai",
+    help="Image backend: openai uses GPT Image 2; google uses Gemini 3 Pro Image",
+)
+@click.option(
     "-m", "--model",
-    type=click.Choice(["flash", "pro"]),
-    default="pro",
-    help="Model: Both use Gemini 3 Pro Image (gemini-3-pro-image-preview)"
+    default=None,
+    help="Model alias/name. OpenAI default: gpt-image-2. Google: flash/pro",
 )
 @click.option(
     "--aspect-ratio", "-a",
     default="1:1",
-    help="Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 5:4, 4:5"
+    help="Google aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 5:4, 4:5",
 )
 @click.option(
     "--resolution", "-r",
     type=click.Choice(["1K", "2K", "4K"]),
     default="1K",
-    help="Resolution: 1K, 2K, 4K (2K+ requires pro model)"
+    help="Google resolution: 1K, 2K, 4K",
+)
+@click.option(
+    "--input-image", "-i",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="OpenAI edit/reference image. Repeat for multiple reference images.",
+)
+@click.option(
+    "--size",
+    default="auto",
+    help="OpenAI output size: auto, 1024x1024, 1536x1024, 1024x1536",
+)
+@click.option(
+    "--quality",
+    default="auto",
+    help="OpenAI quality: auto, low, medium, high",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["png", "jpeg", "webp"]),
+    default="png",
+    help="OpenAI output format",
+)
+@click.option(
+    "--input-fidelity",
+    type=click.Choice(["high", "low"]),
+    default=None,
+    help="Optional OpenAI edit/reference input fidelity for models that accept it",
+)
+@click.option(
+    "-n", "--count",
+    type=click.IntRange(1, 10),
+    default=1,
+    help="Number of OpenAI output images",
 )
 @click.option("--debug", is_flag=True, help="Debug logging")
-def image_cmd(prompt, output, model, aspect_ratio, resolution, debug):
-    """Generate images using Gemini Nano Banana models.
+def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_image, size, quality, output_format, input_fidelity, count, debug):
+    """Generate or edit images.
 
     Examples:
-        llmx image "a cute robot mascot"
-        llmx image "pixel art knight with sword" -o knight.png
-        llmx image "game background forest" -m pro -r 2K
-        llmx image "physics momentum diagram" --aspect-ratio 16:9
+        llmx image "a cute robot mascot" -o robot.png
+        llmx image -i photobooth.jpg -o beard.png "same person, short crop, trimmed beard"
+        llmx image --provider google "game background forest" -m pro -r 2K
     """
     configure_logger(debug=debug)
 
     prompt_text = " ".join(prompt)
 
     try:
-        from .image import generate_image
+        if provider == "openai":
+            from .image import generate_openai_image
 
+            results = generate_openai_image(
+                prompt=prompt_text,
+                output_path=output,
+                model=model or "gpt-image-2",
+                input_images=list(input_image) or None,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+                input_fidelity=input_fidelity,
+                n=count,
+            )
+            if results:
+                for result in results:
+                    click.echo(f"Image saved: {result}")
+            else:
+                click.echo("No image was generated.", err=True)
+                sys.exit(1)
+            return
+
+        from .image import generate_image
+        google_model = model or "pro"
+        if google_model not in {"flash", "pro"}:
+            raise click.ClickException("Google image backend model must be 'flash' or 'pro'")
+        if input_image:
+            raise click.ClickException("--input-image is currently supported only with --provider openai")
+        if count != 1:
+            raise click.ClickException("--count is currently supported only with --provider openai")
         result = generate_image(
             prompt=prompt_text,
             output_path=output,
-            model=model,
+            model=google_model,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
         )
-
         if result:
             click.echo(f"Image saved: {result}")
         else:
@@ -410,6 +475,16 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     "fallback_model",
     help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
 )
+@click.option(
+    "--lite",
+    type=click.Choice(["bare", "research"], case_sensitive=False),
+    default=None,
+    help=(
+        "Cost-saving CLI mode. 'bare' = no MCPs/tools/skills. "
+        "'research' = research MCP only (papers, preprints, verify_claim). "
+        "Routes openai→codex-cli too. Empty cwd, no project context."
+    ),
+)
 @click.pass_context
 def chat_cmd(
     ctx,
@@ -435,6 +510,7 @@ def chat_cmd(
     max_tokens,
     output_path,
     fallback_model,
+    lite,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -592,7 +668,7 @@ def chat_cmd(
         # empty during the thinking phase) while still capturing output reliably.
 
         requested_reasoning_effort = reasoning_effort
-        cli_provider = preferred_cli_provider(final_provider)
+        cli_provider = preferred_cli_provider(final_provider, lite=lite)
         cli_fallback_reason = None
 
         if cli_provider:
@@ -652,6 +728,8 @@ def chat_cmd(
             _original_stdout = sys.stdout
             sys.stdout = _TeeWriter(sys.stdout, _output_file)
 
+        if lite:
+            log_payload["lite"] = lite
         logger.info("Starting chat", log_payload)
         _result_text = chat(
             prompt_text,
@@ -669,6 +747,7 @@ def chat_cmd(
             system=system,
             schema=schema,
             max_tokens=max_tokens,
+            lite=lite,
         )
 
     except KeyboardInterrupt:
@@ -708,6 +787,7 @@ def chat_cmd(
                     system=system,
                     schema=schema,
                     max_tokens=max_tokens,
+                    lite=lite,
                 )
                 return  # Fallback succeeded
             except Exception as fb_error:

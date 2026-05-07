@@ -33,11 +33,43 @@ CLI_PROVIDERS = {
 }
 
 # Prefer subscription/free CLIs for logical providers when available.
-# codex-cli disabled: 10+s startup (loads sandbox/MCP), no cost advantage over API,
-# causes silent timeouts on short-timeout calls. OpenAI goes direct to API.
+# Default routing: gemini-cli for google. OpenAI → codex-cli only in --lite mode
+# (codex with full MCP load = 37K context overhead + 10s startup; lite profile
+# disables MCPs and loads in ~1s).
 CLI_PROVIDER_ALIASES = {
     "google": "gemini-cli",
-    # "openai": "codex-cli",  # disabled — startup overhead causes timeouts
+}
+CLI_PROVIDER_ALIASES_LITE = {
+    "google": "gemini-cli",
+    "openai": "codex-cli",
+}
+
+# Empty cwd reused across calls — prevents AGENTS.md / GEMINI.md autoload from
+# the user's project tree. Initialized as a git repo so codex --skip-git-repo-check
+# isn't strictly needed, but we pass it anyway for safety.
+_LITE_CWD = os.path.expanduser("~/.cache/llmx/empty-cwd")
+
+# Lite-mode HOME / CODEX_HOME selectors.
+_LITE_GEMINI_HOMES = {
+    "bare": os.path.expanduser("~/.gemini-bare"),
+    "research": os.path.expanduser("~/.gemini-research"),
+}
+_LITE_CODEX_HOMES = {
+    "bare": os.path.expanduser("~/.codex-bare"),
+    "research": os.path.expanduser("~/.codex-research"),
+}
+
+_LITE_PROMPT_PREFIX = {
+    "bare": (
+        "[Environment: no tools, no web search, no file access. "
+        "Answer from training knowledge only.]\n\n"
+    ),
+    "research": (
+        "[Environment: no general web search. A 'research' MCP is available "
+        "for academic paper / preprint search and web archive lookups "
+        "(search_papers, search_preprints, verify_claim, deep_research, etc.). "
+        "No other tools.]\n\n"
+    ),
 }
 
 # Max bytes for command-line argument before switching to stdin.
@@ -45,11 +77,12 @@ CLI_PROVIDER_ALIASES = {
 _ARG_MAX_BYTES = 100_000
 
 
-def configured_cli_provider(provider: str) -> Optional[str]:
+def configured_cli_provider(provider: str, lite: Optional[str] = None) -> Optional[str]:
     """Return the CLI backend associated with a provider, if any."""
     if provider in CLI_PROVIDERS:
         return provider
-    return CLI_PROVIDER_ALIASES.get(provider)
+    aliases = CLI_PROVIDER_ALIASES_LITE if lite else CLI_PROVIDER_ALIASES
+    return aliases.get(provider)
 
 
 def binary_available(provider: str) -> bool:
@@ -61,14 +94,16 @@ def binary_available(provider: str) -> bool:
     return shutil.which(config["binary"]) is not None
 
 
-def preferred_cli_provider(provider: str) -> Optional[str]:
+def preferred_cli_provider(provider: str, lite: Optional[str] = None) -> Optional[str]:
     """Return the CLI backend to prefer for a provider.
 
     Explicit CLI providers always resolve, even if the binary is missing, so callers can
     surface a precise fallback reason. Logical providers (openai/google) only resolve when
     the corresponding CLI is installed.
+
+    `lite` ('bare' or 'research') routes openai → codex-cli (cost-saving mode).
     """
-    cli_provider = configured_cli_provider(provider)
+    cli_provider = configured_cli_provider(provider, lite=lite)
     if not cli_provider:
         return None
     if provider in CLI_PROVIDERS:
@@ -118,15 +153,25 @@ def cli_chat(
     *,
     schema=None,
     system: Optional[str] = None,
+    lite: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Optional[str]:
     """Execute one-shot chat via CLI binary.
 
     Returns response text on success, None on failure (caller should fall back to API).
     For long prompts (>100KB), pipes via stdin to avoid ARG_MAX limits.
+
+    `lite` ('bare' or 'research') runs the CLI in a stripped-down profile —
+    no MCPs (bare) or research-MCP only (research), empty cwd, prompt prefix
+    advising the model what's available.
     """
     # Fold system message into prompt — CLIs don't have a system flag
     if system:
         prompt = f"<system>\n{system}\n</system>\n\n{prompt}"
+
+    # Lite mode: prepend environment notice so the model knows what tools exist.
+    if lite and lite in _LITE_PROMPT_PREFIX:
+        prompt = _LITE_PROMPT_PREFIX[lite] + prompt
 
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
@@ -149,9 +194,24 @@ def cli_chat(
                 cmd.extend(["-m", clean_model])
         elif binary == "codex":
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
-            cmd = ["codex", "exec"]
+            cmd = ["codex", "exec", "--skip-git-repo-check"]
+            if lite:
+                # Lite mode: skip config.toml entirely so codex doesn't re-enable
+                # bundled plugins on each launch. Inject MCPs via -c overrides.
+                cmd.append("--ignore-user-config")
+                if lite == "research":
+                    cmd.extend([
+                        "-c", 'mcp_servers.research.command="uv"',
+                        "-c",
+                        'mcp_servers.research.args=["run","--directory",'
+                        '"/Users/alien/Projects/research-mcp","research-mcp"]',
+                    ])
             if model:
                 cmd.extend(["-m", model])
+            if reasoning_effort and reasoning_effort in {
+                "minimal", "low", "medium", "high", "xhigh"
+            }:
+                cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
             if schema:
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".json", delete=False, encoding="utf-8"
@@ -175,10 +235,25 @@ def cli_chat(
         import signal as _signal
         import threading as _threading
 
-        # Run gemini-cli in bare mode: skip MCP servers, extensions, skills.
-        # Uses ~/.gemini-bare with admin overrides + oauth creds only.
+        # Lite mode: route HOME / CODEX_HOME to a stripped-down profile and
+        # run from an empty cwd so no project AGENTS.md / GEMINI.md is autoloaded.
+        # Default (non-lite) gemini path keeps the original ~/.gemini-bare HOME
+        # override for backward compatibility.
         env = None
-        if binary == "gemini":
+        cwd = None
+        if lite:
+            cwd = _LITE_CWD if os.path.isdir(_LITE_CWD) else None
+            if binary == "gemini":
+                home = _LITE_GEMINI_HOMES.get(lite)
+                if home and os.path.isdir(home):
+                    env = {**os.environ, "HOME": home}
+                    logger.debug(f"[cli] lite={lite} HOME={home}")
+            elif binary == "codex":
+                home = _LITE_CODEX_HOMES.get(lite)
+                if home and os.path.isdir(home):
+                    env = {**os.environ, "CODEX_HOME": home}
+                    logger.debug(f"[cli] lite={lite} CODEX_HOME={home}")
+        elif binary == "gemini":
             bare_home = os.path.join(os.path.expanduser("~"), ".gemini-bare")
             if os.path.isdir(bare_home):
                 env = {**os.environ, "HOME": bare_home}
@@ -186,7 +261,7 @@ def cli_chat(
 
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, stdin=subprocess.PIPE, env=env,
+            text=True, stdin=subprocess.PIPE, env=env, cwd=cwd,
             start_new_session=True,  # new process group for clean kill
         )
 
