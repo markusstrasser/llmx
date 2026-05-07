@@ -30,6 +30,10 @@ CLI_PROVIDERS = {
         "binary": "codex",
         "api_fallback": "openai",
     },
+    "claude-cli": {
+        "binary": "claude",
+        "api_fallback": "anthropic",
+    },
 }
 
 # Prefer subscription/free CLIs for logical providers when available.
@@ -42,6 +46,7 @@ CLI_PROVIDER_ALIASES = {
 CLI_PROVIDER_ALIASES_LITE = {
     "google": "gemini-cli",
     "openai": "codex-cli",
+    "anthropic": "claude-cli",
 }
 
 # Empty cwd reused across calls — prevents AGENTS.md / GEMINI.md autoload from
@@ -72,13 +77,15 @@ LITE_PROMPT_PREFIX = {
     ),
 }
 
-# Lite mode is restricted to three frontier models. Anthropic has no CLI
-# transport in llmx (Claude Code is the CLI for Claude), so claude-opus-4-7
-# in lite mode is API + prompt prefix only — research-MCP is unavailable
-# (use Claude Code with research-mcp configured instead).
+# Lite mode is restricted to three frontier models. Anthropic routes via
+# claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
+# (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
+# research-mcp only). Gemini-3.1-pro is excluded — capacity-limited / not
+# accessible without Pro sub at the time of writing; gemini-3-flash-preview
+# is the fast tier.
 LITE_ALLOWED_MODELS = {
     "gpt-5.5",
-    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
     "claude-opus-4-7",
 }
 
@@ -212,6 +219,10 @@ def cli_chat(
                 stdin_input = prompt
             else:
                 cmd = ["gemini", "-p", prompt, "-o", "text"]
+            if lite:
+                # Empty-cwd lite profile isn't in gemini's trusted-folders list;
+                # --skip-trust bypasses the headless rejection.
+                cmd.append("--skip-trust")
             if model:
                 # Strip gemini/ prefix — CLI doesn't want it
                 clean_model = model.removeprefix("gemini/")
@@ -248,6 +259,35 @@ def cli_chat(
                 stdin_input = prompt
             else:
                 cmd.append(prompt)
+        elif binary == "claude":
+            # claude -p (headless). Lite-only path — Claude Code is heavy by
+            # default; we pass flags to skip skills/CLAUDE.md/sessions and
+            # restrict MCP/tools. Auth: drop ANTHROPIC_API_KEY from env so
+            # the OAuth subscription path is used (api-key path can fail
+            # with low credit balance even when subscription works fine).
+            cmd = [
+                "claude", "-p",
+                "--no-session-persistence",
+                "--output-format", "text",
+                "--disable-slash-commands",
+            ]
+            if lite == "research":
+                cmd.extend([
+                    "--mcp-config",
+                    '{"mcpServers":{"research":{"command":"uv","args":'
+                    '["run","--directory","/Users/alien/Projects/research-mcp",'
+                    '"research-mcp"]}}}',
+                    "--allowedTools", "mcp__research",
+                ])
+            else:
+                cmd.extend([
+                    "--mcp-config", '{"mcpServers":{}}',
+                    "--allowedTools", "",
+                ])
+            if model:
+                cmd.extend(["--model", model])
+            # Always pipe prompt via stdin — keeps long prompts off argv.
+            stdin_input = prompt
         else:
             return None
 
@@ -277,6 +317,11 @@ def cli_chat(
                 if home and os.path.isdir(home):
                     env = {**os.environ, "CODEX_HOME": home}
                     logger.debug(f"[cli] lite={lite} CODEX_HOME={home}")
+            elif binary == "claude":
+                # Use OAuth subscription, not the API key path (which can hit
+                # low-credit failures while the subscription is fine).
+                env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+                logger.debug(f"[cli] lite={lite} claude (OAuth, no API key)")
         elif binary == "gemini":
             bare_home = os.path.join(os.path.expanduser("~"), ".gemini-bare")
             if os.path.isdir(bare_home):

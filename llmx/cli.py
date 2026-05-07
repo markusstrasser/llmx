@@ -741,15 +741,6 @@ def chat_cmd(
                     err=True,
                 )
                 sys.exit(2)
-            if lite == "research" and final_provider == "anthropic":
-                click.echo(
-                    "Error: --lite research is not supported for Claude — Claude has no "
-                    "CLI transport in llmx, so research-MCP isn't reachable. Use Claude "
-                    "Code (which has the research MCP configured) for Claude+research, "
-                    "or pick gpt-5.5 / gemini-3.1-pro-preview here.",
-                    err=True,
-                )
-                sys.exit(2)
             # Inject env-notice prefix so the model knows what tools exist.
             # Done here (not in cli_chat) so Anthropic API path also gets it.
             prompt_text = LITE_PROMPT_PREFIX[lite] + prompt_text
