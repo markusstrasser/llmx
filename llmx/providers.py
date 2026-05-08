@@ -586,9 +586,47 @@ def _get_api_key(provider: str) -> Optional[str]:
 # Native SDK backends
 # ============================================================================
 
+def _normalize_usage(provider: str, raw) -> dict:
+    """Normalize per-provider usage objects to a flat token dict.
+
+    Returns {"prompt_tokens", "completion_tokens", "total_tokens",
+    "reasoning_tokens", "cached_tokens"} with None for fields the
+    provider didn't report. Total is computed when not provided.
+    """
+    if raw is None:
+        return {"prompt_tokens": None, "completion_tokens": None,
+                "total_tokens": None, "reasoning_tokens": None,
+                "cached_tokens": None}
+    if provider == "google":
+        prompt = getattr(raw, "prompt_token_count", None)
+        completion = getattr(raw, "candidates_token_count", None)
+        reasoning = getattr(raw, "thoughts_token_count", None)
+        cached = getattr(raw, "cached_content_token_count", None)
+    else:  # openai-compatible
+        prompt = getattr(raw, "prompt_tokens", None)
+        completion = getattr(raw, "completion_tokens", None)
+        details = getattr(raw, "completion_tokens_details", None)
+        reasoning = getattr(details, "reasoning_tokens", None) if details else None
+        prompt_details = getattr(raw, "prompt_tokens_details", None)
+        cached = getattr(prompt_details, "cached_tokens", None) if prompt_details else None
+    total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
+    return {
+        "prompt_tokens": prompt, "completion_tokens": completion,
+        "total_tokens": total, "reasoning_tokens": reasoning,
+        "cached_tokens": cached,
+    }
+
+
 def _google_chat(prompt, model, system, temperature, timeout, stream,
-                 max_tokens, search, schema, reasoning_effort):
-    """Google Gemini via google-genai SDK. Returns response text."""
+                 max_tokens, search, schema, reasoning_effort,
+                 usage_out: Optional[dict] = None):
+    """Google Gemini via google-genai SDK. Returns response text.
+
+    If usage_out is provided, it's populated in-place with the normalized
+    token dict from _normalize_usage(). Out-param keeps the public string
+    return type so the threaded SDK dispatcher and legacy callers don't
+    need to unpack a tuple.
+    """
     import time as _time
     from .usage_log import log_usage
 
@@ -663,12 +701,19 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
         logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
 
+    if usage_out is not None:
+        usage_out.update(_normalize_usage("google", usage))
     return result_text
 
 
 def _openai_chat(prompt, model, provider, system, temperature, timeout,
-                 stream, max_tokens, schema, reasoning_effort):
-    """OpenAI-compatible API via openai SDK. Returns response text."""
+                 stream, max_tokens, schema, reasoning_effort,
+                 usage_out: Optional[dict] = None):
+    """OpenAI-compatible API via openai SDK. Returns response text.
+
+    If usage_out is provided, it's populated in-place with the normalized
+    token dict from _normalize_usage().
+    """
     import time as _time
     from .usage_log import log_usage
 
@@ -756,6 +801,8 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
     if finish_reason == "length":
         logger.warn(f"[llmx:WARN] output may be truncated (hit max_tokens limit)")
 
+    if usage_out is not None:
+        usage_out.update(_normalize_usage(provider, usage))
     return result_text
 
 

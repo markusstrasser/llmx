@@ -155,6 +155,7 @@ class LLM:
                 # Capture stdout — native backends print directly
                 old_stdout = sys.stdout
                 sys.stdout = io.StringIO()
+                usage_out: dict = {}
                 try:
                     if self.provider == "google":
                         content = _google_chat(
@@ -163,6 +164,7 @@ class LLM:
                             stream=False, max_tokens=call_kwargs.get("max_tokens"),
                             search=self.search, schema=call_kwargs.get("response_format"),
                             reasoning_effort=call_kwargs.get("reasoning_effort"),
+                            usage_out=usage_out,
                         )
                     else:
                         if self.search:
@@ -174,14 +176,17 @@ class LLM:
                             stream=False, max_tokens=call_kwargs.get("max_tokens"),
                             schema=call_kwargs.get("response_format"),
                             reasoning_effort=call_kwargs.get("reasoning_effort"),
+                            usage_out=usage_out,
                         )
                 finally:
                     sys.stdout = old_stdout
 
                 latency = time.time() - start_time
-
-                # Usage not available from native SDKs in this path
-                usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                usage = usage_out or {
+                    "prompt_tokens": None, "completion_tokens": None,
+                    "total_tokens": None, "reasoning_tokens": None,
+                    "cached_tokens": None,
+                }
 
                 trace.set_response({
                     "content": content,
