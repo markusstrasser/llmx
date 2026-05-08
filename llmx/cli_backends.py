@@ -50,20 +50,27 @@ CLI_PROVIDER_ALIASES_LITE = {
     "anthropic": "claude-cli",
 }
 
-# Lite cwd dirs — shipped inside the llmx package, one per mode. Used for
-# all three CLI backends (codex, claude, gemini); per-tool isolation comes
-# from CLI flags (--ignore-user-config, --skip-trust, --mcp-config, etc.),
-# not from separate HOME / CODEX_HOME redirects. Auth state lives in the
-# user's normal HOME, where each CLI already keeps it.
+# Lite cwd is split between two locations:
 #
-# The dirs are intentionally empty (no AGENTS.md, no GEMINI.md, no
-# CLAUDE.md, no project state). The orchestrator that calls llmx is
-# responsible for stuffing project context into the prompt.
-_LITE_PACKAGE_ROOT = Path(__file__).resolve().parent / "lite"
-_LITE_CWDS = {
-    "bare": _LITE_PACKAGE_ROOT / "bare",
-    "research": _LITE_PACKAGE_ROOT / "research",
-}
+#   Skeleton (package, read-only):   llmx/lite/{bare,research}/
+#       Encapsulated description of what each lite mode looks like.
+#       Ships with llmx, ignored at runtime — the package stays clean
+#       even when CLIs scribble session state into their cwd.
+#
+#   Runtime (cache, read-write):     ~/.cache/llmx/lite/{bare,research}/
+#       Actual cwd handed to the CLI subprocess. Auto-created from the
+#       skeleton on first use, idempotent across runs. claude-cli writes
+#       its <cwd>/.claude/current-session-id marker here even with
+#       --no-session-persistence, so we keep that pollution out of the
+#       package by routing it to a cache location the user can wipe.
+#
+# Per-CLI isolation (no project AGENTS.md / GEMINI.md / CLAUDE.md autoload,
+# no user config.toml / settings.json) comes from CLI flags — not from
+# HOME / CODEX_HOME redirects. Auth still flows through the user's normal
+# HOME, where each CLI keeps it.
+_LITE_PACKAGE_SKEL = Path(__file__).resolve().parent / "lite"
+_LITE_RUNTIME_ROOT = Path(os.path.expanduser("~/.cache/llmx/lite"))
+_LITE_MODES = ("bare", "research")
 
 LITE_PROMPT_PREFIX = {
     "bare": (
@@ -218,25 +225,27 @@ class LiteEnvironmentError(RuntimeError):
 
 
 def _lite_cwd(lite: str) -> str:
-    """Return the encapsulated cwd for the requested lite mode.
+    """Return (auto-creating) the runtime cwd for the requested lite mode.
 
-    The cwd is a fixed empty directory inside the llmx package — same one
-    used by all three CLI backends. Isolation from project context comes
-    from running there (no AGENTS.md / GEMINI.md / CLAUDE.md autoload);
-    isolation from user config comes from per-CLI flags
-    (--ignore-user-config, --skip-trust, --mcp-config '{}'). Auth still
-    flows through the user's normal HOME — that's where each CLI keeps it.
+    Bootstraps ~/.cache/llmx/lite/{mode}/ from the package skeleton at
+    llmx/lite/{mode}/ on first call. Both shipped modes (bare, research)
+    have empty skeletons today, so the bootstrap is just mkdir -p — but
+    the indirection lets us add preloaded files (extra MCP configs,
+    pinned context fragments) to the package skeleton later without
+    pushing those into a user-owned dir.
     """
-    cwd = _LITE_CWDS.get(lite)
-    if cwd is None:
+    if lite not in _LITE_MODES:
         raise LiteEnvironmentError(
-            f"--lite {lite!r} unknown. Supported: {sorted(_LITE_CWDS)}"
+            f"--lite {lite!r} unknown. Supported: {list(_LITE_MODES)}"
         )
-    if not cwd.is_dir():  # only fires on broken installs
+    skel = _LITE_PACKAGE_SKEL / lite
+    if not skel.is_dir():  # only fires on broken installs
         raise LiteEnvironmentError(
-            f"--lite mode {lite!r} cwd {cwd} missing — llmx install corrupt?"
+            f"--lite mode {lite!r} skeleton {skel} missing — llmx install corrupt?"
         )
-    return str(cwd)
+    runtime = _LITE_RUNTIME_ROOT / lite
+    runtime.mkdir(parents=True, exist_ok=True)
+    return str(runtime)
 
 
 def cli_chat(
@@ -366,21 +375,27 @@ def cli_chat(
         import signal as _signal
         import threading as _threading
 
-        # Lite mode: run from the encapsulated package cwd. No HOME redirect —
-        # auth lives in the user's normal HOME, where each CLI already keeps
-        # it. Per-CLI flags (--ignore-user-config / --skip-trust /
-        # --mcp-config '{}') already strip user-config + project context;
-        # the empty cwd handles AGENTS.md / GEMINI.md / CLAUDE.md autoload.
+        # Lite mode: run from the runtime cwd (auto-bootstrapped from the
+        # package skeleton). No HOME redirect — auth lives in the user's
+        # normal HOME. Per-CLI flags (--ignore-user-config / --skip-trust /
+        # --mcp-config '{}') strip user-config + project context; the
+        # empty cwd handles AGENTS.md / GEMINI.md / CLAUDE.md autoload.
+        #
+        # Env scrubs:
+        #   CLAUDE_SESSION_ID — Claude Code injects this into every subprocess.
+        #     claude-cli writes <cwd>/.claude/current-session-id when it sees
+        #     it (even with --no-session-persistence, the marker propagates
+        #     for prepare-commit-msg). Drop it so the runtime cwd stays
+        #     ephemeral instead of accumulating session history.
+        #   ANTHROPIC_API_KEY (claude-cli only) — force OAuth subscription.
         env = None
         cwd = None
         if lite:
             cwd = _lite_cwd(lite)
             logger.debug(f"[cli] lite={lite} cwd={cwd}")
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_ID"}
             if binary == "claude":
-                # claude-cli OAuth path — drop ANTHROPIC_API_KEY so the
-                # subscription is used (api-key path can fail with low
-                # credit balance while the subscription works fine).
-                env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+                env.pop("ANTHROPIC_API_KEY", None)
                 logger.debug("[cli] lite claude (OAuth, no API key)")
 
         proc = subprocess.Popen(
