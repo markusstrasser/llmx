@@ -3,8 +3,13 @@
 50% cost discount on async processing (24h target, usually faster).
 Uses inline requests (not GCS file upload) — sufficient for <20MB batches.
 
-Key limitation: inline responses may not preserve input order (googleapis/python-genai#1909).
-We embed a correlation key in each request's system instruction to match responses back.
+Inline responses don't preserve input order (googleapis/python-genai#1909).
+Each InlinedRequest carries a `metadata: dict[str, str]` slot that's mirrored
+onto the matching InlinedResponse — that's the supported correlation channel.
+We stuff the caller's key under metadata['llmx_key'] on submit and read it
+back on fetch. Falls back to positional matching only when metadata is absent
+(older SDK / API versions), and warns loudly so the corruption surface is
+visible.
 """
 
 import os
@@ -27,9 +32,8 @@ TERMINAL_STATES = {
     "JOB_STATE_EXPIRED",
 }
 
-# Correlation prefix embedded in system instructions
-_KEY_PREFIX = "[LLMX_BATCH_KEY:"
-_KEY_SUFFIX = "]"
+# Metadata key used to round-trip the caller's request key.
+_METADATA_KEY = "llmx_key"
 
 
 def _get_api_key() -> str:
@@ -97,31 +101,23 @@ def parse_input_jsonl(path: str) -> list[BatchRequest]:
 def _build_inline_request(req: BatchRequest) -> dict:
     """Convert a BatchRequest to a Gemini inline request dict.
 
-    Embeds correlation key in system instruction so we can match
-    responses back to requests even if order isn't preserved.
+    Round-trips the caller's request key through the InlinedRequest.metadata
+    slot, which the API mirrors onto the matching InlinedResponse so we can
+    correlate even when responses come back out of order.
     """
-    # Build system instruction with embedded key
-    key_marker = f"{_KEY_PREFIX}{req.key}{_KEY_SUFFIX}"
+    config: dict = {}
     if req.system:
-        system_text = f"{key_marker} {req.system}"
-    else:
-        system_text = f"{key_marker} Follow the user's instructions."
+        config["system_instruction"] = {"parts": [{"text": req.system}]}
 
-    result = {
+    result: dict = {
         "contents": [{"parts": [{"text": req.prompt}], "role": "user"}],
-        "config": {
-            "system_instruction": {"parts": [{"text": system_text}]},
-        },
+        "metadata": {_METADATA_KEY: req.key},
     }
+    if config:
+        result["config"] = config
+    if req.model:
+        result["model"] = req.model
     return result
-
-
-def _extract_key_from_response(text: str, index: int) -> str:
-    """Try to extract correlation key from response text. Fall back to index."""
-    # The key won't be in response text — it's in system instruction.
-    # We rely on positional matching as primary, with key extraction as backup
-    # if we can parse the job's request data.
-    return str(index)
 
 
 def submit(
@@ -181,12 +177,19 @@ def status(job_name: str) -> dict:
 def fetch(job_name: str, original_keys: Optional[list[str]] = None) -> list[BatchResult]:
     """Fetch results from a completed batch job.
 
+    Correlates each response back to its request via the
+    InlinedResponse.metadata['llmx_key'] slot that submit() populates.
+    Falls back to positional matching only if the metadata channel is
+    missing (older API/SDK), and warns — that path can corrupt results
+    when the API doesn't preserve order.
+
     Args:
         job_name: The batch job name/ID
-        original_keys: Keys from the original requests (for correlation).
-                       If provided, used for positional matching.
+        original_keys: Optional keys from the original requests, used only
+                       to size the positional fallback. New callers should
+                       not need this — keys round-trip via metadata.
 
-    Returns list of BatchResult objects.
+    Returns list of BatchResult objects (caller's original key on each).
     """
     client = _get_client()
     job = client.batches.get(name=job_name)
@@ -197,9 +200,17 @@ def fetch(job_name: str, original_keys: Optional[list[str]] = None) -> list[Batc
 
     results = []
     responses = job.dest.inlined_responses if hasattr(job, "dest") and job.dest else []
+    fell_back_to_positional = False
 
     for i, resp in enumerate(responses):
-        key = original_keys[i] if original_keys and i < len(original_keys) else str(i)
+        # Prefer metadata round-trip; fall back to positional with a loud warning.
+        meta = getattr(resp, "metadata", None)
+        key: Optional[str] = None
+        if isinstance(meta, dict):
+            key = meta.get(_METADATA_KEY)
+        if key is None:
+            fell_back_to_positional = True
+            key = original_keys[i] if original_keys and i < len(original_keys) else str(i)
 
         if hasattr(resp, "response") and resp.response:
             try:
@@ -212,6 +223,12 @@ def fetch(job_name: str, original_keys: Optional[list[str]] = None) -> list[Batc
         else:
             results.append(BatchResult(key=key, error="No response or error in result"))
 
+    if fell_back_to_positional and responses:
+        logger.warn(
+            f"[batch:WARN] {job_name} responses missing metadata['{_METADATA_KEY}']; "
+            "fell back to positional matching. If response order isn't preserved "
+            "(googleapis/python-genai#1909), correlations may be wrong."
+        )
     return results
 
 
