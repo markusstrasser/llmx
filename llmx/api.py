@@ -96,10 +96,16 @@ class LLM:
         """Send chat message and return Response."""
         # CLI backend — try CLI first, fall back to API
         if self._cli_provider and not kwargs.pop("api_only", False):
-            schema = kwargs.get("response_format")
-            reasoning_effort = kwargs.get("reasoning_effort")
+            # Per-call kwargs override stored self.kwargs (e.g. someone built
+            # an LLM with default timeout but passes max_tokens=65536 on a
+            # specific .chat() call).
+            merged = {**self.kwargs, **kwargs}
+            schema = merged.get("response_format")
+            reasoning_effort = merged.get("reasoning_effort")
+            max_tokens = merged.get("max_tokens")
             fallback_reason = needs_api_fallback(
-                self._cli_provider, schema, system, self.search, False, reasoning_effort
+                self._cli_provider, schema, system, self.search, False,
+                reasoning_effort, max_tokens,
             )
             if not fallback_reason:
                 start_time = time.time()
@@ -107,7 +113,7 @@ class LLM:
                     self._cli_provider,
                     prompt,
                     self.model,
-                    kwargs.get("timeout", 300),
+                    merged.get("timeout", 300),
                     schema=schema,
                     system=system,
                 )
@@ -269,8 +275,15 @@ def chat(
 ) -> Response:
     """Simple chat function - one-shot calls"""
     api_only = kwargs.pop("api_only", False)
-    llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **kwargs)
-    return llm.chat(prompt, system=system, api_only=api_only)
+    # Pull init-time fields out so LLM.__init__ doesn't see them as **kwargs
+    # carried into self.kwargs (timeout/max_tokens/reasoning_effort/response_format
+    # are per-call options, not constructor state).
+    init_kwargs = {k: v for k, v in kwargs.items() if k not in {
+        "timeout", "max_tokens", "reasoning_effort", "response_format",
+    }}
+    call_kwargs = {k: v for k, v in kwargs.items() if k not in init_kwargs}
+    llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **init_kwargs)
+    return llm.chat(prompt, system=system, api_only=api_only, **call_kwargs)
 
 
 def batch(
