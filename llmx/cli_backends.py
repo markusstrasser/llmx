@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 from typing import Optional
 
 from .logger import logger
@@ -49,19 +50,19 @@ CLI_PROVIDER_ALIASES_LITE = {
     "anthropic": "claude-cli",
 }
 
-# Empty cwd reused across calls — prevents AGENTS.md / GEMINI.md autoload from
-# the user's project tree. Initialized as a git repo so codex --skip-git-repo-check
-# isn't strictly needed, but we pass it anyway for safety.
-_LITE_CWD = os.path.expanduser("~/.cache/llmx/empty-cwd")
-
-# Lite-mode HOME / CODEX_HOME selectors.
-_LITE_GEMINI_HOMES = {
-    "bare": os.path.expanduser("~/.gemini-bare"),
-    "research": os.path.expanduser("~/.gemini-research"),
-}
-_LITE_CODEX_HOMES = {
-    "bare": os.path.expanduser("~/.codex-bare"),
-    "research": os.path.expanduser("~/.codex-research"),
+# Lite cwd dirs — shipped inside the llmx package, one per mode. Used for
+# all three CLI backends (codex, claude, gemini); per-tool isolation comes
+# from CLI flags (--ignore-user-config, --skip-trust, --mcp-config, etc.),
+# not from separate HOME / CODEX_HOME redirects. Auth state lives in the
+# user's normal HOME, where each CLI already keeps it.
+#
+# The dirs are intentionally empty (no AGENTS.md, no GEMINI.md, no
+# CLAUDE.md, no project state). The orchestrator that calls llmx is
+# responsible for stuffing project context into the prompt.
+_LITE_PACKAGE_ROOT = Path(__file__).resolve().parent / "lite"
+_LITE_CWDS = {
+    "bare": _LITE_PACKAGE_ROOT / "bare",
+    "research": _LITE_PACKAGE_ROOT / "research",
 }
 
 LITE_PROMPT_PREFIX = {
@@ -209,54 +210,33 @@ def needs_api_fallback(
 
 
 class LiteEnvironmentError(RuntimeError):
-    """Raised when --lite is requested but its profile dirs aren't set up.
+    """Raised when --lite mode {!r} doesn't have a packaged cwd.
 
-    Lite mode depends on three on-disk profiles to keep the subprocess from
-    inheriting the caller's project context (AGENTS.md / GEMINI.md autoload,
-    bundled MCPs, plugins). When any of them is missing, we fail loud with a
-    setup hint instead of silently falling through to the full-fat profile.
+    Should never fire for shipped modes (bare/research) since their dirs
+    travel with the package. Catches typos and forward-compat slips.
     """
 
 
-def _ensure_lite_profile(binary: str, lite: str) -> tuple[str, str]:
-    """Return (cwd, home_path) for a lite invocation, creating empty cwd as needed.
+def _lite_cwd(lite: str) -> str:
+    """Return the encapsulated cwd for the requested lite mode.
 
-    Empty cwd is auto-created (it has no per-binary state). The HOME / CODEX_HOME
-    profile is NOT auto-created — those dirs need user-side config (settings,
-    auth) and a fresh empty dir would defeat the lite purpose differently
-    (gemini/codex would re-run their first-launch flows). Raise LiteEnvironmentError
-    instead so the caller sees actionable setup output.
+    The cwd is a fixed empty directory inside the llmx package — same one
+    used by all three CLI backends. Isolation from project context comes
+    from running there (no AGENTS.md / GEMINI.md / CLAUDE.md autoload);
+    isolation from user config comes from per-CLI flags
+    (--ignore-user-config, --skip-trust, --mcp-config '{}'). Auth still
+    flows through the user's normal HOME — that's where each CLI keeps it.
     """
-    try:
-        os.makedirs(_LITE_CWD, exist_ok=True)
-    except OSError as exc:
+    cwd = _LITE_CWDS.get(lite)
+    if cwd is None:
         raise LiteEnvironmentError(
-            f"--lite requires {_LITE_CWD} (auto-created) but mkdir failed: {exc}"
-        ) from exc
-
-    home: Optional[str]
-    if binary == "gemini":
-        home = _LITE_GEMINI_HOMES.get(lite)
-    elif binary == "codex":
-        home = _LITE_CODEX_HOMES.get(lite)
-    elif binary == "claude":
-        # claude-cli reuses the user's ~/.claude (OAuth lives there); the
-        # isolation comes from --disable-slash-commands + empty mcp-config,
-        # not from a separate HOME. No profile dir to validate.
-        return _LITE_CWD, ""
-    else:
-        return _LITE_CWD, ""
-
-    if not home:
-        raise LiteEnvironmentError(
-            f"--lite {lite!r} not supported for {binary} (no profile mapping)"
+            f"--lite {lite!r} unknown. Supported: {sorted(_LITE_CWDS)}"
         )
-    if not os.path.isdir(home):
+    if not cwd.is_dir():  # only fires on broken installs
         raise LiteEnvironmentError(
-            f"--lite needs profile dir {home} for {binary} but it doesn't exist.\n"
-            f"Set it up by running {binary} once with that HOME, then re-run."
+            f"--lite mode {lite!r} cwd {cwd} missing — llmx install corrupt?"
         )
-    return _LITE_CWD, home
+    return str(cwd)
 
 
 def cli_chat(
@@ -285,7 +265,7 @@ def cli_chat(
 
     # Note: lite-mode prompt prefix is injected in cli.py before chat() so
     # the Anthropic API path gets it too. Don't double-prefix here.
-    _ = lite  # used for HOME / cwd routing below
+    _ = lite  # used for cwd routing below
 
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
@@ -386,34 +366,22 @@ def cli_chat(
         import signal as _signal
         import threading as _threading
 
-        # Lite mode: route HOME / CODEX_HOME to a stripped-down profile and
-        # run from an empty cwd so no project AGENTS.md / GEMINI.md is autoloaded.
-        # Default (non-lite) gemini path keeps the original ~/.gemini-bare HOME
-        # override for backward compatibility.
+        # Lite mode: run from the encapsulated package cwd. No HOME redirect —
+        # auth lives in the user's normal HOME, where each CLI already keeps
+        # it. Per-CLI flags (--ignore-user-config / --skip-trust /
+        # --mcp-config '{}') already strip user-config + project context;
+        # the empty cwd handles AGENTS.md / GEMINI.md / CLAUDE.md autoload.
         env = None
         cwd = None
         if lite:
-            # Hard-fail when the lite profile isn't set up. Silent fall-through
-            # to cwd=None / no HOME override would inherit the project's
-            # AGENTS.md / GEMINI.md / full ~/.codex profile and defeat the
-            # entire point of lite (cost-saving via stripped-down context).
-            cwd, home = _ensure_lite_profile(binary, lite)
-            if binary == "gemini" and home:
-                env = {**os.environ, "HOME": home}
-                logger.debug(f"[cli] lite={lite} HOME={home}")
-            elif binary == "codex" and home:
-                env = {**os.environ, "CODEX_HOME": home}
-                logger.debug(f"[cli] lite={lite} CODEX_HOME={home}")
-            elif binary == "claude":
-                # Use OAuth subscription, not the API key path (which can hit
-                # low-credit failures while the subscription is fine).
+            cwd = _lite_cwd(lite)
+            logger.debug(f"[cli] lite={lite} cwd={cwd}")
+            if binary == "claude":
+                # claude-cli OAuth path — drop ANTHROPIC_API_KEY so the
+                # subscription is used (api-key path can fail with low
+                # credit balance while the subscription works fine).
                 env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-                logger.debug(f"[cli] lite={lite} claude (OAuth, no API key)")
-        elif binary == "gemini":
-            bare_home = os.path.join(os.path.expanduser("~"), ".gemini-bare")
-            if os.path.isdir(bare_home):
-                env = {**os.environ, "HOME": bare_home}
-                logger.debug(f"[cli] using bare HOME={bare_home}")
+                logger.debug("[cli] lite claude (OAuth, no API key)")
 
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
