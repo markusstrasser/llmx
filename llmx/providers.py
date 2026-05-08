@@ -202,6 +202,13 @@ PROVIDER_CONFIGS = {
         "supports_streaming": False,
         "api_fallback": "openai",
     },
+    "claude-cli": {
+        "model": None,
+        "env_var": None,  # Claude Code OAuth subscription auth
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": False,
+        "api_fallback": "anthropic",
+    },
 }
 
 
