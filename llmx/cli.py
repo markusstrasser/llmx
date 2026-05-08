@@ -785,6 +785,17 @@ def chat_cmd(
             logger.info(f"Falling back to {fallback_model} after {error.error_type}")
             try:
                 fb_provider = infer_provider_from_model(fallback_model) or final_provider
+                # If the fallback model isn't on the lite allowlist, drop --lite
+                # for the retry. Inheriting lite would re-hit the allowlist gate
+                # and fail before the fallback model gets a chance, defeating
+                # the whole point of --fallback.
+                fb_lite = lite if (not lite or lite_model_allowed(fallback_model)) else None
+                if lite and fb_lite is None:
+                    click.echo(
+                        f"[llmx:FALLBACK] dropping --lite for {fallback_model} "
+                        "(not on lite allowlist) — retry runs via API transport",
+                        err=True,
+                    )
                 _result_text = chat(
                     prompt_text,
                     fb_provider,
@@ -801,7 +812,7 @@ def chat_cmd(
                     system=system,
                     schema=schema,
                     max_tokens=max_tokens,
-                    lite=lite,
+                    lite=fb_lite,
                 )
                 return  # Fallback succeeded
             except Exception as fb_error:
