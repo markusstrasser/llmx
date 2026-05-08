@@ -77,6 +77,38 @@ LITE_PROMPT_PREFIX = {
     ),
 }
 
+
+def _research_mcp_dir() -> Optional[str]:
+    """Resolve the research-mcp project dir.
+
+    Order: $LLMX_RESEARCH_MCP_DIR → developer default at ~/Projects/research-mcp
+    if it exists → None. Returning None makes --lite research raise
+    LiteEnvironmentError so the user gets a setup hint instead of a
+    cryptic 'uv run --directory' failure inside the subprocess.
+    """
+    env_dir = os.environ.get("LLMX_RESEARCH_MCP_DIR")
+    if env_dir and os.path.isdir(env_dir):
+        return env_dir
+    if env_dir:
+        # User set the env var but the path is wrong — surface that.
+        return env_dir
+    default = os.path.expanduser("~/Projects/research-mcp")
+    if os.path.isdir(default):
+        return default
+    return None
+
+
+def _research_mcp_args() -> list[str]:
+    """uv invocation args for the research MCP. Raises if not configured."""
+    target = _research_mcp_dir()
+    if not target:
+        raise LiteEnvironmentError(
+            "--lite research needs the research-mcp project. Set "
+            "LLMX_RESEARCH_MCP_DIR=/path/to/research-mcp or clone it to "
+            "~/Projects/research-mcp."
+        )
+    return ["run", "--directory", target, "research-mcp"]
+
 # Lite mode is restricted to three frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
@@ -286,11 +318,10 @@ def cli_chat(
                 # bundled plugins on each launch. Inject MCPs via -c overrides.
                 cmd.append("--ignore-user-config")
                 if lite == "research":
+                    args_json = json.dumps(_research_mcp_args())
                     cmd.extend([
                         "-c", 'mcp_servers.research.command="uv"',
-                        "-c",
-                        'mcp_servers.research.args=["run","--directory",'
-                        '"/Users/alien/Projects/research-mcp","research-mcp"]',
+                        "-c", f"mcp_servers.research.args={args_json}",
                     ])
             if model:
                 cmd.extend(["-m", model])
@@ -323,11 +354,16 @@ def cli_chat(
                 "--disable-slash-commands",
             ]
             if lite == "research":
+                mcp_cfg = json.dumps({
+                    "mcpServers": {
+                        "research": {
+                            "command": "uv",
+                            "args": _research_mcp_args(),
+                        }
+                    }
+                })
                 cmd.extend([
-                    "--mcp-config",
-                    '{"mcpServers":{"research":{"command":"uv","args":'
-                    '["run","--directory","/Users/alien/Projects/research-mcp",'
-                    '"research-mcp"]}}}',
+                    "--mcp-config", mcp_cfg,
                     "--allowedTools", "mcp__research",
                 ])
             else:
