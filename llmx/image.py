@@ -1,10 +1,12 @@
-"""Image generation using Gemini 3 Pro Image (Nano Banana Pro) API
+"""Image generation helpers for llmx.
 
-Models:
-- gemini-3-pro-image-preview: High-quality image generation with reasoning
-- gemini-3-flash-preview: Fast image generation (fallback)
+Backends:
+- Gemini 3 Pro Image (Nano Banana Pro)
+- OpenAI GPT Image 2
 
-Reference: https://ai.google.dev/gemini-api/docs/image-generation
+References:
+- https://ai.google.dev/gemini-api/docs/image-generation
+- https://platform.openai.com/docs/guides/image-generation
 """
 
 import os
@@ -13,6 +15,7 @@ import base64
 from pathlib import Path
 from typing import Optional, Literal
 from io import BytesIO
+from urllib.request import urlopen
 
 from .logger import logger
 
@@ -40,6 +43,14 @@ IMAGE_MODELS = {
 ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
 # Resolutions must be uppercase K
 RESOLUTIONS = ["1K", "2K", "4K"]
+OPENAI_IMAGE_MODELS = {
+    "image2": "gpt-image-2",
+    "gpt-image-2": "gpt-image-2",
+    "gpt-image-2-2026-04-21": "gpt-image-2-2026-04-21",
+}
+OPENAI_IMAGE_SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"]
+OPENAI_IMAGE_QUALITIES = ["auto", "low", "medium", "high"]
+OPENAI_IMAGE_FORMATS = ["png", "jpeg", "webp"]
 
 
 def check_genai_available():
@@ -52,14 +63,157 @@ def check_genai_available():
 
 
 def check_api_key() -> str:
-    """Check for Gemini API key"""
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.\n"
-            "Get a key at: https://aistudio.google.com/apikey"
-        )
+    """Check for Gemini API key (env vars + macOS Keychain)."""
+    from .providers import check_api_key as _provider_check, _get_api_key
+    _provider_check("google")  # raises RuntimeError with hint if missing
+    key = _get_api_key("google")
+    if not key:  # defense in depth — _provider_check should have raised
+        raise RuntimeError("API key not found for google after Keychain fallback")
     return key
+
+
+def check_openai_api_key() -> str:
+    """Check for OpenAI API key (env vars + macOS Keychain)."""
+    from .providers import check_api_key as _provider_check, _get_api_key
+    _provider_check("openai")
+    key = _get_api_key("openai")
+    if not key:
+        raise RuntimeError("API key not found for openai after Keychain fallback")
+    return key
+
+
+def _safe_stem(prompt: str) -> str:
+    base_name = prompt[:30].replace(" ", "_").replace("/", "-")
+    return "".join(c for c in base_name if c.isalnum() or c in "_-") or "llmx_image"
+
+
+def _output_path_for_index(output_path: Optional[str], prompt: str, index: int, total: int, suffix: str) -> Path:
+    if output_path:
+        path = Path(output_path)
+        if total == 1:
+            return path
+        return path.with_name(f"{path.stem}_{index + 1}{path.suffix or suffix}")
+    return Path(f"{_safe_stem(prompt)}_{index + 1}{suffix}")
+
+
+def _write_openai_image_item(item, output_path: Optional[str], prompt: str, index: int, total: int, output_format: str) -> Path:
+    suffix = f".{'jpg' if output_format == 'jpeg' else output_format}"
+    saved_path = _output_path_for_index(output_path, prompt, index, total, suffix)
+    saved_path.parent.mkdir(parents=True, exist_ok=True)
+
+    image_b64 = getattr(item, "b64_json", None)
+    image_url = getattr(item, "url", None)
+    if image_b64:
+        saved_path.write_bytes(base64.b64decode(image_b64))
+    elif image_url:
+        with urlopen(image_url, timeout=60) as response:
+            saved_path.write_bytes(response.read())
+    else:
+        raise RuntimeError("OpenAI image response did not include b64_json or url")
+
+    logger.info(f"Image saved to {saved_path}")
+    return saved_path
+
+
+def generate_openai_image(
+    prompt: str,
+    output_path: Optional[str] = None,
+    model: str = "gpt-image-2",
+    input_images: Optional[list[str]] = None,
+    size: str = "auto",
+    quality: str = "auto",
+    output_format: str = "png",
+    input_fidelity: Optional[str] = None,
+    n: int = 1,
+) -> list[Path]:
+    """
+    Generate or edit images using OpenAI GPT Image models.
+
+    Args:
+        prompt: Text description of the image to generate or edit
+        output_path: Path to save the image; for n>1, _1/_2 suffixes are added
+        model: OpenAI image model, default gpt-image-2
+        input_images: Optional source images for edit/reference workflows
+        size: auto, 1024x1024, 1536x1024, or 1024x1536
+        quality: auto, low, medium, or high
+        output_format: png, jpeg, or webp
+        input_fidelity: Optional high/low edit fidelity hint for models that accept it
+        n: Number of output images
+
+    Returns:
+        Paths to saved images.
+    """
+    check_openai_api_key()
+
+    if size not in OPENAI_IMAGE_SIZES:
+        raise ValueError(f"Invalid OpenAI size: {size}. Valid: {OPENAI_IMAGE_SIZES}")
+    if quality not in OPENAI_IMAGE_QUALITIES:
+        raise ValueError(f"Invalid OpenAI quality: {quality}. Valid: {OPENAI_IMAGE_QUALITIES}")
+    if output_format not in OPENAI_IMAGE_FORMATS:
+        raise ValueError(f"Invalid OpenAI output format: {output_format}. Valid: {OPENAI_IMAGE_FORMATS}")
+    if input_fidelity is not None and input_fidelity not in {"high", "low"}:
+        raise ValueError("input_fidelity must be 'high' or 'low'")
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
+    from openai import OpenAI
+
+    model_name = OPENAI_IMAGE_MODELS.get(model, model)
+    client = OpenAI()
+    files = []
+
+    logger.info(f"Generating image with {model_name}", {
+        "backend": "openai",
+        "mode": "edit" if input_images else "generate",
+        "size": size,
+        "quality": quality,
+        "format": output_format,
+        "n": n,
+        "prompt_length": len(prompt),
+    })
+
+    try:
+        if input_images:
+            for image_path in input_images:
+                path = Path(image_path)
+                if not path.is_file():
+                    raise FileNotFoundError(f"Input image not found: {image_path}")
+                files.append(path.open("rb"))
+
+            edit_kwargs = {
+                "model": model_name,
+                "image": files if len(files) > 1 else files[0],
+                "prompt": prompt,
+                "n": n,
+                "size": size,
+                "quality": quality,
+                "output_format": output_format,
+            }
+            if input_fidelity is not None:
+                edit_kwargs["input_fidelity"] = input_fidelity
+            response = client.images.edit(**edit_kwargs)
+        else:
+            response = client.images.generate(
+                model=model_name,
+                prompt=prompt,
+                n=n,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+            )
+    finally:
+        for f in files:
+            f.close()
+
+    data = getattr(response, "data", None) or []
+    if not data:
+        logger.warn("No image was generated in the response")
+        return []
+
+    return [
+        _write_openai_image_item(item, output_path, prompt, index, len(data), output_format)
+        for index, item in enumerate(data)
+    ]
 
 
 def generate_image(
@@ -178,10 +332,7 @@ def generate_image(
                 if output_path:
                     saved_path = Path(output_path)
                 else:
-                    # Auto-generate filename
-                    base_name = prompt[:30].replace(" ", "_").replace("/", "-")
-                    base_name = "".join(c for c in base_name if c.isalnum() or c in "_-")
-                    saved_path = Path(f"{base_name}_{model}.png")
+                    saved_path = Path(f"{_safe_stem(prompt)}_{model}.png")
 
                 # Ensure parent directory exists
                 saved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,4 +459,7 @@ Output the raw SVG code starting with <svg and ending with </svg>."""
 
 def list_models():
     """List available image generation models"""
-    return IMAGE_MODELS
+    return {
+        "google": IMAGE_MODELS,
+        "openai": OPENAI_IMAGE_MODELS,
+    }

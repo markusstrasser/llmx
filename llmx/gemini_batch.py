@@ -33,12 +33,12 @@ _KEY_SUFFIX = "]"
 
 
 def _get_api_key() -> str:
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    """Resolve Gemini API key via env vars + macOS Keychain."""
+    from .providers import check_api_key as _provider_check, _get_api_key as _provider_get
+    _provider_check("google")  # raises RuntimeError with hint if missing
+    key = _provider_get("google")
     if not key:
-        raise RuntimeError(
-            "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY.\n"
-            "Get a key at: https://aistudio.google.com/apikey"
-        )
+        raise RuntimeError("API key not found for google after Keychain fallback")
     return key
 
 
