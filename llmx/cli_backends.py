@@ -305,7 +305,10 @@ def cli_chat(
             if lite:
                 # Lite mode: skip config.toml entirely so codex doesn't re-enable
                 # bundled plugins on each launch. Inject MCPs via -c overrides.
+                # --ignore-rules (codex 0.122, PR #18646) strips project AGENTS.md
+                # in addition to user config — pairs with empty cwd.
                 cmd.append("--ignore-user-config")
+                cmd.append("--ignore-rules")
                 if lite == "research":
                     args_json = json.dumps(_research_mcp_args())
                     cmd.extend([
