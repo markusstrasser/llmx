@@ -115,6 +115,7 @@ MODEL_RESTRICTIONS = {
     "gemini-3.1-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     "gemini-3-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     "gemini-3-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
+    "gemini-3.5-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     "gemini-3.1-flash-lite": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
     # OpenAI GPT-5.3 (Mar 2026): "Instant" variant, reduced hallucination, max reasoning_effort=medium
     "gpt-5.3": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["medium"], "default_effort": "medium"},
@@ -259,7 +260,7 @@ def _normalize_model(provider: str, model: str) -> str:
 
 # Known models for typo detection
 _KNOWN_MODELS = {
-    "google": ["gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
+    "google": ["gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
     "openai": ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.3", "gpt-5.2", "gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-pro", "gpt-5-codex"],
     "xai": ["grok-4", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-beta"],
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
