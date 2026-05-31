@@ -188,14 +188,8 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.5),
         "supports_streaming": True,
     },
-    # CLI-backed providers: shell out to subscription CLIs instead of per-token API
-    "gemini-cli": {
-        "model": None,  # CLI uses its own default
-        "env_var": None,  # Google account auth
-        "temperature_range": (0.0, 2.0),
-        "supports_streaming": False,
-        "api_fallback": "google",
-    },
+    # CLI-backed providers: shell out to subscription CLIs instead of per-token API.
+    # (gemini-cli removed 2026-05-31 — free Gemini CLI tier retired; google → paid API.)
     "codex-cli": {
         "model": None,
         "env_var": None,  # ChatGPT subscription auth

@@ -1,11 +1,15 @@
-"""CLI-backed providers: gemini-cli, codex-cli.
+"""CLI-backed providers: codex-cli, claude-cli.
 
-Shell out to Gemini CLI / Codex CLI instead of API for subscription/free-tier pricing.
+Shell out to Codex CLI / Claude Code instead of API for subscription pricing.
 Fall back to API transparently when CLI can't handle requested features.
 
+Gemini routing was removed 2026-05-31: Google retired the free Gemini CLI
+consumer tier (Antigravity migration, hard cutoff 2026-06-18), and the
+replacement `agy` CLI can't pin a model headlessly (print mode is locked to
+the account's default). Google now routes straight to the paid Gemini
+Developer API. See ~/.claude/rules/llmx-routing.md.
+
 CLI flag reference (verified 2026-03):
-  gemini -p/--prompt <text> [-m <model>] [-o/--output-format text|json|stream-json]
-         stdin is prepended to prompt when both provided
   codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
          reads stdin when PROMPT is "-" or omitted
 """
@@ -23,10 +27,6 @@ from .logger import logger
 
 # CLI provider configs — kept separate from PROVIDER_CONFIGS (different lifecycle)
 CLI_PROVIDERS = {
-    "gemini-cli": {
-        "binary": "gemini",
-        "api_fallback": "google",
-    },
     "codex-cli": {
         "binary": "codex",
         "api_fallback": "openai",
@@ -37,15 +37,13 @@ CLI_PROVIDERS = {
     },
 }
 
-# Prefer subscription/free CLIs for logical providers when available.
-# Default routing: gemini-cli for google. OpenAI → codex-cli only in --lite mode
-# (codex with full MCP load = 37K context overhead + 10s startup; lite profile
-# disables MCPs and loads in ~1s).
-CLI_PROVIDER_ALIASES = {
-    "google": "gemini-cli",
-}
+# Prefer subscription CLIs for logical providers when available.
+# Google has NO CLI alias — it always routes to the paid Gemini API (the free
+# gemini-cli consumer tier was retired 2026-06-18). OpenAI/Anthropic route to
+# codex-cli/claude-cli only in --lite mode (full MCP load = ~37K context
+# overhead + ~10s startup; lite profile disables MCPs and loads in ~1s).
+CLI_PROVIDER_ALIASES = {}
 CLI_PROVIDER_ALIASES_LITE = {
-    "google": "gemini-cli",
     "openai": "codex-cli",
     "anthropic": "claude-cli",
 }
@@ -120,9 +118,11 @@ def _research_mcp_args() -> list[str]:
 # Lite mode is restricted to three frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
-# research-mcp only). Gemini-3.1-pro is excluded — capacity-limited / not
-# accessible without Pro sub at the time of writing; gemini-3-flash-preview
-# is the fast tier.
+# research-mcp only); gpt-5.5 routes via codex-cli. gemini-3-flash-preview
+# stays allowed for back-compat but no longer has a CLI backend — with the
+# free gemini-cli retired (2026-06-18) it routes to the paid Gemini API and
+# --lite only contributes the no-tools prompt prefix (no cwd/MCP stripping,
+# no cost saving) for Google.
 LITE_ALLOWED_MODELS = {
     "gpt-5.5",
     "gemini-3-flash-preview",
@@ -283,23 +283,7 @@ def cli_chat(
     temp_schema_path = None
 
     try:
-        if binary == "gemini":
-            # gemini -p <prompt> -o text [-m <model>]
-            # When prompt is large, pipe via stdin and use -p with short instruction
-            if use_stdin:
-                cmd = ["gemini", "-p", "Respond to the input provided on stdin.", "-o", "text"]
-                stdin_input = prompt
-            else:
-                cmd = ["gemini", "-p", prompt, "-o", "text"]
-            if lite:
-                # Empty-cwd lite profile isn't in gemini's trusted-folders list;
-                # --skip-trust bypasses the headless rejection.
-                cmd.append("--skip-trust")
-            if model:
-                # Strip gemini/ prefix — CLI doesn't want it
-                clean_model = model.removeprefix("gemini/")
-                cmd.extend(["-m", clean_model])
-        elif binary == "codex":
+        if binary == "codex":
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
             cmd = ["codex", "exec", "--skip-git-repo-check"]
             if lite:
