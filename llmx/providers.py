@@ -614,13 +614,18 @@ def _normalize_usage(provider: str, raw) -> dict:
 
 def _google_chat(prompt, model, system, temperature, timeout, stream,
                  max_tokens, search, schema, reasoning_effort,
-                 usage_out: Optional[dict] = None):
+                 usage_out: Optional[dict] = None, service_tier: Optional[str] = None):
     """Google Gemini via google-genai SDK. Returns response text.
 
     If usage_out is provided, it's populated in-place with the normalized
     token dict from _normalize_usage(). Out-param keeps the public string
     return type so the threaded SDK dispatcher and legacy callers don't
     need to unpack a tuple.
+
+    service_tier ('flex' for the 50% best-effort discount) is only set when
+    requested — flex has variable latency (best-effort queue), so it's
+    opt-in via `--flex` for non-interactive dispatch. Requires
+    google-genai>=2.7 (older SDKs reject the field with extra_forbidden).
     """
     import time as _time
     from .usage_log import log_usage
@@ -632,6 +637,8 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
     )
     config = types.GenerateContentConfig(temperature=temperature)
 
+    if service_tier:
+        config.service_tier = service_tier
     if system:
         config.system_instruction = system
     if max_tokens:
@@ -860,11 +867,15 @@ def chat(
     schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
     lite: Optional[str] = None,
+    service_tier: Optional[str] = None,
 ) -> Optional[str]:
     """Execute chat with single provider.  Returns response text (or None).
 
     `lite` ('bare' or 'research') routes via stripped-down CLI profile —
     no MCPs (bare) or research-MCP only (research). Cost-saving mode.
+
+    `service_tier` ('flex') applies only to the google API path — 50%
+    best-effort discount, variable latency (opt-in via `--flex`).
     """
     start_time = time.time()
     # Auto-upgrade deprecated model names before any other logic
@@ -1001,6 +1012,7 @@ def chat(
                         temperature=adjusted_temp, timeout=timeout, stream=stream,
                         max_tokens=max_tokens, search=search, schema=schema,
                         reasoning_effort=reasoning_effort,
+                        service_tier=service_tier,
                     )
                 else:
                     if search:
@@ -1187,6 +1199,7 @@ def compare(
                         temperature=adjusted_temp, timeout=timeout, stream=False,
                         max_tokens=None, search=search, schema=None,
                         reasoning_effort=effective_effort,
+                        service_tier=service_tier,
                     )
                 finally:
                     sys.stdout = old_stdout

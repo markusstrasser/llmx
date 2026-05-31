@@ -488,6 +488,16 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
         "Routes openai→codex-cli too. Empty cwd, no project context."
     ),
 )
+@click.option(
+    "--flex",
+    is_flag=True,
+    default=False,
+    help=(
+        "Google only: use the Flex service tier (50% cheaper, best-effort "
+        "variable latency). For non-interactive/background dispatch — not "
+        "latency-sensitive interactive calls."
+    ),
+)
 @click.pass_context
 def chat_cmd(
     ctx,
@@ -514,6 +524,7 @@ def chat_cmd(
     output_path,
     fallback_model,
     lite,
+    flex,
 ):
     """Text generation with LLMs (default command)."""
     configure_logger(debug=debug, json_mode=json_output)
@@ -762,6 +773,7 @@ def chat_cmd(
             schema=schema,
             max_tokens=max_tokens,
             lite=lite,
+            service_tier="flex" if flex else None,
         )
 
     except KeyboardInterrupt:
@@ -813,6 +825,7 @@ def chat_cmd(
                     schema=schema,
                     max_tokens=max_tokens,
                     lite=fb_lite,
+                    service_tier="flex" if flex else None,
                 )
                 return  # Fallback succeeded
             except Exception as fb_error:

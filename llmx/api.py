@@ -165,6 +165,7 @@ class LLM:
                             search=self.search, schema=call_kwargs.get("response_format"),
                             reasoning_effort=call_kwargs.get("reasoning_effort"),
                             usage_out=usage_out,
+                            service_tier=call_kwargs.get("service_tier"),
                         )
                     else:
                         if self.search:
@@ -285,6 +286,7 @@ def chat(
     # are per-call options, not constructor state).
     init_kwargs = {k: v for k, v in kwargs.items() if k not in {
         "timeout", "max_tokens", "reasoning_effort", "response_format",
+        "service_tier",
     }}
     call_kwargs = {k: v for k, v in kwargs.items() if k not in init_kwargs}
     llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **init_kwargs)
