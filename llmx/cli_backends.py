@@ -126,7 +126,7 @@ def _research_mcp_args() -> list[str]:
 LITE_ALLOWED_MODELS = {
     "gpt-5.5",
     "gemini-3-flash-preview",
-    "claude-opus-4-7",
+    "claude-opus-4-8",
 }
 
 

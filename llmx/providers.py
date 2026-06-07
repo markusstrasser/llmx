@@ -147,7 +147,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "anthropic": {
-        "model": "claude-opus-4-6",
+        "model": "claude-opus-4-8",
         "legacy_model": "claude-sonnet-4-6",
         "env_var": "OPENROUTER_API_KEY",  # routed via OpenRouter (no Anthropic API credits)
         "temperature_range": (0.0, 1.0),
@@ -169,7 +169,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "openrouter": {
-        "model": "openai/gpt-4o",
+        "model": "openai/gpt-5.5",
         "env_var": "OPENROUTER_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -275,7 +275,7 @@ _MODEL_UPGRADES = {
     "gpt-4": "gpt-5.5",
     "gpt-4-turbo": "gpt-5.5",
     "claude-3.5-sonnet": "claude-sonnet-4-6",
-    "claude-3-opus": "claude-opus-4-6",
+    "claude-3-opus": "claude-opus-4-8",
 }
 
 
