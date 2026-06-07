@@ -153,6 +153,17 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
     },
+    # Direct Anthropic API via its OpenAI-compatible endpoint (api.anthropic.com/v1/).
+    # Opt-in with `-p anthropic-direct` — the default `anthropic` provider still
+    # routes via OpenRouter. Uses ANTHROPIC_API_KEY directly (prompt caching,
+    # native rate limits). claude-cli drops ANTHROPIC_API_KEY for its OAuth path,
+    # so this does not disturb the subscription transport.
+    "anthropic-direct": {
+        "model": "claude-opus-4-8",
+        "env_var": "ANTHROPIC_API_KEY",
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": True,
+    },
     "xai": {
         "model": "grok-4",
         "fast_model": "grok-4-1-fast-reasoning",
@@ -219,6 +230,7 @@ OPENAI_COMPAT_URLS = {
     "cerebras": "https://api.cerebras.ai/v1",
     "kimi": "https://api.moonshot.cn/v1",
     "anthropic": "https://openrouter.ai/api/v1",  # Anthropic via OpenRouter
+    "anthropic-direct": "https://api.anthropic.com/v1/",  # direct Anthropic OpenAI-compat
 }
 
 # API key overrides for providers routed through another service
@@ -260,6 +272,7 @@ _KNOWN_MODELS = {
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
     "deepseek": ["deepseek-chat"],
     "cerebras": ["qwen-3-coder-480b"],
+    "anthropic-direct": ["claude-opus-4-8"],
 }
 
 
@@ -737,7 +750,11 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    kwargs = {"model": model, "messages": messages, "temperature": temperature}
+    kwargs = {"model": model, "messages": messages}
+    # claude-opus-4-8 (and other Anthropic reasoning models) deprecate `temperature`
+    # on the OpenAI-compat endpoint — sending it 400s. Omit for anthropic-direct.
+    if provider != "anthropic-direct":
+        kwargs["temperature"] = temperature
     if max_tokens:
         kwargs["max_completion_tokens"] = max_tokens
     if reasoning_effort:
