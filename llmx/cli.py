@@ -329,19 +329,36 @@ def vision_cmd(files, prompt, model, sample, json_output, output, debug):
     is_flag=True,
     help="Enable code interpreter for data analysis",
 )
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "perplexity-agent"]),
+    default="openai",
+    help="Deep-research backend: openai (o3/o4) or perplexity-agent (Search-as-Code)",
+)
+@click.option(
+    "--preset",
+    type=click.Choice(["deep-research", "pro-search"]),
+    default="deep-research",
+    help="perplexity-agent depth (ignored for openai). pro-search ~$0.2/25s; deep-research ~$0.7/1-5min",
+)
 @click.option("-o", "--output", help="Save report to file (markdown)")
 @click.option("--debug", is_flag=True, help="Debug logging")
-def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
-    """Deep research using OpenAI o3/o4-mini.
+def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, preset, output, debug):
+    """Deep research via OpenAI o3/o4-mini (default) or Perplexity Agent API (Search-as-Code).
 
     Searches hundreds of sources and produces a detailed report with citations.
     Runs in background mode (typically takes 2-10 minutes).
+
+    Use perplexity-agent only for open-ended/exhaustive research; for bounded
+    single-hop structured pulls the cheap Exa /answer path ties it at lower cost
+    (eval: agent-infra evals/sac_bakeoff, 2026-06-10).
 
     Examples:
         llmx research "economic impact of semaglutide on healthcare"
         llmx research --mini "compare React vs Svelte in 2026"
         llmx research "analyze CRISPR patent landscape" -o report.md
-        llmx research --code-interpreter "global EV adoption trends with data"
+        llmx research --provider perplexity-agent "all FDA novel approvals in oncology 2025" -o rep.md
+        llmx research --provider perplexity-agent --preset pro-search "X" -o rep.md
     """
     configure_logger(debug=debug)
 
@@ -349,6 +366,15 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, output, debug):
     model = "o4-mini" if mini else "o3"
 
     try:
+        if provider == "perplexity-agent":
+            from .research import research_perplexity_agent
+            research_perplexity_agent(
+                prompt=prompt_text,
+                preset=preset,
+                output_file=output,
+                debug=debug,
+            )
+            return
         from .research import research
         research(
             prompt=prompt_text,
