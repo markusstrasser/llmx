@@ -83,12 +83,15 @@ def research_perplexity_agent(
 ) -> None:
     """Run deep research via the Perplexity Agent API (Search-as-Code architecture).
 
-    SaC exposes Perplexity's search stack as code-orchestrated primitives. Eval
-    (evals/sac_bakeoff, 2026-06-10) found it does NOT beat the cheap Exa /answer
-    path on bounded single-hop structured pulls (ties at ~3x cost/latency) and is
-    freshness-bound on current financials. Use this lane only for genuinely
-    open-ended / exhaustive research (the WANDR/BrowseComp regime), not as a
-    default. `deep-research` preset ~$0.7/call & 1-5 min; `pro-search` ~$0.2 & ~25s.
+    SaC exposes Perplexity's search stack as code-orchestrated primitives — but only
+    inside Perplexity's PRIVATE internal harness. Eval (evals/sac_bakeoff, 2026-06-10)
+    found the public Agent API has NO measured advantage in ANY regime: it ties the
+    cheap Exa /answer path on bounded structured pulls (~3x cost/latency) AND returns
+    recall 0 on the exhaustive CVE flagship (4 configs all abstain) where a single
+    $0.005 Exa call gets precision 1.0. This lane is PARITY-ONLY (availability, not a
+    recommendation). For real work, DIY code fan-out->verify over Exa/Brave + an
+    authoritative registry (NVD/FDA/SEC/eutils) beats it.
+    `deep-research` preset ~$0.7/call & 1-5 min; `pro-search` ~$0.2 & ~25s.
     """
     import json as _json
     import urllib.error

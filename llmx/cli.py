@@ -349,9 +349,11 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     Searches hundreds of sources and produces a detailed report with citations.
     Runs in background mode (typically takes 2-10 minutes).
 
-    Use perplexity-agent only for open-ended/exhaustive research; for bounded
-    single-hop structured pulls the cheap Exa /answer path ties it at lower cost
-    (eval: agent-infra evals/sac_bakeoff, 2026-06-10).
+    perplexity-agent is PARITY-ONLY: eval (agent-infra evals/sac_bakeoff, 2026-06-10)
+    found no advantage in any regime — it ties cheap Exa /answer on bounded pulls and
+    abstains (recall 0) on exhaustive enumeration. SaC's magic is in Perplexity's
+    private internal harness, not the public API. Prefer the openai lane or DIY
+    code-orchestration over Exa/Brave + NVD/FDA/SEC.
 
     Examples:
         llmx research "economic impact of semaglutide on healthcare"
