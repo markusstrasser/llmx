@@ -632,9 +632,12 @@ def chat_cmd(
     user_specified_temp = temperature is not None
     final_temperature = temperature if temperature is not None else 0.7
 
-    if timeout < 1 or timeout > 1800:
+    # Ceiling is a runaway/typo guard, not a real limit — xhigh on hard problems
+    # genuinely runs 30-45 min. 1h matches the wakeup-cadence ceiling; past that,
+    # background/async is the right tool, not a longer foreground wait.
+    if timeout < 1 or timeout > 3600:
         logger.error(f"Invalid timeout: {timeout}")
-        click.echo("Error: Timeout must be between 1 and 1800 seconds.", err=True)
+        click.echo("Error: Timeout must be between 1 and 3600 seconds.", err=True)
         sys.exit(1)
 
     _output_file = None
