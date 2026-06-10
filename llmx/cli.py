@@ -441,7 +441,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     "--timeout",
     default=300,
     type=int,
-    help="Timeout seconds (default: 300)",
+    help="Wall-clock timeout seconds (default: 300; auto-raised to 600/1200 for -e high/xhigh unless set explicitly)",
 )
 @click.option("--debug", is_flag=True, help="Debug logging")
 @click.option("--json", "json_output", is_flag=True, help="JSON output")
@@ -632,9 +632,9 @@ def chat_cmd(
     user_specified_temp = temperature is not None
     final_temperature = temperature if temperature is not None else 0.7
 
-    if timeout < 1 or timeout > 900:
+    if timeout < 1 or timeout > 1800:
         logger.error(f"Invalid timeout: {timeout}")
-        click.echo("Error: Timeout must be between 1 and 900 seconds.", err=True)
+        click.echo("Error: Timeout must be between 1 and 1800 seconds.", err=True)
         sys.exit(1)
 
     _output_file = None
@@ -751,6 +751,22 @@ def chat_cmd(
             else:
                 reasoning_effort_source = "user-requested-cli-may-ignore"
 
+        # High/xhigh reasoning routinely exceeds the flat 300s wall clock
+        # (GPT-5.5 high ≈ 5-10 min, xhigh ≈ 10-15 min). Scale the default;
+        # an explicit --timeout always wins. Keyed on EFFECTIVE effort so
+        # api-default high (e.g. flag-less GPT-5.5) scales too.
+        from click.core import ParameterSource
+        if ctx.get_parameter_source("timeout") == ParameterSource.DEFAULT:
+            scaled = {"high": 600, "xhigh": 1200}.get(
+                (effective_reasoning_effort or "").lower()
+            )
+            if scaled and scaled > timeout:
+                timeout = scaled
+                logger.info(
+                    f"Timeout auto-raised to {timeout}s for "
+                    f"reasoning_effort={effective_reasoning_effort}"
+                )
+
         log_payload = {
             "provider": final_provider,
             "transport": planned_transport,
@@ -759,6 +775,7 @@ def chat_cmd(
             "requested_reasoning_effort": requested_reasoning_effort,
             "effective_reasoning_effort": effective_reasoning_effort,
             "reasoning_effort_source": reasoning_effort_source,
+            "timeout": timeout,
         }
         if cli_fallback_reason:
             log_payload["cli_fallback_reason"] = cli_fallback_reason
