@@ -30,6 +30,8 @@ style = "pep440"
 fallback-version = "0.0.0"
 
 [tool.pyright]
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "basic"
 exclude = ["build/"]
 
