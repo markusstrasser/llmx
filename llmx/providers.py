@@ -732,6 +732,18 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
     return result_text
 
 
+# Effort-scaled reasoning-token reserve added on top of a user-set --max-tokens
+# for OpenAI reasoning models, so reasoning can't starve visible output. These
+# are generous floors; reasoning bills as output regardless of this ceiling.
+_REASONING_HEADROOM = {
+    "minimal": 4_000,
+    "low": 8_000,
+    "medium": 16_000,
+    "high": 32_000,
+    "xhigh": 64_000,
+}
+
+
 def _openai_chat(prompt, model, provider, system, temperature, timeout,
                  stream, max_tokens, schema, reasoning_effort,
                  usage_out: Optional[dict] = None):
@@ -766,8 +778,23 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
     # on the OpenAI-compat endpoint — sending it 400s. Omit for anthropic-direct.
     if provider != "anthropic-direct":
         kwargs["temperature"] = temperature
+    # On reasoning models, max_completion_tokens bounds reasoning AND visible
+    # output together. A user-set --max-tokens (e.g. 32K) on xhigh is silently
+    # consumed entirely by reasoning, yielding empty content with
+    # finish_reason="length" — the "returns nothing" fault. So treat --max-tokens
+    # as the VISIBLE-OUTPUT budget and add effort-scaled reasoning headroom on
+    # top; cost on a reasoning model is governed by effort, not this ceiling.
+    _is_reasoning = bool(reasoning_effort) and reasoning_effort in _REASONING_HEADROOM
     if max_tokens:
-        kwargs["max_completion_tokens"] = max_tokens
+        if _is_reasoning:
+            headroom = _REASONING_HEADROOM[reasoning_effort]
+            kwargs["max_completion_tokens"] = max_tokens + headroom
+            logger.info(
+                f"reasoning headroom: max_completion_tokens={max_tokens}+{headroom} "
+                f"(visible-output budget + {reasoning_effort} reasoning reserve)"
+            )
+        else:
+            kwargs["max_completion_tokens"] = max_tokens
     if reasoning_effort:
         kwargs["reasoning_effort"] = reasoning_effort
     if schema:
@@ -825,6 +852,22 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
             reasoning_tokens=getattr(details, "reasoning_tokens", None),
             cached_tokens=getattr(cached, "cached_tokens", None),
             latency_s=_time.time() - started,
+        )
+
+    # Reasoning-starvation detection: finish_reason="length" with empty visible
+    # output means the model spent its whole completion budget on reasoning and
+    # emitted nothing. Returning "" here is the silent "produced nothing" fault —
+    # raise instead so the caller sees a real error and exit code, not 0 bytes.
+    if finish_reason == "length" and not result_text.strip():
+        rtoks = getattr(details, "reasoning_tokens", None) if details else None
+        ctoks = getattr(usage, "completion_tokens", None) if usage else None
+        detail = f" reasoning consumed {rtoks}/{ctoks} completion tokens;" if rtoks else ""
+        raise ModelError(
+            f"Model returned no visible output — completion budget exhausted by "
+            f"reasoning before any text was emitted.{detail} Raise --max-tokens "
+            f"(it is the visible-output budget; reasoning headroom is added on top) "
+            f"or lower --reasoning-effort.",
+            provider=provider, model=model,
         )
 
     # Truncation detection
