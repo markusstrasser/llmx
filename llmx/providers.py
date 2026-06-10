@@ -283,6 +283,11 @@ _MODEL_UPGRADES = {
     "gemini-2.0-flash": "gemini-3-flash-preview",
     "gemini-pro": "gemini-3.1-pro-preview",
     "gemini-flash": "gemini-3-flash-preview",
+    # Common guesses that 404 at the API (agents drop the -preview suffix /
+    # version digit; gemini-3-pro alone caused 10 indexed 404s, 2026-06).
+    "gemini-3-pro": "gemini-3.1-pro-preview",
+    "gemini-3-flash": "gemini-3-flash-preview",
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",
     "gpt-4o": "gpt-5.5",
     "gpt-4o-mini": "gpt-5.1-mini",
     "gpt-4": "gpt-5.5",
@@ -357,7 +362,13 @@ def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = F
 
     config = PROVIDER_CONFIGS.get(provider)
     if not config:
-        raise ValueError(f"Unknown provider: {provider}")
+        hint = ""
+        if " " in provider or len(provider) > 24:
+            hint = (
+                " (-p/--provider takes a provider name like 'google' or 'openai'."
+                " The PROMPT is positional: llmx chat -m MODEL \"your prompt\")"
+            )
+        raise ValueError(f"Unknown provider: {provider}{hint}")
 
     if use_old and "old_model" in config:
         return config["old_model"]
@@ -1216,7 +1227,7 @@ def compare(
                         temperature=adjusted_temp, timeout=timeout, stream=False,
                         max_tokens=None, search=search, schema=None,
                         reasoning_effort=effective_effort,
-                        service_tier=service_tier,
+                        service_tier=None,
                     )
                 finally:
                     sys.stdout = old_stdout
