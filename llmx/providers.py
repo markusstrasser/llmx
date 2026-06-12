@@ -193,6 +193,14 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
     },
+    "minimax": {
+        # Token Plan subscription key (sk-cp-...) — Token Plan calls only, not pay-as-you-go
+        "model": "MiniMax-M3",
+        "old_model": "MiniMax-M2.7",
+        "env_var": "MINIMAX_API_KEY",
+        "temperature_range": (0.0, 2.0),
+        "supports_streaming": True,
+    },
     "cerebras": {
         "model": "qwen-3-coder-480b",
         "env_var": "CEREBRAS_API_KEY",
@@ -229,6 +237,7 @@ OPENAI_COMPAT_URLS = {
     "openrouter": "https://openrouter.ai/api/v1",
     "cerebras": "https://api.cerebras.ai/v1",
     "kimi": "https://api.moonshot.cn/v1",
+    "minimax": "https://api.minimax.io/v1",  # international endpoint; M3 emits <think> blocks inline
     "anthropic": "https://openrouter.ai/api/v1",  # Anthropic via OpenRouter
     "anthropic-direct": "https://api.anthropic.com/v1/",  # direct Anthropic OpenAI-compat
 }
@@ -271,6 +280,7 @@ _KNOWN_MODELS = {
     "xai": ["grok-4", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-beta"],
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
     "deepseek": ["deepseek-chat"],
+    "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3-coder-480b"],
     "anthropic-direct": ["claude-opus-4-8"],
 }
@@ -323,6 +333,8 @@ def infer_provider_from_model(model: str) -> Optional[str]:
         return "openrouter"
     if model.startswith("moonshot/") or "kimi" in model_lower:
         return "kimi"
+    if "minimax" in model_lower:
+        return "minimax"
     if model.startswith("cerebras/") or "qwen" in model_lower:
         return "cerebras"
     if model.startswith("gemini/") or "gemini" in model_lower:
