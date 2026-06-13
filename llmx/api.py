@@ -1,16 +1,51 @@
 """Programmatic API for llmx"""
 
 import io
+import os
+import random
 import sys
 import time
 from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
 from .providers import (
-    get_model_name, check_api_key, _build_search_kwargs, infer_provider_from_model,
-    _normalize_model, _get_api_key, _google_chat, _openai_chat, OPENAI_COMPAT_URLS,
+    get_model_name,
+    check_api_key,
+    _build_search_kwargs,
+    infer_provider_from_model,
+    _normalize_model,
+    _get_api_key,
+    _google_chat,
+    _openai_chat,
+    OPENAI_COMPAT_URLS,
+    RateLimitError,
 )
-from .cli_backends import CLI_PROVIDERS, needs_api_fallback, cli_chat, preferred_cli_provider
+
+# Dispatch auto-retry on TRANSIENT failures (RateLimitError + its ServiceUnavailableError
+# subclass = 429/503/overload/connection). Exponential backoff + JITTER (the jitter matters:
+# under concurrent multi-session load, deterministic backoff thundering-herds). Non-transient
+# errors (QuotaError/ModelError/ApiKeyError) are NOT RateLimitError → propagate immediately.
+# Override attempts via LLMX_MAX_RETRIES env or max_retries kwarg. Default 4 (3 retries).
+_RETRY_BASE = 2.0  # seconds; waits ≈ 2,4,8 (+jitter)
+_RETRY_CAP = 30.0  # max single backoff
+
+
+def _resolve_max_attempts(call_kwargs: dict) -> int:
+    raw = os.environ.get("LLMX_MAX_RETRIES")
+    if raw is None:
+        raw = call_kwargs.get("max_retries", 4)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 4
+
+
+from .cli_backends import (
+    CLI_PROVIDERS,
+    needs_api_fallback,
+    cli_chat,
+    preferred_cli_provider,
+)
 from .logger import logger
 from .inspect import capture_call
 
@@ -27,6 +62,7 @@ class Response:
         latency: Response time in seconds
         raw: Raw response from provider
     """
+
     content: str
     provider: str
     model: str
@@ -38,7 +74,7 @@ class Response:
         return self.content
 
     def __repr__(self) -> str:
-        tokens = self.usage.get('total_tokens', 0)
+        tokens = self.usage.get("total_tokens", 0)
         return f"Response(content='{self.content[:50]}...', tokens={tokens}, latency={self.latency:.2f}s)"
 
 
@@ -58,7 +94,7 @@ class LLM:
         model: Optional[str] = None,
         temperature: float = 0.7,
         search: bool = False,
-        **kwargs
+        **kwargs,
     ):
         self.provider = provider
         self._is_cli = provider in CLI_PROVIDERS
@@ -75,7 +111,9 @@ class LLM:
         else:
             if self._cli_provider:
                 logical_provider = (
-                    provider if not self._is_cli else CLI_PROVIDERS[self._cli_provider]["api_fallback"]
+                    provider
+                    if not self._is_cli
+                    else CLI_PROVIDERS[self._cli_provider]["api_fallback"]
                 )
                 self.model = get_model_name(logical_provider)
             elif self._is_cli:
@@ -91,7 +129,7 @@ class LLM:
         prompt: str,
         system: Optional[str] = None,
         temperature: Optional[float] = None,
-        **kwargs
+        **kwargs,
     ) -> Response:
         """Send chat message and return Response."""
         # CLI backend — try CLI first, fall back to API
@@ -104,8 +142,13 @@ class LLM:
             reasoning_effort = merged.get("reasoning_effort")
             max_tokens = merged.get("max_tokens")
             fallback_reason = needs_api_fallback(
-                self._cli_provider, schema, system, self.search, False,
-                reasoning_effort, max_tokens,
+                self._cli_provider,
+                schema,
+                system,
+                self.search,
+                False,
+                reasoning_effort,
+                max_tokens,
             )
             if not fallback_reason:
                 start_time = time.time()
@@ -123,7 +166,11 @@ class LLM:
                         content=text,
                         provider=self._cli_provider,
                         model=self.model or self.provider,
-                        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                        usage={
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                        },
                         latency=latency,
                         raw=None,
                     )
@@ -133,11 +180,16 @@ class LLM:
                 f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason or 'CLI error'})"
             )
             fallback = LLM(
-                provider=api_provider, model=self.model,
-                temperature=self.temperature, search=self.search, **self.kwargs
+                provider=api_provider,
+                model=self.model,
+                temperature=self.temperature,
+                search=self.search,
+                **self.kwargs,
             )
             fallback._cli_provider = None  # prevent infinite fallback loop
-            return fallback.chat(prompt, system=system, temperature=temperature, **kwargs)
+            return fallback.chat(
+                prompt, system=system, temperature=temperature, **kwargs
+            )
 
         # Native SDK call
         call_kwargs = {**self.kwargs, **kwargs}
@@ -152,48 +204,79 @@ class LLM:
 
         with capture_call(self.provider, self.model, messages) as trace:
             try:
-                # Capture stdout — native backends print directly
-                old_stdout = sys.stdout
-                sys.stdout = io.StringIO()
+                # Auto-retry TRANSIENT failures (429/503/overload/connection) with backoff+jitter,
+                # so a load-shed (esp. --flex) doesn't surface as a swallowable hard failure.
+                # Non-transient errors (QuotaError/ModelError/ApiKeyError) aren't RateLimitError →
+                # propagate immediately. stdout is captured/restored PER attempt.
+                max_attempts = _resolve_max_attempts(call_kwargs)
                 usage_out: dict = {}
-                try:
-                    if self.provider == "google":
-                        content = _google_chat(
-                            prompt=prompt, model=self.model, system=system,
-                            temperature=temp, timeout=call_kwargs.get("timeout", 300),
-                            stream=False, max_tokens=call_kwargs.get("max_tokens"),
-                            search=self.search, schema=call_kwargs.get("response_format"),
-                            reasoning_effort=call_kwargs.get("reasoning_effort"),
-                            usage_out=usage_out,
-                            service_tier=call_kwargs.get("service_tier"),
+                content = None
+                for attempt in range(max_attempts):
+                    usage_out = {}  # discard a failed attempt's partial usage
+                    old_stdout = sys.stdout
+                    sys.stdout = io.StringIO()
+                    try:
+                        if self.provider == "google":
+                            content = _google_chat(
+                                prompt=prompt,
+                                model=self.model,
+                                system=system,
+                                temperature=temp,
+                                timeout=call_kwargs.get("timeout", 300),
+                                stream=False,
+                                max_tokens=call_kwargs.get("max_tokens"),
+                                search=self.search,
+                                schema=call_kwargs.get("response_format"),
+                                reasoning_effort=call_kwargs.get("reasoning_effort"),
+                                usage_out=usage_out,
+                                service_tier=call_kwargs.get("service_tier"),
+                            )
+                        else:
+                            if self.search:
+                                _build_search_kwargs(self.provider, self.model)
+                            content = _openai_chat(
+                                prompt=prompt,
+                                model=self.model,
+                                provider=self.provider,
+                                system=system,
+                                temperature=temp,
+                                timeout=call_kwargs.get("timeout", 300),
+                                stream=False,
+                                max_tokens=call_kwargs.get("max_tokens"),
+                                schema=call_kwargs.get("response_format"),
+                                reasoning_effort=call_kwargs.get("reasoning_effort"),
+                                usage_out=usage_out,
+                            )
+                    except RateLimitError as e:
+                        if attempt == max_attempts - 1:
+                            raise  # retries exhausted — still exit 3, caller decides
+                        wait = min(
+                            _RETRY_BASE * (2**attempt) + random.uniform(0, _RETRY_BASE),
+                            _RETRY_CAP,
                         )
-                    else:
-                        if self.search:
-                            _build_search_kwargs(self.provider, self.model)
-                        content = _openai_chat(
-                            prompt=prompt, model=self.model, provider=self.provider,
-                            system=system, temperature=temp,
-                            timeout=call_kwargs.get("timeout", 300),
-                            stream=False, max_tokens=call_kwargs.get("max_tokens"),
-                            schema=call_kwargs.get("response_format"),
-                            reasoning_effort=call_kwargs.get("reasoning_effort"),
-                            usage_out=usage_out,
+                        print(
+                            f"[llmx:RETRY] {self.provider}/{self.model} {e.error_type} "
+                            f"(attempt {attempt + 1}/{max_attempts}) — sleeping {wait:.1f}s",
+                            file=sys.stderr,
                         )
-                finally:
-                    sys.stdout = old_stdout
+                        time.sleep(wait)
+                        continue
+                    finally:
+                        sys.stdout = old_stdout
+                    break  # success
 
                 latency = time.time() - start_time
                 usage = usage_out or {
-                    "prompt_tokens": None, "completion_tokens": None,
-                    "total_tokens": None, "reasoning_tokens": None,
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                    "total_tokens": None,
+                    "reasoning_tokens": None,
                     "cached_tokens": None,
                 }
 
-                trace.set_response({
-                    "content": content,
-                    "usage": usage,
-                    "latency": latency
-                })
+                trace.set_response(
+                    {"content": content, "usage": usage, "latency": latency}
+                )
 
                 return Response(
                     content=content,
@@ -208,7 +291,9 @@ class LLM:
                 trace.set_error(e)
                 raise
 
-    def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> Iterator[str]:
+    def stream(
+        self, prompt: str, system: Optional[str] = None, **kwargs
+    ) -> Iterator[str]:
         """Stream response chunks."""
         temp = self.temperature
 
@@ -270,6 +355,7 @@ class LLM:
 
 # Simple function API
 
+
 def chat(
     prompt: str,
     provider: str = "google",
@@ -277,19 +363,33 @@ def chat(
     system: Optional[str] = None,
     temperature: float = 0.7,
     search: bool = False,
-    **kwargs
+    **kwargs,
 ) -> Response:
     """Simple chat function - one-shot calls"""
     api_only = kwargs.pop("api_only", False)
     # Pull init-time fields out so LLM.__init__ doesn't see them as **kwargs
     # carried into self.kwargs (timeout/max_tokens/reasoning_effort/response_format
     # are per-call options, not constructor state).
-    init_kwargs = {k: v for k, v in kwargs.items() if k not in {
-        "timeout", "max_tokens", "reasoning_effort", "response_format",
-        "service_tier",
-    }}
+    init_kwargs = {
+        k: v
+        for k, v in kwargs.items()
+        if k
+        not in {
+            "timeout",
+            "max_tokens",
+            "reasoning_effort",
+            "response_format",
+            "service_tier",
+        }
+    }
     call_kwargs = {k: v for k, v in kwargs.items() if k not in init_kwargs}
-    llm = LLM(provider=provider, model=model, temperature=temperature, search=search, **init_kwargs)
+    llm = LLM(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        search=search,
+        **init_kwargs,
+    )
     return llm.chat(prompt, system=system, api_only=api_only, **call_kwargs)
 
 
@@ -299,7 +399,7 @@ def batch(
     model: Optional[str] = None,
     system: Optional[str] = None,
     parallel: int = 3,
-    **kwargs
+    **kwargs,
 ) -> List[Response]:
     """Process multiple prompts in parallel"""
     from concurrent.futures import ThreadPoolExecutor
@@ -313,10 +413,10 @@ def batch(
         return list(executor.map(_chat_with_system, prompts))
 
 
-
 # ============================================================================
 # Gemini Batch API (async, 50% discount)
 # ============================================================================
+
 
 def batch_submit(
     input_file: str,
@@ -325,6 +425,7 @@ def batch_submit(
 ) -> str:
     """Submit a Gemini batch job from a JSONL file. Returns job name."""
     from .gemini_batch import parse_input_jsonl, submit
+
     requests = parse_input_jsonl(input_file)
     return submit(requests, model=model, display_name=display_name)
 
@@ -332,18 +433,32 @@ def batch_submit(
 def batch_status(job_name: str) -> Dict[str, Any]:
     """Get batch job status."""
     from .gemini_batch import status
+
     return status(job_name)
 
 
 def batch_get(job_name: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Fetch results from a completed batch job."""
     from .gemini_batch import fetch
+
     results = fetch(job_name, original_keys=keys)
     return [
-        {"key": r.key, **({"content": r.content} if r.content else {}), **({"error": r.error} if r.error else {})}
+        {
+            "key": r.key,
+            **({"content": r.content} if r.content else {}),
+            **({"error": r.error} if r.error else {}),
+        }
         for r in results
     ]
 
 
 # Export public API
-__all__ = ["LLM", "Response", "chat", "batch", "batch_submit", "batch_status", "batch_get"]
+__all__ = [
+    "LLM",
+    "Response",
+    "chat",
+    "batch",
+    "batch_submit",
+    "batch_status",
+    "batch_get",
+]

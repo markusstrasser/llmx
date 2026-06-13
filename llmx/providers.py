@@ -22,6 +22,7 @@ console = Console()
 
 class _WallClockTimeout(Exception):
     """Raised by SIGALRM when wall-clock deadline is exceeded."""
+
     pass
 
 
@@ -32,18 +33,26 @@ class _WallClockTimeout(Exception):
 EXIT_SUCCESS = 0
 EXIT_GENERAL = 1
 EXIT_API_KEY = 2
-EXIT_RATE_LIMIT = 3    # 429, 503 (transient)
+EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
-EXIT_MODEL_ERROR = 5   # context too large, model not found, invalid request
-EXIT_QUOTA = 6         # insufficient_quota, billing exhausted (permanent until topped up)
+EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
+EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
 
 
 class LlmxError(RuntimeError):
     """Base error with structured diagnostics."""
+
     exit_code = EXIT_GENERAL
 
-    def __init__(self, message: str, *, provider: str = "", model: str = "",
-                 status_code: int = 0, error_type: str = "general"):
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str = "",
+        model: str = "",
+        status_code: int = 0,
+        error_type: str = "general",
+    ):
         super().__init__(message)
         self.provider = provider
         self.model = model
@@ -70,8 +79,22 @@ class RateLimitError(LlmxError):
         super().__init__(message, error_type="rate_limit", **kwargs)
 
 
+class ServiceUnavailableError(RateLimitError):
+    """Transient server overload / load-shedding (HTTP 503 UNAVAILABLE, 5xx, connection
+    blip). Distinct from a 429 quota and from a permanent LlmxError — it resolves on retry.
+    Subclasses RateLimitError so it shares exit 3 AND is caught by the dispatch auto-retry
+    (and any caller `except RateLimitError`). This is the class `--flex` sheds load with:
+    before this it fell through to a generic LlmxError and looked permanent, so bulk loops
+    swallowed it as a hard failure (silent undercount)."""
+
+    def __init__(self, message: str, **kwargs):
+        kwargs.pop("error_type", None)
+        LlmxError.__init__(self, message, error_type="service_unavailable", **kwargs)
+
+
 class QuotaError(LlmxError):
     """Billing/quota exhausted — not transient, won't resolve with retries."""
+
     exit_code = EXIT_QUOTA
 
     def __init__(self, message: str, **kwargs):
@@ -98,29 +121,140 @@ class ModelError(LlmxError):
     def __init__(self, message: str, **kwargs):
         super().__init__(message, error_type="model_error", **kwargs)
 
+
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
-    "gpt-5.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "medium"},
-    "gpt-5.5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
-    "gpt-5.4": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh"], "default_effort": "high"},
-    "gpt-5.2": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
-    "gpt-5.1": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
-    "gpt-5.1-mini": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
+    "gpt-5.5": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ],
+        "default_effort": "medium",
+    },
+    "gpt-5.5-pro": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ],
+        "default_effort": "high",
+    },
+    "gpt-5.4": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ],
+        "default_effort": "high",
+    },
+    "gpt-5.2": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    "gpt-5.1": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    "gpt-5.1-mini": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+        "default_effort": "high",
+    },
     # Legacy GPT-5 models
-    "gpt-5": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
-    "gpt-5-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"], "default_effort": "high"},
-    "gpt-5-codex": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"], "default_effort": "high"},  # No minimal
+    "gpt-5": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    "gpt-5-pro": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    "gpt-5-codex": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+        "default_effort": "high",
+    },  # No minimal
     # Gemini 3.x thinking models: temperature=1 required (lower causes looping/degraded reasoning)
-    "gemini-3.1-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
-    "gemini-3-pro": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
-    "gemini-3-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["minimal", "low", "medium", "high"]},
-    "gemini-3.5-flash": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
-    "gemini-3.1-flash-lite": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["low", "medium", "high"]},
+    "gemini-3.1-pro": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+    },
+    "gemini-3-pro": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+    },
+    "gemini-3-flash": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+    },
+    "gemini-3.5-flash": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+    },
+    "gemini-3.1-flash-lite": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+    },
     # OpenAI GPT-5.3 (Mar 2026): "Instant" variant, reduced hallucination, max reasoning_effort=medium
-    "gpt-5.3": {"temperature": 1.0, "fixed": True, "reasoning_effort": True, "reasoning_effort_levels": ["medium"], "default_effort": "medium"},
+    "gpt-5.3": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["medium"],
+        "default_effort": "medium",
+    },
     # Kimi K2.5 thinking model (Jan 2026)
-    "kimi-k2.5": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},  # No reasoning_effort support
+    "kimi-k2.5": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": False,
+    },  # No reasoning_effort support
     # Legacy K2 variants
     "kimi-k2-thinking": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},
 }
@@ -268,16 +402,38 @@ def _normalize_model(provider: str, model: str) -> str:
     prefix = _STRIP_PREFIXES.get(provider)
     if prefix and model.startswith(prefix):
         logger.debug(f"Stripped prefix '{prefix}' from model '{model}'")
-        return model[len(prefix):]
+        return model[len(prefix) :]
     # OpenRouter models use real slashes (anthropic/claude-sonnet-4-6) — preserve
     return model
 
 
 # Known models for typo detection
 _KNOWN_MODELS = {
-    "google": ["gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
-    "openai": ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.3", "gpt-5.2", "gpt-5.1", "gpt-5.1-mini", "gpt-5", "gpt-5-pro", "gpt-5-codex"],
-    "xai": ["grok-4", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-beta"],
+    "google": [
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+    ],
+    "openai": [
+        "gpt-5.5",
+        "gpt-5.5-pro",
+        "gpt-5.4",
+        "gpt-5.3",
+        "gpt-5.2",
+        "gpt-5.1",
+        "gpt-5.1-mini",
+        "gpt-5",
+        "gpt-5-pro",
+        "gpt-5-codex",
+    ],
+    "xai": [
+        "grok-4",
+        "grok-4-1-fast-reasoning",
+        "grok-4-1-fast-non-reasoning",
+        "grok-beta",
+    ],
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
     "deepseek": ["deepseek-chat"],
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
@@ -321,7 +477,9 @@ def _warn_unknown_model(model: str, provider: str):
     if known and model not in known:
         close = difflib.get_close_matches(model, known, n=1, cutoff=0.6)
         if close:
-            logger.warn(f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?")
+            logger.warn(
+                f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?"
+            )
 
 
 def infer_provider_from_model(model: str) -> Optional[str]:
@@ -362,11 +520,13 @@ def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
 
     logger.debug(
         "Using Flash Lite",
-        {"model": model_name, "note": "$0.25/M in, $1.50/M out, 1M context"}
+        {"model": model_name, "note": "$0.25/M in, $1.50/M out, 1M context"},
     )
 
 
-def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = False) -> str:
+def get_model_name(
+    provider: str, model: Optional[str] = None, use_old: bool = False
+) -> str:
     """Get model name for provider — no prefixes needed (native SDKs)"""
     if model:
         # Strip any leftover LiteLLM prefixes
@@ -378,7 +538,7 @@ def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = F
         if " " in provider or len(provider) > 24:
             hint = (
                 " (-p/--provider takes a provider name like 'google' or 'openai'."
-                " The PROMPT is positional: llmx chat -m MODEL \"your prompt\")"
+                ' The PROMPT is positional: llmx chat -m MODEL "your prompt")'
             )
         raise ValueError(f"Unknown provider: {provider}{hint}")
 
@@ -406,10 +566,7 @@ def get_model_restriction(model_name: str) -> Optional[Dict[str, Any]]:
 
 
 def validate_and_adjust_temperature(
-    temperature: float,
-    model_name: str,
-    provider: str,
-    user_specified: bool = False
+    temperature: float, model_name: str, provider: str, user_specified: bool = False
 ) -> tuple[float, bool]:
     """Validate and adjust temperature for model/provider.
     Returns (adjusted_temperature, was_adjusted)
@@ -422,12 +579,12 @@ def validate_and_adjust_temperature(
             if user_specified:
                 logger.warn(
                     f"Temperature override ignored: {model_name} only supports temperature={required_temp}",
-                    {"requested": temperature, "using": required_temp}
+                    {"requested": temperature, "using": required_temp},
                 )
             else:
                 logger.debug(
                     f"Auto-adjusted temperature for {model_name}",
-                    {"from": temperature, "to": required_temp}
+                    {"from": temperature, "to": required_temp},
                 )
             return required_temp, True
         return temperature, False
@@ -439,7 +596,7 @@ def validate_and_adjust_temperature(
             clamped = max(min_temp, min(max_temp, temperature))
             logger.warn(
                 f"Temperature clamped to {provider} valid range [{min_temp}, {max_temp}]",
-                {"requested": temperature, "using": clamped}
+                {"requested": temperature, "using": clamped},
             )
             return clamped, True
 
@@ -463,10 +620,21 @@ def _keychain_get(key_name: str) -> Optional[str]:
     if not _keychain_available():
         return None
     import subprocess
+
     try:
         result = subprocess.run(
-            ["security", "find-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name, "-w"],
-            capture_output=True, text=True, timeout=5,
+            [
+                "security",
+                "find-generic-password",
+                "-a",
+                KEYCHAIN_SERVICE,
+                "-s",
+                key_name,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -480,14 +648,27 @@ def _keychain_set(key_name: str, value: str) -> bool:
     if not _keychain_available():
         return False
     import subprocess
+
     # Delete existing entry first (update = delete + add)
     subprocess.run(
         ["security", "delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name],
-        capture_output=True, timeout=5,
+        capture_output=True,
+        timeout=5,
     )
     result = subprocess.run(
-        ["security", "add-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name, "-w", value],
-        capture_output=True, text=True, timeout=5,
+        [
+            "security",
+            "add-generic-password",
+            "-a",
+            KEYCHAIN_SERVICE,
+            "-s",
+            key_name,
+            "-w",
+            value,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     return result.returncode == 0
 
@@ -497,9 +678,11 @@ def _keychain_delete(key_name: str) -> bool:
     if not _keychain_available():
         return False
     import subprocess
+
     result = subprocess.run(
         ["security", "delete-generic-password", "-a", KEYCHAIN_SERVICE, "-s", key_name],
-        capture_output=True, timeout=5,
+        capture_output=True,
+        timeout=5,
     )
     return result.returncode == 0
 
@@ -509,16 +692,19 @@ def _keychain_list() -> list:
     if not _keychain_available():
         return []
     import subprocess
+
     try:
         result = subprocess.run(
             ["security", "dump-keychain"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode != 0:
             return []
         # Parse: look for entries where "acct"="llmx" and extract "svce" (key name)
         keys = []
-        lines = result.stdout.split('\n')
+        lines = result.stdout.split("\n")
         in_llmx_entry = False
         for line in lines:
             if '"acct"' in line and f'"{KEYCHAIN_SERVICE}"' in line:
@@ -527,11 +713,12 @@ def _keychain_list() -> list:
                 # Extract the service name (our key name)
                 # Format: "svce"<blob>="KEY_NAME"
                 import re
+
                 m = re.search(r'"svce".*?="(.+?)"', line)
                 if m:
                     keys.append(m.group(1))
                 in_llmx_entry = False
-            elif 'keychain:' in line.lower() or line.startswith('class:'):
+            elif "keychain:" in line.lower() or line.startswith("class:"):
                 in_llmx_entry = False
         return keys
     except Exception:
@@ -542,7 +729,9 @@ def check_api_key(provider: str) -> None:
     """Check if API key is available for provider (env vars → Keychain)."""
     config = PROVIDER_CONFIGS.get(provider)
     if not config:
-        raise ValueError(f"Unknown provider: {provider}. Use --list-providers to see available providers.")
+        raise ValueError(
+            f"Unknown provider: {provider}. Use --list-providers to see available providers."
+        )
 
     # CLI providers use subscription auth, no API key needed
     if config.get("env_var") is None:
@@ -617,6 +806,7 @@ def _get_api_key(provider: str) -> Optional[str]:
 # Native SDK backends
 # ============================================================================
 
+
 def _normalize_usage(provider: str, raw) -> dict:
     """Normalize per-provider usage objects to a flat token dict.
 
@@ -625,9 +815,13 @@ def _normalize_usage(provider: str, raw) -> dict:
     provider didn't report. Total is computed when not provided.
     """
     if raw is None:
-        return {"prompt_tokens": None, "completion_tokens": None,
-                "total_tokens": None, "reasoning_tokens": None,
-                "cached_tokens": None}
+        return {
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+            "reasoning_tokens": None,
+            "cached_tokens": None,
+        }
     if provider == "google":
         prompt = getattr(raw, "prompt_token_count", None)
         completion = getattr(raw, "candidates_token_count", None)
@@ -639,18 +833,33 @@ def _normalize_usage(provider: str, raw) -> dict:
         details = getattr(raw, "completion_tokens_details", None)
         reasoning = getattr(details, "reasoning_tokens", None) if details else None
         prompt_details = getattr(raw, "prompt_tokens_details", None)
-        cached = getattr(prompt_details, "cached_tokens", None) if prompt_details else None
+        cached = (
+            getattr(prompt_details, "cached_tokens", None) if prompt_details else None
+        )
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
-        "prompt_tokens": prompt, "completion_tokens": completion,
-        "total_tokens": total, "reasoning_tokens": reasoning,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "reasoning_tokens": reasoning,
         "cached_tokens": cached,
     }
 
 
-def _google_chat(prompt, model, system, temperature, timeout, stream,
-                 max_tokens, search, schema, reasoning_effort,
-                 usage_out: Optional[dict] = None, service_tier: Optional[str] = None):
+def _google_chat(
+    prompt,
+    model,
+    system,
+    temperature,
+    timeout,
+    stream,
+    max_tokens,
+    search,
+    schema,
+    reasoning_effort,
+    usage_out: Optional[dict] = None,
+    service_tier: Optional[str] = None,
+):
     """Google Gemini via google-genai SDK. Returns response text.
 
     If usage_out is provided, it's populated in-place with the normalized
@@ -680,8 +889,14 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
     if max_tokens:
         config.max_output_tokens = max_tokens
     if reasoning_effort:
-        level_map = {"low": "low", "medium": "medium", "high": "high",
-                     "minimal": "low", "none": "low", "xhigh": "high"}
+        level_map = {
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "minimal": "low",
+            "none": "low",
+            "xhigh": "high",
+        }
         config.thinking_config = types.ThinkingConfig(
             thinking_level=level_map.get(reasoning_effort, "high")
         )
@@ -713,16 +928,19 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
             )
             # Guard empty candidates from safety filter
             if not response.candidates:
-                feedback = getattr(response, 'prompt_feedback', None)
+                feedback = getattr(response, "prompt_feedback", None)
                 raise ModelError(
                     f"Response blocked by safety filter: {feedback}",
-                    provider="google", model=model,
+                    provider="google",
+                    model=model,
                 )
             result_text = response.text
             finish_reason = str(response.candidates[0].finish_reason)
             print(result_text)
     finally:
-        usage = getattr(response, "usage_metadata", None) if response is not None else None
+        usage = (
+            getattr(response, "usage_metadata", None) if response is not None else None
+        )
         log_usage(
             provider="google",
             model=model,
@@ -737,7 +955,9 @@ def _google_chat(prompt, model, system, temperature, timeout, stream,
 
     # Truncation detection
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
-        logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
+        logger.warn(
+            f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)"
+        )
 
     if usage_out is not None:
         usage_out.update(_normalize_usage("google", usage))
@@ -756,9 +976,19 @@ _REASONING_HEADROOM = {
 }
 
 
-def _openai_chat(prompt, model, provider, system, temperature, timeout,
-                 stream, max_tokens, schema, reasoning_effort,
-                 usage_out: Optional[dict] = None):
+def _openai_chat(
+    prompt,
+    model,
+    provider,
+    system,
+    temperature,
+    timeout,
+    stream,
+    max_tokens,
+    schema,
+    reasoning_effort,
+    usage_out: Optional[dict] = None,
+):
     """OpenAI-compatible API via openai SDK. Returns response text.
 
     If usage_out is provided, it's populated in-place with the normalized
@@ -843,10 +1073,11 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
             usage = getattr(response, "usage", None)
             content = response.choices[0].message.content
             if content is None:
-                refusal = getattr(response.choices[0].message, 'refusal', None)
+                refusal = getattr(response.choices[0].message, "refusal", None)
                 raise ModelError(
                     f"Model returned no content. Refusal: {refusal}",
-                    provider=provider, model=model,
+                    provider=provider,
+                    model=model,
                 )
             result_text = content
             finish_reason = response.choices[0].finish_reason
@@ -873,18 +1104,21 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
     if finish_reason == "length" and not result_text.strip():
         rtoks = getattr(details, "reasoning_tokens", None) if details else None
         ctoks = getattr(usage, "completion_tokens", None) if usage else None
-        detail = f" reasoning consumed {rtoks}/{ctoks} completion tokens;" if rtoks else ""
+        detail = (
+            f" reasoning consumed {rtoks}/{ctoks} completion tokens;" if rtoks else ""
+        )
         raise ModelError(
             f"Model returned no visible output — completion budget exhausted by "
             f"reasoning before any text was emitted.{detail} Raise --max-tokens "
             f"(it is the visible-output budget; reasoning headroom is added on top) "
             f"or lower --reasoning-effort.",
-            provider=provider, model=model,
+            provider=provider,
+            model=model,
         )
 
     # Truncation detection
     if finish_reason == "length":
-        logger.warn(f"[llmx:WARN] output may be truncated (hit max_tokens limit)")
+        logger.warn("[llmx:WARN] output may be truncated (hit max_tokens limit)")
 
     if usage_out is not None:
         usage_out.update(_normalize_usage(provider, usage))
@@ -893,10 +1127,13 @@ def _openai_chat(prompt, model, provider, system, temperature, timeout,
 
 class SearchUnavailableError(Exception):
     """Raised when --search is requested but not supported for the provider/model."""
+
     pass
 
 
-def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False) -> dict:
+def _build_search_kwargs(
+    provider: str, model_name: str, *, strict: bool = False
+) -> dict:
     """Build provider-specific kwargs for web search grounding.
     Only meaningful for legacy callers — search is handled natively in _google_chat.
 
@@ -932,6 +1169,7 @@ def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False
 # ============================================================================
 # Main chat dispatcher
 # ============================================================================
+
 
 def chat(
     prompt: str,
@@ -993,21 +1231,36 @@ def chat(
         cli_provider = preferred_cli_provider(provider, lite=lite)
         if cli_provider:
             logical_provider = (
-                provider if provider not in CLI_PROVIDERS else CLI_PROVIDERS[cli_provider]["api_fallback"]
+                provider
+                if provider not in CLI_PROVIDERS
+                else CLI_PROVIDERS[cli_provider]["api_fallback"]
             )
             cli_model = model or get_model_name(logical_provider, None, use_old)
             fallback_reason = needs_api_fallback(
-                cli_provider, schema, system, search, stream, reasoning_effort, max_tokens
+                cli_provider,
+                schema,
+                system,
+                search,
+                stream,
+                reasoning_effort,
+                max_tokens,
             )
             if fallback_reason:
                 api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-                logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
+                logger.info(
+                    f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
+                )
                 provider = api_provider
                 model = cli_model
             else:
                 text = cli_chat(
-                    cli_provider, prompt, cli_model, timeout,
-                    schema=schema, system=system, lite=lite,
+                    cli_provider,
+                    prompt,
+                    cli_model,
+                    timeout,
+                    schema=schema,
+                    system=system,
+                    lite=lite,
                     reasoning_effort=reasoning_effort,
                 )
                 if text is not None:
@@ -1019,7 +1272,9 @@ def chat(
                 if use_alarm:
                     signal.alarm(remaining)
                 api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-                logger.info(f"[cli→api] {cli_provider} → {api_provider} (CLI returned error, {remaining}s remaining)")
+                logger.info(
+                    f"[cli→api] {cli_provider} → {api_provider} (CLI returned error, {remaining}s remaining)"
+                )
                 provider = api_provider
                 model = cli_model
 
@@ -1044,7 +1299,7 @@ def chat(
             if not restriction or not restriction.get("reasoning_effort"):
                 logger.warn(
                     f"Model {model_name} does not support --reasoning-effort parameter (ignoring)",
-                    {"model": model_name, "provider": provider}
+                    {"model": model_name, "provider": provider},
                 )
                 reasoning_effort = None
             elif restriction.get("reasoning_effort_levels"):
@@ -1052,7 +1307,7 @@ def chat(
                 if reasoning_effort not in valid_levels:
                     logger.error(
                         f"Invalid reasoning_effort for {model_name}",
-                        {"valid": valid_levels, "requested": reasoning_effort}
+                        {"valid": valid_levels, "requested": reasoning_effort},
                     )
                     raise ValueError(
                         f"Model {model_name} only supports reasoning_effort: {', '.join(valid_levels)}\n"
@@ -1065,7 +1320,9 @@ def chat(
             default_effort = restriction.get("default_effort")
             if default_effort:
                 reasoning_effort = default_effort
-                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
+                logger.info(
+                    f"Defaulting to --reasoning-effort {default_effort} for {model_name}"
+                )
 
         logger.debug(
             "Starting chat",
@@ -1091,9 +1348,15 @@ def chat(
             try:
                 if provider == "google":
                     _sdk_result[0] = _google_chat(
-                        prompt=prompt, model=model_name, system=system,
-                        temperature=adjusted_temp, timeout=timeout, stream=stream,
-                        max_tokens=max_tokens, search=search, schema=schema,
+                        prompt=prompt,
+                        model=model_name,
+                        system=system,
+                        temperature=adjusted_temp,
+                        timeout=timeout,
+                        stream=stream,
+                        max_tokens=max_tokens,
+                        search=search,
+                        schema=schema,
                         reasoning_effort=reasoning_effort,
                         service_tier=service_tier,
                     )
@@ -1101,9 +1364,15 @@ def chat(
                     if search:
                         _build_search_kwargs(provider, model_name, strict=True)
                     _sdk_result[0] = _openai_chat(
-                        prompt=prompt, model=model_name, provider=provider,
-                        system=system, temperature=adjusted_temp, timeout=timeout,
-                        stream=stream, max_tokens=max_tokens, schema=schema,
+                        prompt=prompt,
+                        model=model_name,
+                        provider=provider,
+                        system=system,
+                        temperature=adjusted_temp,
+                        timeout=timeout,
+                        stream=stream,
+                        max_tokens=max_tokens,
+                        schema=schema,
                         reasoning_effort=reasoning_effort,
                     )
             except Exception as e:
@@ -1134,11 +1403,13 @@ def chat(
         elapsed = time.time() - start_time
         logger.error(
             f"Wall-clock timeout after {elapsed:.1f}s",
-            {"provider": provider, "model": model_name, "timeout": timeout}
+            {"provider": provider, "model": model_name, "timeout": timeout},
         )
         raise TimeoutError_(
             f"Request timed out after {timeout}s (wall-clock). Model may be overloaded or prompt too large.",
-            provider=provider, model=model_name, status_code=0,
+            provider=provider,
+            model=model_name,
+            status_code=0,
         )
     except (LlmxError, ValueError):
         # Already typed — re-raise as-is
@@ -1150,16 +1421,22 @@ def chat(
             if "quota" in msg.lower() or "billing" in msg.lower():
                 raise QuotaError(
                     f"BILLING EXHAUSTED for google/{model_name}. Check Google Cloud billing.",
-                    provider="google", model=model_name, status_code=429,
+                    provider="google",
+                    model=model_name,
+                    status_code=429,
                 ) from e
             raise RateLimitError(
                 f"Rate limit exceeded for google/{model_name}. Wait and retry, or use --stream for API transport.",
-                provider="google", model=model_name, status_code=429,
+                provider="google",
+                model=model_name,
+                status_code=429,
             ) from e
         elif "404" in msg:
             raise ModelError(
                 f"Model not found: {model_name}",
-                provider="google", model=model_name, status_code=404,
+                provider="google",
+                model=model_name,
+                status_code=404,
             ) from e
         raise LlmxError(msg, provider="google", model=model_name) from e
     except genai_errors.ServerError as e:
@@ -1167,50 +1444,92 @@ def chat(
         if "DEADLINE_EXCEEDED" in msg:
             raise TimeoutError_(
                 f"Google API deadline exceeded for {model_name}.",
-                provider="google", model=model_name,
+                provider="google",
+                model=model_name,
+            ) from e
+        # 503 UNAVAILABLE / overloaded = transient load-shedding (what --flex sheds with) →
+        # retryable, not a permanent LlmxError. Match by status text so it survives SDK changes.
+        if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
+            raise ServiceUnavailableError(
+                f"google/{model_name} temporarily unavailable (503/overloaded). Retrying.",
+                provider="google",
+                model=model_name,
+                status_code=503,
             ) from e
         raise LlmxError(str(e), provider="google", model=model_name) from e
     except openai_module.RateLimitError as e:
         # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
         # Parse the error body to distinguish them.
-        err_body = getattr(e, 'body', {}) or {}
-        err_code = err_body.get('error', {}).get('code', '') if isinstance(err_body, dict) else ''
-        if err_code == 'insufficient_quota':
+        err_body = getattr(e, "body", {}) or {}
+        err_code = (
+            err_body.get("error", {}).get("code", "")
+            if isinstance(err_body, dict)
+            else ""
+        )
+        if err_code == "insufficient_quota":
             raise QuotaError(
                 f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",
-                provider=provider, model=model_name, status_code=429,
+                provider=provider,
+                model=model_name,
+                status_code=429,
             ) from e
         raise RateLimitError(
             f"Rate limit exceeded for {provider}/{model_name}. Wait and retry.",
-            provider=provider, model=model_name, status_code=429,
+            provider=provider,
+            model=model_name,
+            status_code=429,
         ) from e
     except openai_module.APITimeoutError as e:
         raise TimeoutError_(
             f"Request timed out for {provider}/{model_name}.",
-            provider=provider, model=model_name,
+            provider=provider,
+            model=model_name,
         ) from e
     except openai_module.AuthenticationError as e:
         raise ApiKeyError(
             f"Invalid API key for {provider}. Check your API key configuration.",
-            provider=provider, model=model_name,
+            provider=provider,
+            model=model_name,
         ) from e
     except openai_module.NotFoundError as e:
         raise ModelError(
             f"Model not found: {model_name}",
-            provider=provider, model=model_name, status_code=404,
+            provider=provider,
+            model=model_name,
+            status_code=404,
+        ) from e
+    except openai_module.APIConnectionError as e:
+        # network blip mid-dispatch — transient, retryable
+        raise ServiceUnavailableError(
+            f"Connection error to {provider}/{model_name}. Retrying.",
+            provider=provider,
+            model=model_name,
+            status_code=0,
         ) from e
     except openai_module.APIStatusError as e:
         if e.status_code == 402:
             raise QuotaError(
                 f"BILLING EXHAUSTED for {provider}/{model_name}. Top up your account.",
-                provider=provider, model=model_name, status_code=402,
+                provider=provider,
+                model=model_name,
+                status_code=402,
+            ) from e
+        if e.status_code and e.status_code >= 500:
+            # 500/503/529 = server overload / load-shedding → transient, retryable
+            raise ServiceUnavailableError(
+                f"{provider}/{model_name} server error {e.status_code} (overloaded). Retrying.",
+                provider=provider,
+                model=model_name,
+                status_code=e.status_code,
             ) from e
         raise LlmxError(str(e), provider=provider, model=model_name) from e
     except TimeoutError as error:
         elapsed = time.time() - start_time
         raise TimeoutError_(
             f"Request timed out after {timeout}s. Model may be overloaded or prompt too large.",
-            provider=provider, model=model_name, status_code=0,
+            provider=provider,
+            model=model_name,
+            status_code=0,
         ) from error
     except Exception as error:
         elapsed = time.time() - start_time
@@ -1219,11 +1538,17 @@ def chat(
 
         logger.error(
             "Chat failed",
-            {"provider": provider, "model": model_name, "error_type": error_type, "elapsed": f"{elapsed:.1f}s"}
+            {
+                "provider": provider,
+                "model": model_name,
+                "error_type": error_type,
+                "elapsed": f"{elapsed:.1f}s",
+            },
         )
         raise LlmxError(
             f"{error_type}: {error_msg}",
-            provider=provider, model=model_name,
+            provider=provider,
+            model=model_name,
         ) from error
     finally:
         if use_alarm:
@@ -1235,6 +1560,7 @@ def chat(
 # ============================================================================
 # Compare: parallel provider calls
 # ============================================================================
+
 
 def compare(
     prompt: str,
@@ -1278,9 +1604,15 @@ def compare(
                 sys.stdout = io.StringIO()
                 try:
                     text = _google_chat(
-                        prompt=prompt, model=model_name, system=None,
-                        temperature=adjusted_temp, timeout=timeout, stream=False,
-                        max_tokens=None, search=search, schema=None,
+                        prompt=prompt,
+                        model=model_name,
+                        system=None,
+                        temperature=adjusted_temp,
+                        timeout=timeout,
+                        stream=False,
+                        max_tokens=None,
+                        search=search,
+                        schema=None,
                         reasoning_effort=effective_effort,
                         service_tier=None,
                     )
@@ -1294,9 +1626,15 @@ def compare(
                 sys.stdout = io.StringIO()
                 try:
                     text = _openai_chat(
-                        prompt=prompt, model=model_name, provider=provider,
-                        system=None, temperature=adjusted_temp, timeout=timeout,
-                        stream=False, max_tokens=None, schema=None,
+                        prompt=prompt,
+                        model=model_name,
+                        provider=provider,
+                        system=None,
+                        temperature=adjusted_temp,
+                        timeout=timeout,
+                        stream=False,
+                        max_tokens=None,
+                        schema=None,
                         reasoning_effort=effective_effort,
                     )
                 finally:
@@ -1305,7 +1643,10 @@ def compare(
             elapsed = time.time() - provider_start
             logger.debug(
                 f"{provider} complete",
-                {"elapsed_sec": round(elapsed, 2), "response_length": len(text) if text else 0},
+                {
+                    "elapsed_sec": round(elapsed, 2),
+                    "response_length": len(text) if text else 0,
+                },
             )
 
             return (provider, text, None)
