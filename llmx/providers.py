@@ -497,6 +497,14 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     """Infer provider from model name"""
     model_lower = model.lower()
 
+    # Cursor subscription transport — the `cursor/` prefix is an explicit override that MUST
+    # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
+    # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
+    # after the substring checks silently billed those families (and 404'd). composer-* is
+    # Cursor-exclusive so it's unambiguous here too.
+    if model.startswith("cursor/") or model_lower.startswith("composer"):
+        return "cursor"
+
     # Check for explicit prefixes first
     if model.startswith("openrouter/"):
         return "openrouter"
@@ -510,10 +518,6 @@ def infer_provider_from_model(model: str) -> Optional[str]:
         return "google"
     if model.startswith("xai/") or "grok" in model_lower:
         return "xai"
-    # Cursor: composer-* is Cursor-exclusive; `cursor/` forces ANY model through
-    # the Cursor subscription transport (e.g. cursor/claude-opus-4-8-thinking-high).
-    if model.startswith("cursor/") or model_lower.startswith("composer"):
-        return "cursor"
     if model.startswith("anthropic/") or "claude" in model_lower:
         return "anthropic"
     if model.startswith("deepseek/") or "deepseek" in model_lower:
