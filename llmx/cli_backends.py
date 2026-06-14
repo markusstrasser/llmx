@@ -35,6 +35,16 @@ CLI_PROVIDERS = {
         "binary": "claude",
         "api_fallback": "anthropic",
     },
+    # Cursor CLI (cursor-agent) in headless `-p` mode with the user's Cursor
+    # app subscription auth. NO api_fallback: composer-2.5 is Cursor-exclusive
+    # (no public API), and proxied models (claude/gpt/gemini via the sub) have
+    # no $0 API path either — a feature the CLI can't do raises, never silently
+    # routes to a paid API. Always-on (not lite-gated): cursor-agent --mode ask
+    # is already lightweight (~1s startup, no MCP).
+    "cursor-cli": {
+        "binary": "cursor-agent",
+        "api_fallback": None,
+    },
 }
 
 # Prefer subscription CLIs for logical providers when available.
@@ -42,10 +52,13 @@ CLI_PROVIDERS = {
 # gemini-cli consumer tier was retired 2026-06-18). OpenAI/Anthropic route to
 # codex-cli/claude-cli only in --lite mode (full MCP load = ~37K context
 # overhead + ~10s startup; lite profile disables MCPs and loads in ~1s).
-CLI_PROVIDER_ALIASES = {}
+# `cursor` always resolves to cursor-cli (subscription-only, no API path), so
+# it lives in the non-lite alias map — reachable in every mode, not just --lite.
+CLI_PROVIDER_ALIASES = {"cursor": "cursor-cli"}
 CLI_PROVIDER_ALIASES_LITE = {
     "openai": "codex-cli",
     "anthropic": "claude-cli",
+    "cursor": "cursor-cli",
 }
 
 # Lite cwd is split between two locations:
@@ -248,6 +261,21 @@ def _lite_cwd(lite: str) -> str:
     return str(runtime)
 
 
+_CURSOR_RUNTIME_DIR = Path(os.path.expanduser("~/.cache/llmx/cursor"))
+
+
+def _cursor_cwd() -> str:
+    """Neutral empty cwd for cursor-agent.
+
+    cursor-agent reads the workspace it runs in (rules, AGENTS.md, file tree)
+    and folds it into context. For a clean model-query transport we run from an
+    empty cache dir so the answer depends only on the prompt — not on wherever
+    llmx happened to be invoked. Auto-created, idempotent.
+    """
+    _CURSOR_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    return str(_CURSOR_RUNTIME_DIR)
+
+
 def cli_chat(
     provider: str,
     prompt: str,
@@ -351,6 +379,21 @@ def cli_chat(
                 cmd.extend(["--model", model])
             # Always pipe prompt via stdin — keeps long prompts off argv.
             stdin_input = prompt
+        elif binary == "cursor-agent":
+            # cursor-agent -p (headless print). --mode ask = read-only Q&A (no
+            # edits/shell), --trust required for non-interactive runs. Auth comes
+            # from the user's Cursor app login. Prompt via stdin (-p with no
+            # positional reads stdin); errors exit non-zero with stderr, so the
+            # shared returncode/empty-output handling below catches them.
+            cmd = [
+                "cursor-agent", "-p",
+                "--output-format", "text",
+                "--mode", "ask",
+                "--trust",
+            ]
+            if model:
+                cmd.extend(["--model", model])
+            stdin_input = prompt
         else:
             return None
 
@@ -377,7 +420,12 @@ def cli_chat(
         #   ANTHROPIC_API_KEY (claude-cli only) — force OAuth subscription.
         env = None
         cwd = None
-        if lite:
+        if binary == "cursor-agent":
+            # Always run cursor from a neutral empty cwd so the answer depends
+            # only on the prompt, never the caller's workspace context.
+            cwd = _cursor_cwd()
+            logger.debug(f"[cli] cursor cwd={cwd}")
+        elif lite:
             cwd = _lite_cwd(lite)
             logger.debug(f"[cli] lite={lite} cwd={cwd}")
             env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_ID"}

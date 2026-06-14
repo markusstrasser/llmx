@@ -357,6 +357,16 @@ PROVIDER_CONFIGS = {
         "supports_streaming": False,
         "api_fallback": "anthropic",
     },
+    # Cursor app subscription via cursor-agent. composer-2.5 is the default
+    # (Cursor-exclusive); proxied models reachable as cursor/<model> or
+    # -p cursor -m <model>. No api_fallback — subscription-only transport.
+    "cursor": {
+        "model": "composer-2.5",
+        "env_var": None,  # Cursor app login (cursor-agent status)
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": False,
+        "api_fallback": None,
+    },
 }
 
 
@@ -394,6 +404,7 @@ _STRIP_PREFIXES = {
     "deepseek": "deepseek/",
     "cerebras": "cerebras/",
     "openrouter": "openrouter/",
+    "cursor": "cursor/",
 }
 
 
@@ -499,6 +510,10 @@ def infer_provider_from_model(model: str) -> Optional[str]:
         return "google"
     if model.startswith("xai/") or "grok" in model_lower:
         return "xai"
+    # Cursor: composer-* is Cursor-exclusive; `cursor/` forces ANY model through
+    # the Cursor subscription transport (e.g. cursor/claude-opus-4-8-thinking-high).
+    if model.startswith("cursor/") or model_lower.startswith("composer"):
+        return "cursor"
     if model.startswith("anthropic/") or "claude" in model_lower:
         return "anthropic"
     if model.startswith("deepseek/") or "deepseek" in model_lower:
@@ -1235,7 +1250,10 @@ def chat(
                 if provider not in CLI_PROVIDERS
                 else CLI_PROVIDERS[cli_provider]["api_fallback"]
             )
-            cli_model = model or get_model_name(logical_provider, None, use_old)
+            # get_model_name normalizes (strips synthetic prefixes like
+            # `cursor/`) when a model is given, and supplies the provider
+            # default when not — so cursor/<model> reaches cursor-agent clean.
+            cli_model = get_model_name(logical_provider, model, use_old)
             fallback_reason = needs_api_fallback(
                 cli_provider,
                 schema,
@@ -1247,6 +1265,14 @@ def chat(
             )
             if fallback_reason:
                 api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+                if api_provider is None:
+                    # Subscription-only CLI (cursor) with no API path — a
+                    # request needing an unsupported feature can't be served.
+                    raise ValueError(
+                        f"{cli_provider} cannot handle this request ({fallback_reason}) "
+                        f"and has no API fallback. Drop the unsupported option "
+                        f"(e.g. --schema/--search/--stream) or pick a different model."
+                    )
                 logger.info(
                     f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
                 )
@@ -1266,12 +1292,19 @@ def chat(
                 if text is not None:
                     print(text)
                     return text
-                # CLI failed — fall back to API
+                # CLI failed — fall back to API (if one exists)
+                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+                if api_provider is None:
+                    # Subscription-only CLI (cursor) — nowhere to fall back to.
+                    raise RuntimeError(
+                        f"{cli_provider} ({cli_model}) failed and has no API "
+                        f"fallback. Check `cursor-agent status` (auth) and the "
+                        f"model name via `cursor-agent --list-models`."
+                    )
                 elapsed_cli = int(time.time() - start_time)
                 remaining = max(timeout - elapsed_cli, 5)
                 if use_alarm:
                     signal.alarm(remaining)
-                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
                 logger.info(
                     f"[cli→api] {cli_provider} → {api_provider} (CLI returned error, {remaining}s remaining)"
                 )

@@ -727,7 +727,11 @@ def chat_cmd(
                 cli_provider, schema, system, search, stream, requested_reasoning_effort, max_tokens
             )
             if cli_fallback_reason:
-                planned_transport = f"{CLI_PROVIDERS[cli_provider]['api_fallback']}-api"
+                api_fb = CLI_PROVIDERS[cli_provider]["api_fallback"]
+                # Subscription-only CLI (cursor) has no api_fallback — chat()
+                # raises on the unsupported feature; label the transport as the
+                # CLI itself rather than "None-api".
+                planned_transport = f"{api_fb}-api" if api_fb else cli_provider
             else:
                 planned_transport = cli_provider
         else:
