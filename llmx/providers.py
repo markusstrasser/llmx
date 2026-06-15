@@ -826,6 +826,55 @@ def _get_api_key(provider: str) -> Optional[str]:
 # ============================================================================
 
 
+# JSON-Schema composition keywords whose values hold nested subschemas to recurse into.
+_SCHEMA_SUBSCHEMA_LISTS = ("anyOf", "oneOf", "allOf", "prefixItems")
+_SCHEMA_SUBSCHEMA_MAPS = ("properties", "$defs", "definitions", "patternProperties")
+
+
+def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
+    """Adapt a canonical JSON Schema to a provider's structured-output dialect.
+
+    One schema can't satisfy both providers as authored, so callers would otherwise keep two
+    near-identical files. Single-source the dialect invariant here, at the transport boundary:
+
+      - OpenAI strict (`response_format` json_schema, strict=True) REQUIRES every object to set
+        `"additionalProperties": false` AND list *every* property in `"required"`. (Optionality
+        under strict is expressed as a nullable type, not omission from `required`.)
+      - Google (`response_schema`) REJECTS `"additionalProperties"` outright.
+
+    Pure + recursive (returns a new structure; never mutates the input). Unknown providers and
+    non-dict/list nodes pass through unchanged. Only `additionalProperties` is provider-specific;
+    every other keyword is preserved verbatim.
+    """
+    if isinstance(schema, list):
+        return [_normalize_schema_for_provider(s, provider) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    out: dict = {}
+    for key, val in schema.items():
+        if key == "additionalProperties" and provider in ("openai", "google"):
+            continue  # re-derived below for openai; dropped for google
+        if key in _SCHEMA_SUBSCHEMA_MAPS and isinstance(val, dict):
+            out[key] = {
+                k: _normalize_schema_for_provider(v, provider) for k, v in val.items()
+            }
+        elif key in _SCHEMA_SUBSCHEMA_LISTS and isinstance(val, list):
+            out[key] = [_normalize_schema_for_provider(v, provider) for v in val]
+        elif key == "items":
+            out[key] = _normalize_schema_for_provider(val, provider)
+        else:
+            out[key] = val
+
+    is_object = out.get("type") == "object" or "properties" in out
+    if provider == "openai" and is_object:
+        out["additionalProperties"] = False
+        if "properties" in out:
+            # strict mode: every property must be required (use nullable types for optionality).
+            out["required"] = list(out["properties"].keys())
+    return out
+
+
 def _normalize_usage(provider: str, raw) -> dict:
     """Normalize per-provider usage objects to a flat token dict.
 
@@ -921,7 +970,7 @@ def _google_chat(
         )
     if schema:
         config.response_mime_type = "application/json"
-        config.response_schema = schema
+        config.response_schema = _normalize_schema_for_provider(schema, "google")
     if search:
         config.tools = [types.Tool(google_search=types.GoogleSearch())]
 
@@ -1061,7 +1110,11 @@ def _openai_chat(
     if schema:
         kwargs["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "response", "strict": True, "schema": schema},
+            "json_schema": {
+                "name": "response",
+                "strict": True,
+                "schema": _normalize_schema_for_provider(schema, "openai"),
+            },
         }
 
     result_text = ""
