@@ -839,8 +839,11 @@ def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
 
       - OpenAI strict (`response_format` json_schema, strict=True) REQUIRES every object to set
         `"additionalProperties": false` AND list *every* property in `"required"`. (Optionality
-        under strict is expressed as a nullable type, not omission from `required`.)
-      - Google (`response_schema`) REJECTS `"additionalProperties"` outright.
+        under strict is expressed as a nullable type, not omission from `required`.) [verified
+        against OpenAI structured-outputs docs, 2026-06-15]
+      - Google (`response_schema`) does NOT support/require `"additionalProperties"` — it constrains
+        to declared keys regardless and ignores unsupported keywords, and the google.genai SDK can
+        reject a raw dict carrying it. Either way stripping it is the safe normalization.
 
     Pure + recursive (returns a new structure; never mutates the input). Unknown providers and
     non-dict/list nodes pass through unchanged. Only `additionalProperties` is provider-specific;
