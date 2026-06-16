@@ -283,15 +283,15 @@ PROVIDER_CONFIGS = {
     "anthropic": {
         "model": "claude-opus-4-8",
         "legacy_model": "claude-sonnet-4-6",
-        "env_var": "OPENROUTER_API_KEY",  # routed via OpenRouter (no Anthropic API credits)
+        # Default transport is claude-cli subscription (OAuth). API fallback uses
+        # OpenRouter only when CLI unavailable or api_only=True.
+        "env_var": "OPENROUTER_API_KEY",
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
     },
     # Direct Anthropic API via its OpenAI-compatible endpoint (api.anthropic.com/v1/).
-    # Opt-in with `-p anthropic-direct` — the default `anthropic` provider still
-    # routes via OpenRouter. Uses ANTHROPIC_API_KEY directly (prompt caching,
-    # native rate limits). claude-cli drops ANTHROPIC_API_KEY for its OAuth path,
-    # so this does not disturb the subscription transport.
+    # Opt-in with `-p anthropic-direct` — never the default. claude-cli drops
+    # ANTHROPIC_API_KEY for its OAuth path, so subscription transport is unaffected.
     "anthropic-direct": {
         "model": "claude-opus-4-8",
         "env_var": "ANTHROPIC_API_KEY",
@@ -1386,8 +1386,19 @@ def chat(
         # Check for Gemini Flash misuse
         check_gemini_flash_usage(model_name, prompt)
 
-        # Validate reasoning_effort parameter
+        # Validate reasoning_effort parameter (map aliases like max before API check)
         restriction = get_model_restriction(model_name)
+        if reasoning_effort:
+            from .dispatch_plan import resolve_effort
+
+            mapped, effort_warns = resolve_effort(
+                reasoning_effort,
+                transport=f"{provider}-api",
+                provider=provider,
+            )
+            for msg in effort_warns:
+                logger.warn(msg)
+            reasoning_effort = mapped
         if reasoning_effort:
             if not restriction or not restriction.get("reasoning_effort"):
                 logger.warn(

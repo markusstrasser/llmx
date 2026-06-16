@@ -40,6 +40,7 @@ def _resolve_max_attempts(call_kwargs: dict) -> int:
         return 4
 
 
+from .auth import auth_to_llmx_kwargs, resolve_auth
 from .cli_backends import (
     CLI_PROVIDERS,
     needs_api_fallback,
@@ -98,7 +99,28 @@ class LLM:
     ):
         self.provider = provider
         self._is_cli = provider in CLI_PROVIDERS
-        self._cli_provider = preferred_cli_provider(provider)
+        auth = kwargs.pop("auth", None)
+        api_only = kwargs.pop("api_only", None)
+        mode = kwargs.pop("mode", None)
+        if auth is not None:
+            # Caller already resolved billing (e.g. llm_dispatch auth=).
+            api_only = None
+            resolved_auth = auth  # type: ignore[assignment]
+        else:
+            resolved_auth, _, _, _ = resolve_auth(
+                auth=auth,
+                provider=provider,
+                lite=kwargs.get("lite"),
+                api_only=api_only,
+            )
+        kwargs.update(
+            auth_to_llmx_kwargs(
+                resolved_auth, lite=kwargs.get("lite"), mode=mode
+            )
+        )
+        kwargs["auth"] = resolved_auth
+        lite = kwargs.get("lite")
+        self._cli_provider = preferred_cli_provider(provider, lite=lite)
         self.temperature = temperature
         self.search = search
         self.kwargs = kwargs
@@ -159,6 +181,8 @@ class LLM:
                     merged.get("timeout", 300),
                     schema=schema,
                     system=system,
+                    lite=merged.get("lite"),
+                    reasoning_effort=reasoning_effort,
                 )
                 if text is not None:
                     latency = time.time() - start_time
@@ -366,7 +390,19 @@ def chat(
     **kwargs,
 ) -> Response:
     """Simple chat function - one-shot calls"""
-    api_only = kwargs.pop("api_only", False)
+    auth = kwargs.pop("auth", None)
+    api_only = kwargs.pop("api_only", None)
+    mode = kwargs.pop("mode", None)
+    resolved_auth, _, _, _ = resolve_auth(
+        auth=auth,
+        provider=provider,
+        lite=kwargs.get("lite"),
+        api_only=api_only,
+    )
+    kwargs.update(
+        auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode)
+    )
+    kwargs["auth"] = resolved_auth
     # Pull init-time fields out so LLM.__init__ doesn't see them as **kwargs
     # carried into self.kwargs (timeout/max_tokens/reasoning_effort/response_format
     # are per-call options, not constructor state).
@@ -390,7 +426,7 @@ def chat(
         search=search,
         **init_kwargs,
     )
-    return llm.chat(prompt, system=system, api_only=api_only, **call_kwargs)
+    return llm.chat(prompt, system=system, **call_kwargs)
 
 
 def batch(

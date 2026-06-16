@@ -35,6 +35,7 @@ from .cli_backends import (
     preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS,
     lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
 )
+from .info_cmd import info_cmd
 from .logger import configure_logger, logger
 
 console = Console()
@@ -60,7 +61,7 @@ class _TeeWriter:
 
 
 # Subcommand names for detection
-SUBCOMMANDS = {"image", "svg", "vision", "research", "batch"}
+SUBCOMMANDS = {"image", "svg", "vision", "research", "batch", "info", "keys", "chat"}
 
 
 # ============================================================================
@@ -420,8 +421,9 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
 )
 @click.option(
     "-e", "--reasoning-effort", "--effort",
-    type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh"], case_sensitive=False),
-    help="Thinking effort override. GPT-5.5 supports up to xhigh; llmx defaults GPT-5.5 to high on API fallback.",
+    type=str,
+    default=None,
+    help="Thinking effort: none|minimal|low|medium|high|xhigh|max (max maps per backend).",
 )
 @click.option(
     "--stream/--no-stream",
@@ -507,14 +509,19 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
 )
 @click.option(
+    "--mode",
+    type=click.Choice(["chat", "agent"]),
+    default=None,
+    help=(
+        "Interaction shape: chat=one-shot req/res; agent=CLI tools/MCP loop "
+        "(subscription only). Default chat."
+    ),
+)
+@click.option(
     "--lite",
     type=click.Choice(["bare", "research"], case_sensitive=False),
     default=None,
-    help=(
-        "Cost-saving CLI mode. 'bare' = no MCPs/tools/skills. "
-        "'research' = research MCP only (papers, preprints, verify_claim). "
-        "Routes openai→codex-cli too. Empty cwd, no project context."
-    ),
+    help="Deprecated alias for --mode (bare→chat, research→agent).",
 )
 @click.option(
     "--flex",
@@ -525,6 +532,24 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
         "variable latency). For non-interactive/background dispatch — not "
         "latency-sensitive interactive calls."
     ),
+)
+@click.option(
+    "--auth",
+    type=click.Choice(["api", "subscription"]),
+    default=None,
+    help="Billing route: api (metered API key) or subscription (CLI OAuth / app sub).",
+)
+@click.option(
+    "--subscription",
+    is_flag=True,
+    default=False,
+    help="Alias for --auth subscription (codex-cli / claude-cli OAuth).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print resolved dispatch plan (transport, model, effort) and exit without calling a model.",
 )
 @click.pass_context
 def chat_cmd(
@@ -551,11 +576,31 @@ def chat_cmd(
     max_tokens,
     output_path,
     fallback_model,
+    mode,
     lite,
     flex,
+    auth,
+    subscription,
+    dry_run,
 ):
     """Text generation with LLMs (default command)."""
+    from .dispatch_plan import build_dispatch_plan, normalize_effort_input
+
     configure_logger(debug=debug, json_mode=json_output)
+
+    if auth and subscription and auth != "subscription":
+        click.echo("Error: --subscription conflicts with --auth api", err=True)
+        sys.exit(2)
+    if subscription:
+        auth = auth or "subscription"
+
+    try:
+        reasoning_effort, effort_warnings = normalize_effort_input(reasoning_effort)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(2)
+    for w in effort_warnings:
+        click.echo(f"[llmx:WARN] {w}", err=True)
 
     # List providers
     if list_providers_flag:
@@ -575,10 +620,22 @@ def chat_cmd(
 
     # Read from stdin if available — but only if we don't already have a prompt or file.
     # When launched by agents (Bash tool), stdin is a pipe but empty — read() blocks forever.
-    if not sys.stdin.isatty() and not prompt_text and not file_path:
-        logger.debug("Reading from stdin (no prompt provided)")
-        stdin_text = sys.stdin.read().strip()
-        logger.debug(f"Read {len(stdin_text)} chars from stdin")
+    # Skip for --dry-run (probe only, no prompt required).
+    if (
+        not dry_run
+        and not sys.stdin.isatty()
+        and not prompt_text
+        and not file_path
+    ):
+        import select
+
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if ready:
+            logger.debug("Reading from stdin (no prompt provided)")
+            stdin_text = sys.stdin.read().strip()
+            logger.debug(f"Read {len(stdin_text)} chars from stdin")
+        else:
+            logger.debug("stdin pipe open but empty — not blocking (agent/bash footgun)")
 
     # Read from file(s) if specified — -f is repeatable, file_path is a tuple
     if file_path:
@@ -604,7 +661,9 @@ def chat_cmd(
                 sys.exit(1)
             logger.debug(f"Read {len(part)} chars from {fp}")
             file_parts.append(part)
-        file_text = "\n\n".join(file_parts)
+        from .dispatch_plan import combine_file_context
+
+        file_text = combine_file_context(file_path, file_parts)
         logger.debug(f"Combined {len(file_path)} file(s): {len(file_text)} chars total")
 
     # Combine context sources: file > stdin > prompt
@@ -614,6 +673,8 @@ def chat_cmd(
         logger.debug("Combined context with prompt")
     elif context_parts:
         prompt_text = "\n\n".join(context_parts)
+    elif dry_run and (model or provider):
+        prompt_text = "(dry-run: no prompt)"
     elif not prompt_text:
         click.echo(ctx.get_help())
         return
@@ -796,24 +857,51 @@ def chat_cmd(
 
         if lite:
             log_payload["lite"] = lite
+        dispatch_plan = build_dispatch_plan(
+            provider=final_provider,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout=timeout,
+            lite=lite,
+            mode=mode,
+            auth=auth,
+            subscription=subscription,
+            api_only=None,
+            use_old=use_old,
+            schema=schema,
+            system=system,
+            search=search,
+            stream=stream,
+            max_tokens=max_tokens,
+        )
+        for w in dispatch_plan.warnings:
+            click.echo(f"[llmx:WARN] {w}", err=True)
+        click.echo(dispatch_plan.stderr_line(), err=True)
+        if dispatch_plan.lite:
+            log_payload["lite"] = dispatch_plan.lite
             if not lite_model_allowed(planned_model):
                 allowed = ", ".join(sorted(LITE_ALLOWED_MODELS))
                 click.echo(
-                    f"Error: --lite is restricted to the frontier models: {allowed}.\n"
-                    f"Got model={planned_model!r}. Drop --lite to use other models.",
+                    f"Error: subscription CLI mode is restricted to frontier models: {allowed}.\n"
+                    f"Got model={planned_model!r}. Use --auth api for other models.",
                     err=True,
                 )
                 sys.exit(2)
-            # Inject env-notice prefix so the model knows what tools exist.
-            # Done here (not in cli_chat) so Anthropic API path also gets it.
-            prompt_text = LITE_PROMPT_PREFIX[lite] + prompt_text
+            prompt_text = LITE_PROMPT_PREFIX[dispatch_plan.lite] + prompt_text
+        if dry_run:
+            if json_output:
+                click.echo(json.dumps(dispatch_plan.to_dict(), indent=2))
+            else:
+                click.echo(json.dumps(dispatch_plan.to_dict(), indent=2))
+            return
         logger.info("Starting chat", log_payload)
+        dispatch_effort = dispatch_plan.effort_applied or reasoning_effort
         _result_text = chat(
             prompt_text,
             final_provider,
             model,
             final_temperature,
-            reasoning_effort,
+            dispatch_effort,
             stream,
             debug,
             json_output,
@@ -975,6 +1063,7 @@ def cli():
 
 # Register subcommands
 cli.add_command(chat_cmd, name="chat")
+cli.add_command(info_cmd, name="info")
 cli.add_command(image_cmd, name="image")
 cli.add_command(svg_cmd, name="svg")
 cli.add_command(vision_cmd, name="vision")

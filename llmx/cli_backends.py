@@ -49,9 +49,9 @@ CLI_PROVIDERS = {
 
 # Prefer subscription CLIs for logical providers when available.
 # Google has NO CLI alias — it always routes to the paid Gemini API (the free
-# gemini-cli consumer tier was retired 2026-06-18). OpenAI/Anthropic route to
-# codex-cli/claude-cli only in --lite mode (full MCP load = ~37K context
-# overhead + ~10s startup; lite profile disables MCPs and loads in ~1s).
+# gemini-cli consumer tier was retired 2026-05-31). OpenAI routes to codex-cli
+# only in --lite/--subscription mode. Anthropic defaults to claude-cli
+# subscription (OAuth, API key stripped) unless -p anthropic-direct / api_only.
 # `cursor` always resolves to cursor-cli (subscription-only, no API path), so
 # it lives in the non-lite alias map — reachable in every mode, not just --lite.
 CLI_PROVIDER_ALIASES = {"cursor": "cursor-cli"}
@@ -330,9 +330,17 @@ def cli_chat(
             if model:
                 cmd.extend(["-m", model])
             if reasoning_effort and reasoning_effort in {
-                "minimal", "low", "medium", "high", "xhigh"
+                "minimal", "low", "medium", "high", "xhigh", "max", "none"
             }:
-                cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+                from .dispatch_plan import resolve_effort
+
+                codex_effort, _ = resolve_effort(
+                    reasoning_effort,
+                    transport="codex-cli",
+                    provider="openai",
+                )
+                if codex_effort:
+                    cmd.extend(["-c", f'model_reasoning_effort="{codex_effort}"'])
             if schema:
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".json", delete=False, encoding="utf-8"
@@ -377,6 +385,16 @@ def cli_chat(
                 ])
             if model:
                 cmd.extend(["--model", model])
+            if reasoning_effort:
+                from .dispatch_plan import resolve_effort
+
+                claude_effort, _ = resolve_effort(
+                    reasoning_effort,
+                    transport="claude-cli",
+                    provider="anthropic",
+                )
+                if claude_effort:
+                    cmd.extend(["--effort", claude_effort])
             # Always pipe prompt via stdin — keeps long prompts off argv.
             stdin_input = prompt
         elif binary == "cursor-agent":
@@ -425,13 +443,18 @@ def cli_chat(
             # only on the prompt, never the caller's workspace context.
             cwd = _cursor_cwd()
             logger.debug(f"[cli] cursor cwd={cwd}")
-        elif lite:
-            cwd = _lite_cwd(lite)
-            logger.debug(f"[cli] lite={lite} cwd={cwd}")
+        elif lite or binary == "claude":
+            if lite:
+                cwd = _lite_cwd(lite)
+                logger.debug(f"[cli] lite={lite} cwd={cwd}")
+            elif binary == "claude":
+                cwd = _lite_cwd("bare")
+                logger.debug("[cli] claude subscription cwd (bare cache)")
             env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_ID"}
             if binary == "claude":
                 env.pop("ANTHROPIC_API_KEY", None)
-                logger.debug("[cli] lite claude (OAuth, no API key)")
+                env.pop("CLAUDE_API_KEY", None)
+                logger.debug("[cli] claude-cli OAuth (API keys stripped)")
 
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
