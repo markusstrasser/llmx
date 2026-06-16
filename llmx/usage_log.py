@@ -66,6 +66,14 @@ def _resolve_caller() -> Optional[str]:
             return base
     except Exception:
         pass
+    # No script ancestor — but if a human is at a TTY, this is an interactive `llmx`
+    # invocation (legitimately caller-less). Label it so rollups read "interactive"
+    # not blank/(unattributed); cwd still attributes it to a project.
+    try:
+        if sys.stdin.isatty() or sys.stdout.isatty():
+            return "interactive"
+    except Exception:
+        pass
     return None
 
 
