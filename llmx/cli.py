@@ -912,8 +912,9 @@ def chat_cmd(
             system=system,
             schema=schema,
             max_tokens=max_tokens,
-            lite=lite,
+            lite=dispatch_plan.lite,
             service_tier="flex" if flex else None,
+            auth=dispatch_plan.auth,
         )
 
     except KeyboardInterrupt:
@@ -1047,6 +1048,25 @@ class LlmxGroup(click.Group):
         return super().parse_args(ctx, args)
 
 
+@click.command("usage")
+@click.option("--by", type=click.Choice(["caller", "cwd", "model", "provider"]), default="caller",
+              help="group by (default: caller — who spent it)")
+@click.option("--days", type=int, default=30, help="look back N days (default 30)")
+@click.option("--since", help="ISO date floor (overrides --days)")
+@click.option("--model", help="filter to one model")
+@click.option("--log", help="usage log path (default ~/.claude/llmx-usage.jsonl)")
+def usage_cmd(by, days, since, model, log):
+    """Cost/token rollup over the usage log. `--by model` adds context-window headroom.
+
+    Examples:
+        llmx usage                          # by caller, last 30d
+        llmx usage --by model --days 7      # cost + ctx-window headroom per model
+        llmx usage --by cwd                 # spend per project
+    """
+    from .usage_report import summarize
+    click.echo(summarize(by=by, days=days, since=since, model=model, log=log))
+
+
 @click.group(cls=LlmxGroup)
 @click.version_option(version=__version__)
 def cli():
@@ -1064,6 +1084,7 @@ def cli():
 # Register subcommands
 cli.add_command(chat_cmd, name="chat")
 cli.add_command(info_cmd, name="info")
+cli.add_command(usage_cmd, name="usage")
 cli.add_command(image_cmd, name="image")
 cli.add_command(svg_cmd, name="svg")
 cli.add_command(vision_cmd, name="vision")
