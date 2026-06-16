@@ -15,31 +15,40 @@ uv tool install --editable /path/to/llmx
 ## CLI
 
 ```bash
-# Default provider (Gemini 3.1 Pro via Gemini CLI when installed)
+# Default provider: Google Gemini (paid API — free Gemini CLI retired 2026-05-31)
 llmx "What is 2+2?"
 
 # Model auto-infers provider
-llmx -m gpt-5.4 "Explain Python"
-llmx -m claude-opus-4-6 "Write code"
+llmx -m gpt-5.5 "Explain Python"
+llmx -m claude-opus-4-8 "Write code"   # defaults to claude-cli subscription
 llmx -m kimi-k2.5 "Complex task"
 llmx -m cerebras/qwen-3-coder-480b "Fast coding"
 
 # Pipe input
-cat code.py | llmx -m claude-sonnet-4-6 "Review this"
+cat code.py | llmx -m claude-opus-4-8 "Review this"
 
-# Web search grounding (Google, Anthropic)
+# Subscription routes ($0 OAuth — preferred for GPT/Claude batch work)
+llmx chat --subscription -m gpt-5.5 "Quick task"
+llmx chat --subscription -m claude-opus-4-8 "Review this"
+
+# Probe resolved transport before dispatch
+llmx chat --dry-run --subscription -m claude-opus-4-8 -e max "ping"
+llmx info --write-mirror   # → ~/.claude/cache/llmx-routing.json
+
+# Web search grounding (Google, Anthropic API)
 llmx --search "Latest news on fusion energy"
 
 # Fast mode (Gemini Flash + low reasoning effort)
 llmx --fast "Quick question"
 
 # Control thinking budget (OpenAI, Gemini)
-llmx -m gpt-5.4 --reasoning-effort xhigh "Hard task"
+llmx -m gpt-5.5 --reasoning-effort xhigh "Hard task"
 llmx -m gemini-3-flash --reasoning-effort high "Hard task"
 
-# Force direct APIs instead of subscription CLIs
-llmx -p openai "Reply with OK"
+# Explicit metered API (opt-in — Claude defaults to subscription)
+llmx -p anthropic-direct -m claude-opus-4-8 "API billing path"
 llmx -p google --search "Latest news on fusion energy"
+llmx -p openai "Reply with OK"
 
 # System prompt (works with both CLI and API transport)
 llmx -s "You are terse" "Reply with OK"
@@ -57,9 +66,10 @@ llmx --json "Generate {name, age}"
 ### Subcommands
 
 ```bash
-# Image generation (Gemini 3 Pro Image)
+# Image generation (OpenAI GPT Image 2 by default)
 llmx image "a cute robot mascot" -o robot.png
-llmx image "pixel art knight" -r 2K -a 16:9
+llmx image -i photobooth.jpg -o haircut.png "same person, textured crop, short boxed beard"
+llmx image "pixel art knight" --provider google -m pro -r 2K -a 16:9
 
 # SVG generation
 llmx svg "momentum arrow icon" -o arrow.svg
@@ -152,8 +162,9 @@ prompt = validate_prompt(user_input, min_length=5, max_length=10000)
 | Provider | Default model | Flag |
 |----------|--------------|------|
 | `google` | Gemini 3.1 Pro | (default) |
-| `openai` | GPT-5.4 | `-p openai` |
-| `anthropic` | Claude Opus 4.6 | `-p anthropic` |
+| `openai` | GPT-5.5 | `-p openai` |
+| `anthropic` | Claude Opus 4.8 | `-p anthropic` (→ claude-cli subscription) |
+| `anthropic-direct` | Claude Opus 4.8 | `-p anthropic-direct` (metered API, opt-in) |
 | `xai` | Grok 4 | `-p xai` |
 | `kimi` | Kimi K2.5 | `-p kimi` |
 | `cerebras` | Qwen 3 Coder 480B | `-p cerebras` |
@@ -162,10 +173,12 @@ prompt = validate_prompt(user_input, min_length=5, max_length=10000)
 
 Transport defaults:
 
-- `google` prefers `gemini` CLI when installed, then falls back to the Gemini API.
-- `openai` prefers `codex exec` when installed, then falls back to the OpenAI API.
+- `google` → paid Gemini API (free Gemini CLI retired 2026-05-31).
+- `openai` → OpenAI API by default; `codex-cli` via `--subscription` / `--lite bare`.
+- `anthropic` → **claude-cli subscription by default** (OAuth, API keys stripped). Use `-p anthropic-direct` for metered API.
 - `codex-cli` supports JSON schema output via `codex exec --output-schema`.
-- `-s` (system messages) works with CLI transports — they're folded into the prompt as `<system>` XML.
+- `-s` (system messages) works with CLI transports — folded into the prompt as `<system>` XML.
+- `llmx info --write-mirror` writes routing facts to `~/.claude/cache/llmx-routing.json`.
 
 All thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5) have temperature fixed at 1.0.
 
