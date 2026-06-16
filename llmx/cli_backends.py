@@ -1,7 +1,7 @@
 """CLI-backed providers: codex-cli, claude-cli.
 
 Shell out to Codex CLI / Claude Code instead of API for subscription pricing.
-Fall back to API transparently when CLI can't handle requested features.
+Fall back to metered API only on auth=api routes — subscription forbids silent billing.
 
 Gemini routing was removed 2026-05-31: Google retired the free Gemini CLI
 consumer tier (Antigravity migration, hard cutoff 2026-06-18), and the
@@ -229,6 +229,34 @@ def needs_api_fallback(
     return None
 
 
+def subscription_route(*, auth: Optional[str] = None, lite: Optional[str] = None) -> bool:
+    """True when the caller chose subscription billing (CLI OAuth / app sub)."""
+    return auth == "subscription" or lite in _LITE_MODES
+
+
+def resolve_cli_api_fallback(
+    cli_provider: str,
+    *,
+    auth: Optional[str] = None,
+    lite: Optional[str] = None,
+    reason: str,
+) -> str:
+    """Return API provider for CLI→API fallback, or raise if blocked."""
+    if subscription_route(auth=auth, lite=lite):
+        raise RuntimeError(
+            f"{cli_provider} failed ({reason}) but auth=subscription forbids "
+            f"metered API fallback. Fix the CLI issue or pass auth=api."
+        )
+    api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
+    if api_provider is None:
+        raise ValueError(
+            f"{cli_provider} cannot handle this request ({reason}) "
+            f"and has no API fallback. Drop the unsupported option "
+            f"(e.g. --schema/--search/--stream) or pick a different model."
+        )
+    return api_provider
+
+
 class LiteEnvironmentError(RuntimeError):
     """Raised when --lite mode {!r} doesn't have a packaged cwd.
 
@@ -274,6 +302,44 @@ def _cursor_cwd() -> str:
     """
     _CURSOR_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     return str(_CURSOR_RUNTIME_DIR)
+
+
+def _parse_claude_json(stdout: str):
+    """Unwrap `claude -p --output-format json` (an events list) → (text, usage|None).
+
+    text = the result event's `result` (the model's answer, schema-string or prose).
+    usage = real tokens + API-equivalent total_cost_usd (present even on subscription).
+    On is_error or parse failure → (None, None): the caller treats None as a CLI miss
+    and falls back to API (the pre-existing failure semantics — never returns broken text).
+    """
+    try:
+        events = json.loads(stdout)
+    except Exception:
+        return None, None
+    if isinstance(events, dict):
+        events = [events]
+    if not isinstance(events, list):
+        return None, None
+    for e in events:
+        if not isinstance(e, dict) or e.get("type") != "result":
+            continue
+        if e.get("is_error"):
+            return None, None
+        r = e.get("result")
+        if not isinstance(r, str):
+            return None, None
+        u = e.get("usage") or {}
+        mu = e.get("modelUsage") or {}
+        model_key = next(iter(mu), None)
+        usage = {
+            "model": model_key.split("[")[0] if isinstance(model_key, str) else None,  # strip [1m] etc → PRICING key
+            "input_tokens": u.get("input_tokens"),
+            "output_tokens": u.get("output_tokens"),
+            "cache_read_input_tokens": u.get("cache_read_input_tokens"),
+            "total_cost_usd": e.get("total_cost_usd"),
+        }
+        return r, usage
+    return None, None
 
 
 def cli_chat(
@@ -362,7 +428,12 @@ def cli_chat(
             cmd = [
                 "claude", "-p",
                 "--no-session-persistence",
-                "--output-format", "text",
+                # json (not text): the result event carries REAL usage + the
+                # API-equivalent total_cost_usd even on the OAuth subscription path
+                # (verified 2026-06-16). We unwrap result.result for the caller, so
+                # this is transparent to the text-return contract. Closes the
+                # subscription-usage blind spot (was 100% api-transport in the log).
+                "--output-format", "json",
                 "--disable-slash-commands",
             ]
             if lite == "research":
@@ -496,6 +567,33 @@ def cli_chat(
         if not text:
             logger.info(f"[cli→api] {binary} returned empty output")
             return None
+
+        # claude --output-format json: unwrap the result text + log REAL usage at this
+        # chokepoint (both CLI/sub paths funnel here). Closes the blind spot where
+        # subscription calls never reached log_usage. Best-effort: a log failure never
+        # breaks the call; a json-parse failure falls back to API (clean miss).
+        if binary == "claude":
+            parsed_text, usage = _parse_claude_json(text)
+            if parsed_text is None:
+                logger.info(f"[cli→api] claude json parse/error; treating as CLI miss")
+                return None
+            text = parsed_text
+            if usage:
+                try:
+                    from .usage_log import log_usage
+                    log_usage(
+                        provider=provider,
+                        model=usage.get("model") or model or "?",
+                        transport="claude-cli",  # subscription/CLI — cost is API-EQUIVALENT, not spend
+                        reasoning_effort=reasoning_effort,
+                        prompt_tokens=usage.get("input_tokens"),
+                        completion_tokens=usage.get("output_tokens"),
+                        reasoning_tokens=None,
+                        cached_tokens=usage.get("cache_read_input_tokens"),
+                        latency_s=elapsed,
+                    )
+                except Exception as exc:
+                    logger.debug(f"[cli] usage log skipped: {exc}")
 
         logger.debug(f"[cli] {binary} responded in {elapsed:.1f}s ({len(text)} chars)")
         return text
