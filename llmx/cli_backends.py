@@ -213,7 +213,13 @@ def needs_api_fallback(
 
     if not shutil.which(binary):
         return f"{binary} not found in PATH"
-    if schema and provider != "codex-cli":
+    # codex-cli WAS exempted here (it has `codex exec --output-schema`), but that path is broken on
+    # codex v0.140.0 — it exits 1 with a generic CLI error instead of honoring the schema (reproduced
+    # 2026-06-18: `gpt-5.5 --subscription --schema`). Treat schema as CLI-unsupported for ALL CLIs:
+    # this falls back to the API (which does structured output) on the metered lane, or raises a clear
+    # "use --auth api" error on subscription — instead of an opaque codex failure. Re-add the
+    # `and provider != "codex-cli"` guard if/when codex --output-schema is fixed upstream.
+    if schema:
         return "structured output not supported by CLI"
     # system messages: folded into prompt as <system> XML tag (no CLI flag needed)
     if search:
