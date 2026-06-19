@@ -249,6 +249,14 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["medium"],
         "default_effort": "medium",
     },
+    # Z.ai GLM-5.2 (2026-06-13): dual reasoning modes; OpenRouter exposes effort high/xhigh
+    # (xhigh → max). No fixed temperature; provider temperature_range (0.0, 1.0) governs.
+    "glm-5.2": {
+        "temperature": 1.0,
+        "fixed": False,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["high", "xhigh"],
+    },
     # Kimi K2.5 thinking model (Jan 2026)
     "kimi-k2.5": {
         "temperature": 1.0,
@@ -341,6 +349,17 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.5),
         "supports_streaming": True,
     },
+    # Z.ai / Zhipu GLM family (GLM-5.2 launched 2026-06-13: 1M context, coding-first,
+    # ~1/6 GPT-5.5 cost). Transport routes through OpenRouter (OPENROUTER_API_KEY) because
+    # the direct metered Z.ai API was still rolling out at launch and the GLM Coding Plan
+    # endpoint is Anthropic-compatible/subscription-only. Flip base_url + env_var to the
+    # direct Z.ai API (https://api.z.ai/api/paas/v4) once a ZAI_API_KEY exists.
+    "zai": {
+        "model": "z-ai/glm-5.2",
+        "env_var": "OPENROUTER_API_KEY",
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": True,
+    },
     # CLI-backed providers: shell out to subscription CLIs instead of per-token API.
     # (gemini-cli removed 2026-05-31 — free Gemini CLI tier retired; google → paid API.)
     "codex-cli": {
@@ -384,11 +403,13 @@ OPENAI_COMPAT_URLS = {
     "minimax": "https://api.minimax.io/v1",  # international endpoint; M3 emits <think> blocks inline
     "anthropic": "https://openrouter.ai/api/v1",  # Anthropic via OpenRouter
     "anthropic-direct": "https://api.anthropic.com/v1/",  # direct Anthropic OpenAI-compat
+    "zai": "https://openrouter.ai/api/v1",  # GLM via OpenRouter (flip to api.z.ai when keyed)
 }
 
 # API key overrides for providers routed through another service
 API_KEY_OVERRIDES = {
     "anthropic": "OPENROUTER_API_KEY",
+    "zai": "OPENROUTER_API_KEY",
 }
 
 
@@ -410,6 +431,11 @@ _STRIP_PREFIXES = {
 
 def _normalize_model(provider: str, model: str) -> str:
     """Strip synthetic LiteLLM prefixes, preserve real provider model IDs."""
+    # Z.ai routes through OpenRouter, whose GLM ids are namespaced `z-ai/…`. Accept bare
+    # `glm-5.2` or `zai/glm-5.2` and emit the OpenRouter id the API expects.
+    if provider == "zai":
+        m = model[len("zai/") :] if model.startswith("zai/") else model
+        return m if m.startswith("z-ai/") else f"z-ai/{m}"
     prefix = _STRIP_PREFIXES.get(provider)
     if prefix and model.startswith(prefix):
         logger.debug(f"Stripped prefix '{prefix}' from model '{model}'")
@@ -450,6 +476,7 @@ _KNOWN_MODELS = {
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3-coder-480b"],
     "anthropic-direct": ["claude-opus-4-8"],
+    "zai": ["z-ai/glm-5.2", "z-ai/glm-5.2[1m]", "z-ai/glm-5.1", "z-ai/glm-5"],
 }
 
 
@@ -508,6 +535,11 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # Check for explicit prefixes first
     if model.startswith("openrouter/"):
         return "openrouter"
+    # Z.ai / Zhipu GLM family (glm-5.2, glm-5.1, …). Unambiguous substring; routes via
+    # OpenRouter today (see PROVIDER_CONFIGS["zai"]). An explicit openrouter/ prefix above
+    # still wins for callers who pass the full z-ai/... OpenRouter id directly.
+    if model.startswith("zai/") or "glm" in model_lower:
+        return "zai"
     if model.startswith("moonshot/") or "kimi" in model_lower:
         return "kimi"
     if "minimax" in model_lower:
@@ -1264,6 +1296,7 @@ def chat(
     max_tokens: Optional[int] = None,
     lite: Optional[str] = None,
     service_tier: Optional[str] = None,
+    auth: Optional[str] = None,
 ) -> Optional[str]:
     """Execute chat with single provider.  Returns response text (or None).
 
@@ -1301,6 +1334,7 @@ def chat(
             needs_api_fallback,
             cli_chat,
             preferred_cli_provider,
+            resolve_cli_api_fallback,
         )
 
         cli_provider = preferred_cli_provider(provider, lite=lite)
@@ -1324,15 +1358,12 @@ def chat(
                 max_tokens,
             )
             if fallback_reason:
-                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-                if api_provider is None:
-                    # Subscription-only CLI (cursor) with no API path — a
-                    # request needing an unsupported feature can't be served.
-                    raise ValueError(
-                        f"{cli_provider} cannot handle this request ({fallback_reason}) "
-                        f"and has no API fallback. Drop the unsupported option "
-                        f"(e.g. --schema/--search/--stream) or pick a different model."
-                    )
+                api_provider = resolve_cli_api_fallback(
+                    cli_provider,
+                    auth=auth,
+                    lite=lite,
+                    reason=fallback_reason,
+                )
                 logger.info(
                     f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
                 )
@@ -1352,15 +1383,13 @@ def chat(
                 if text is not None:
                     print(text)
                     return text
-                # CLI failed — fall back to API (if one exists)
-                api_provider = CLI_PROVIDERS[cli_provider]["api_fallback"]
-                if api_provider is None:
-                    # Subscription-only CLI (cursor) — nowhere to fall back to.
-                    raise RuntimeError(
-                        f"{cli_provider} ({cli_model}) failed and has no API "
-                        f"fallback. Check `cursor-agent status` (auth) and the "
-                        f"model name via `cursor-agent --list-models`."
-                    )
+                # CLI failed — fall back to API only on auth=api routes
+                api_provider = resolve_cli_api_fallback(
+                    cli_provider,
+                    auth=auth,
+                    lite=lite,
+                    reason="CLI returned error",
+                )
                 elapsed_cli = int(time.time() - start_time)
                 remaining = max(timeout - elapsed_cli, 5)
                 if use_alarm:
