@@ -88,7 +88,7 @@ def analyze_media(
         )
 
     # Select model
-    model_name = "gemini-3-flash-preview" if model == "flash" else "gemini-3-pro-preview"
+    model_name = "gemini-3-flash-preview" if model == "flash" else "gemini-3.1-pro-preview"
     logger.info(f"Using model: {model_name}")
 
     client = genai.Client()
