@@ -16,6 +16,7 @@ from .cli_backends import (
     lite_model_allowed,
     needs_api_fallback,
     preferred_cli_provider,
+    subscription_route,
 )
 from .providers import get_model_name, get_model_restriction, infer_provider_from_model
 
@@ -212,11 +213,13 @@ def build_dispatch_plan(
             effort_token,
             max_tokens,
         )
-        planned_transport = (
-            f"{CLI_PROVIDERS[cli_provider]['api_fallback']}-api"
-            if cli_fallback_reason and CLI_PROVIDERS[cli_provider]["api_fallback"]
-            else cli_provider
-        )
+        if cli_fallback_reason and not subscription_route(
+            auth=resolved_auth, lite=effective_lite
+        ):
+            api_fb = CLI_PROVIDERS[cli_provider]["api_fallback"]
+            planned_transport = f"{api_fb}-api" if api_fb else cli_provider
+        else:
+            planned_transport = cli_provider
     else:
         planned_model = get_model_name(final_provider, model, use_old)
         planned_transport = f"{final_provider}-api"

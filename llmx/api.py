@@ -46,6 +46,7 @@ from .cli_backends import (
     needs_api_fallback,
     cli_chat,
     preferred_cli_provider,
+    resolve_cli_api_fallback,
 )
 from .logger import logger
 from .inspect import capture_call
@@ -154,15 +155,14 @@ class LLM:
         **kwargs,
     ) -> Response:
         """Send chat message and return Response."""
-        # CLI backend — try CLI first, fall back to API
-        if self._cli_provider and not kwargs.pop("api_only", False):
-            # Per-call kwargs override stored self.kwargs (e.g. someone built
-            # an LLM with default timeout but passes max_tokens=65536 on a
-            # specific .chat() call).
-            merged = {**self.kwargs, **kwargs}
+        # CLI backend — try CLI first, fall back to API only on auth=api routes
+        merged = {**self.kwargs, **kwargs}
+        if self._cli_provider and not merged.get("api_only", False):
             schema = merged.get("response_format")
             reasoning_effort = merged.get("reasoning_effort")
             max_tokens = merged.get("max_tokens")
+            auth = merged.get("auth")
+            lite = merged.get("lite")
             fallback_reason = needs_api_fallback(
                 self._cli_provider,
                 schema,
@@ -181,7 +181,7 @@ class LLM:
                     merged.get("timeout", 300),
                     schema=schema,
                     system=system,
-                    lite=merged.get("lite"),
+                    lite=lite,
                     reasoning_effort=reasoning_effort,
                 )
                 if text is not None:
@@ -198,17 +198,28 @@ class LLM:
                         latency=latency,
                         raw=None,
                     )
-            # Fall back to API provider — disable CLI on fallback to prevent recursion
-            api_provider = CLI_PROVIDERS[self._cli_provider]["api_fallback"]
-            logger.info(
-                f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason or 'CLI error'})"
+                fallback_reason = "CLI error"
+            api_provider = resolve_cli_api_fallback(
+                self._cli_provider,
+                auth=auth,
+                lite=lite,
+                reason=fallback_reason,
             )
+            logger.info(
+                f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason})"
+            )
+            fallback_kwargs = {
+                **self.kwargs,
+                "auth": "api",
+                "api_only": True,
+                "lite": None,
+            }
             fallback = LLM(
                 provider=api_provider,
                 model=self.model,
                 temperature=self.temperature,
                 search=self.search,
-                **self.kwargs,
+                **fallback_kwargs,
             )
             fallback._cli_provider = None  # prevent infinite fallback loop
             return fallback.chat(
