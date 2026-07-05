@@ -114,10 +114,10 @@ try:
 
     # Test retry decorator (won't actually retry since call should succeed)
     @retry(max_attempts=2, backoff=0.5)
-    def test_retry():
+    def exercise_retry():
         return chat("Hi", provider=provider)
 
-    result = test_retry()
+    result = exercise_retry()
     assert hasattr(result, 'content')
     print("✓ retry() decorator works")
 
@@ -125,22 +125,22 @@ try:
     call_count = [0]
 
     @cache(ttl=60)
-    def test_cache(prompt):
+    def exercise_cache(prompt):
         call_count[0] += 1
         return chat(prompt, provider=provider)
 
     # First call - should hit LLM
-    cached_result1 = test_cache("Cache test")
+    cached_result1 = exercise_cache("Cache test")
     assert call_count[0] == 1
     print("✓ cache() decorator works (first call)")
 
     # Second call with same prompt - should use cache
-    cached_result2 = test_cache("Cache test")
+    cached_result2 = exercise_cache("Cache test")
     assert call_count[0] == 1, "Should not increment (cache hit)"
     print("✓ cache() decorator works (cache hit)")
 
     # Third call with different prompt - should hit LLM
-    cached_result3 = test_cache("Different prompt")
+    cached_result3 = exercise_cache("Different prompt")
     assert call_count[0] == 2, "Should increment (cache miss)"
     print("✓ cache() decorator works (cache miss)")
 

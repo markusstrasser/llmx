@@ -13,6 +13,52 @@ import os
 import sys
 import time
 
+
+def _skip_optional_provider(label: str, exc: Exception) -> bool:
+    msg = f"[{label}] SKIP — {type(exc).__name__}: {exc}"
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        import pytest
+
+        pytest.skip(msg)
+    print(msg)
+    return True
+
+
+def _optional_provider_unavailable(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {401, 403, 429}:
+        return True
+    msg = str(exc).lower()
+    return any(
+        marker in msg
+        for marker in ("api key", "permission", "quota", "credit", "rate limit")
+    )
+
+
+def _openai_compat_smoke(label: str, api_key: str, base_url: str, model: str) -> bool:
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=30.0,
+    )
+    start = time.time()
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
+            max_tokens=10,
+        )
+    except Exception as exc:
+        if _optional_provider_unavailable(exc):
+            return _skip_optional_provider(label, exc)
+        raise
+    elapsed = time.time() - start
+    text = response.choices[0].message.content
+    print(f"[{label}] {elapsed:.1f}s — {text.strip()}")
+    return True
+
 # ---------------------------------------------------------------------------
 # Google GenAI SDK — direct
 # ---------------------------------------------------------------------------
@@ -158,8 +204,8 @@ def test_google_timeout():
     from google import genai
     from google.genai import types
 
-    # Client-level timeout
-    client = genai.Client(http_options=types.HttpOptions(timeout=5000))  # 5s in ms
+    # Client-level timeout. Google GenAI rejects manual deadlines below 10s.
+    client = genai.Client(http_options=types.HttpOptions(timeout=10000))  # 10s in ms
     response = client.models.generate_content(
         model="gemini-3-flash-preview",
         contents="Say hi.",
@@ -263,23 +309,12 @@ def test_xai_via_openai():
         print("[xai/basic] SKIP — no XAI_API_KEY")
         return True
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.x.ai/v1",
-        timeout=30.0,
+    return _openai_compat_smoke(
+        "xai/basic",
+        api_key,
+        "https://api.x.ai/v1",
+        "grok-3-mini-fast",
     )
-    start = time.time()
-    response = client.chat.completions.create(
-        model="grok-3-mini-fast",  # cheapest for testing
-        messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
-        max_tokens=10,
-    )
-    elapsed = time.time() - start
-    text = response.choices[0].message.content
-    print(f"[xai/basic] {elapsed:.1f}s — {text.strip()}")
-    return True
 
 
 def test_deepseek_via_openai():
@@ -289,23 +324,12 @@ def test_deepseek_via_openai():
         print("[deepseek/basic] SKIP — no DEEPSEEK_API_KEY")
         return True
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
-        timeout=30.0,
+    return _openai_compat_smoke(
+        "deepseek/basic",
+        api_key,
+        "https://api.deepseek.com",
+        "deepseek-chat",
     )
-    start = time.time()
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
-        max_tokens=10,
-    )
-    elapsed = time.time() - start
-    text = response.choices[0].message.content
-    print(f"[deepseek/basic] {elapsed:.1f}s — {text.strip()}")
-    return True
 
 
 def test_openrouter_via_openai():
@@ -315,23 +339,12 @@ def test_openrouter_via_openai():
         print("[openrouter/basic] SKIP — no OPENROUTER_API_KEY")
         return True
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-        timeout=30.0,
+    return _openai_compat_smoke(
+        "openrouter/basic",
+        api_key,
+        "https://openrouter.ai/api/v1",
+        "openai/gpt-4o-mini",
     )
-    start = time.time()
-    response = client.chat.completions.create(
-        model="openai/gpt-4o-mini",
-        messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
-        max_tokens=10,
-    )
-    elapsed = time.time() - start
-    text = response.choices[0].message.content
-    print(f"[openrouter/basic] {elapsed:.1f}s — {text.strip()}")
-    return True
 
 
 def test_cerebras_via_openai():
@@ -341,23 +354,12 @@ def test_cerebras_via_openai():
         print("[cerebras/basic] SKIP — no CEREBRAS_API_KEY")
         return True
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.cerebras.ai/v1",
-        timeout=30.0,
+    return _openai_compat_smoke(
+        "cerebras/basic",
+        api_key,
+        "https://api.cerebras.ai/v1",
+        "llama-4-scout-17b-16e-instruct",
     )
-    start = time.time()
-    response = client.chat.completions.create(
-        model="llama-4-scout-17b-16e-instruct",  # cheapest available
-        messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
-        max_tokens=10,
-    )
-    elapsed = time.time() - start
-    text = response.choices[0].message.content
-    print(f"[cerebras/basic] {elapsed:.1f}s — {text.strip()}")
-    return True
 
 
 def test_kimi_via_openai():
@@ -367,23 +369,12 @@ def test_kimi_via_openai():
         print("[kimi/basic] SKIP — no MOONSHOT_API_KEY")
         return True
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.moonshot.cn/v1",
-        timeout=30.0,
+    return _openai_compat_smoke(
+        "kimi/basic",
+        api_key,
+        "https://api.moonshot.cn/v1",
+        "moonshot-v1-8k",
     )
-    start = time.time()
-    response = client.chat.completions.create(
-        model="moonshot-v1-8k",  # cheapest for testing
-        messages=[{"role": "user", "content": "What is 2+2? Just the number."}],
-        max_tokens=10,
-    )
-    elapsed = time.time() - start
-    text = response.choices[0].message.content
-    print(f"[kimi/basic] {elapsed:.1f}s — {text.strip()}")
-    return True
 
 
 # ---------------------------------------------------------------------------

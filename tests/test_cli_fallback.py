@@ -50,5 +50,30 @@ class TestLlmSubscriptionFallback(unittest.TestCase):
         self.assertIn("forbids", str(ctx.exception))
 
 
+class TestProviderSubscriptionFallback(unittest.TestCase):
+    @patch("llmx.cli_backends.needs_api_fallback", return_value="structured output not supported by CLI")
+    @patch("llmx.cli_backends.preferred_cli_provider", return_value="claude-cli")
+    def test_subscription_forced_fallback_raises_with_reason(self, *_mocks):
+        from llmx.providers import chat
+
+        with self.assertRaises(RuntimeError) as ctx:
+            chat(
+                "hi",
+                provider="anthropic",
+                model="claude-fable-5",
+                temperature=0.7,
+                reasoning_effort="medium",
+                stream=False,
+                debug=False,
+                json_output=False,
+                schema={"type": "object"},
+                lite="bare",
+                auth="subscription",
+            )
+        message = str(ctx.exception)
+        self.assertIn("structured output not supported by CLI", message)
+        self.assertIn("auth=subscription forbids metered API fallback", message)
+
+
 if __name__ == "__main__":
     unittest.main()

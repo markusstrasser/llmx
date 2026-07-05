@@ -32,7 +32,6 @@ from .providers import (
     EXIT_GENERAL, PROVIDER_CONFIGS, get_model_name, get_model_restriction,
 )
 from .cli_backends import (
-    preferred_cli_provider, needs_api_fallback, CLI_PROVIDERS,
     lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
 )
 from .info_cmd import info_cmd
@@ -773,37 +772,30 @@ def chat_cmd(
         # forcing streaming (which breaks reasoning models whose delta.content is
         # empty during the thinking phase) while still capturing output reliably.
 
-        requested_reasoning_effort = reasoning_effort
-        cli_provider = preferred_cli_provider(final_provider, lite=lite)
-        cli_fallback_reason = None
+        dispatch_plan = build_dispatch_plan(
+            provider=final_provider,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout=timeout,
+            lite=lite,
+            mode=mode,
+            auth=auth,
+            subscription=subscription,
+            api_only=None,
+            use_old=use_old,
+            schema=schema,
+            system=system,
+            search=search,
+            stream=stream,
+            max_tokens=max_tokens,
+        )
 
-        if cli_provider:
-            logical_provider = (
-                CLI_PROVIDERS[cli_provider]["api_fallback"]
-                if final_provider in CLI_PROVIDERS
-                else final_provider
-            )
-            planned_model = model or get_model_name(logical_provider, None, use_old)
-            cli_fallback_reason = needs_api_fallback(
-                cli_provider, schema, system, search, stream, requested_reasoning_effort, max_tokens
-            )
-            if cli_fallback_reason:
-                api_fb = CLI_PROVIDERS[cli_provider]["api_fallback"]
-                # Subscription-only CLI (cursor) has no api_fallback — chat()
-                # raises on the unsupported feature; label the transport as the
-                # CLI itself rather than "None-api".
-                planned_transport = f"{api_fb}-api" if api_fb else cli_provider
-            else:
-                planned_transport = cli_provider
-        else:
-            planned_model = get_model_name(final_provider, model, use_old)
-            planned_transport = f"{final_provider}-api"
-
-        effective_reasoning_effort = requested_reasoning_effort
+        requested_reasoning_effort = dispatch_plan.requested_effort
+        effective_reasoning_effort = dispatch_plan.effort_applied
         reasoning_effort_source = "user" if requested_reasoning_effort else None
 
-        if planned_transport.endswith("-api"):
-            restriction = get_model_restriction(planned_model)
+        if dispatch_plan.transport.endswith("-api"):
+            restriction = get_model_restriction(dispatch_plan.model)
             if not effective_reasoning_effort and restriction and restriction.get("reasoning_effort"):
                 default_effort = restriction.get("default_effort")
                 if default_effort:
@@ -834,19 +826,20 @@ def chat_cmd(
                     f"Timeout auto-raised to {timeout}s for "
                     f"reasoning_effort={effective_reasoning_effort}"
                 )
+                dispatch_plan.timeout = timeout
 
         log_payload = {
-            "provider": final_provider,
-            "transport": planned_transport,
-            "model": planned_model,
+            "provider": dispatch_plan.provider,
+            "transport": dispatch_plan.transport,
+            "model": dispatch_plan.model,
             "stream": stream,
             "requested_reasoning_effort": requested_reasoning_effort,
             "effective_reasoning_effort": effective_reasoning_effort,
             "reasoning_effort_source": reasoning_effort_source,
             "timeout": timeout,
         }
-        if cli_fallback_reason:
-            log_payload["cli_fallback_reason"] = cli_fallback_reason
+        if dispatch_plan.cli_fallback_reason:
+            log_payload["cli_fallback_reason"] = dispatch_plan.cli_fallback_reason
 
         # --output: tee stdout to file (unbuffered)
         if output_path:
@@ -855,35 +848,16 @@ def chat_cmd(
             _original_stdout = sys.stdout
             sys.stdout = _TeeWriter(sys.stdout, _output_file)
 
-        if lite:
-            log_payload["lite"] = lite
-        dispatch_plan = build_dispatch_plan(
-            provider=final_provider,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout=timeout,
-            lite=lite,
-            mode=mode,
-            auth=auth,
-            subscription=subscription,
-            api_only=None,
-            use_old=use_old,
-            schema=schema,
-            system=system,
-            search=search,
-            stream=stream,
-            max_tokens=max_tokens,
-        )
         for w in dispatch_plan.warnings:
             click.echo(f"[llmx:WARN] {w}", err=True)
         click.echo(dispatch_plan.stderr_line(), err=True)
         if dispatch_plan.lite:
             log_payload["lite"] = dispatch_plan.lite
-            if not lite_model_allowed(planned_model):
+            if not lite_model_allowed(dispatch_plan.model):
                 allowed = ", ".join(sorted(LITE_ALLOWED_MODELS))
                 click.echo(
                     f"Error: subscription CLI mode is restricted to frontier models: {allowed}.\n"
-                    f"Got model={planned_model!r}. Use --auth api for other models.",
+                    f"Got model={dispatch_plan.model!r}. Use --auth api for other models.",
                     err=True,
                 )
                 sys.exit(2)
@@ -898,7 +872,7 @@ def chat_cmd(
         dispatch_effort = dispatch_plan.effort_applied or reasoning_effort
         _result_text = chat(
             prompt_text,
-            final_provider,
+            dispatch_plan.provider,
             model,
             final_temperature,
             dispatch_effort,
