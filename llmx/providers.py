@@ -37,6 +37,7 @@ EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
 EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
+EXIT_SPEND_CAP = 7  # daily metered-spend cap reached, or unpriced model — policy refusal
 
 
 class LlmxError(RuntimeError):
@@ -99,6 +100,21 @@ class QuotaError(LlmxError):
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, error_type="quota_exhausted", **kwargs)
+
+
+class SpendCapError(LlmxError):
+    """Daily metered-spend cap reached (or an unpriced model about to be metered).
+    A deliberate policy refusal at the dispatch funnel, not a provider failure — the
+    override is an explicit env (LLMX_SPEND_OVERRIDE=1) the operator sets per run.
+    Distinct exit code (7) so agents can tell a budget block from a billing exhaustion
+    (QuotaError, 6). See llmx/spend_guard.py + agent-infra
+    decisions/2026-06-25-metered-spend-funnel-enforcement.md."""
+
+    exit_code = EXIT_SPEND_CAP
+
+    def __init__(self, message: str, **kwargs):
+        kwargs.setdefault("error_type", "spend_cap")
+        super().__init__(message, **kwargs)
 
 
 class TimeoutError_(LlmxError):
@@ -1442,6 +1458,16 @@ def chat(
 
         check_api_key(provider)
         model_name = get_model_name(provider, model, use_old)
+
+        # Metered from here (the CLI branch above returned or resolved to an API
+        # provider). Enforce the daily metered-spend cap at the funnel BEFORE the
+        # SDK call. Raises SpendCapError (exit 7) over-cap or on an unpriced model;
+        # LLMX_SPEND_OVERRIDE=1 bypasses. Caught by the `except (LlmxError, …)`
+        # below and re-raised as-is → surfaces cleanly in cli.py.
+        from .spend_guard import enforce_daily_cap
+
+        enforce_daily_cap(model_name)
+
         requested_reasoning_effort = reasoning_effort
 
         # Warn on potentially unknown model

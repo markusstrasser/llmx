@@ -106,6 +106,13 @@ def research_perplexity_agent(
             "Example: export PERPLEXITY_API_KEY=pplx-..."
         )
 
+    # Metered (transport=='agent-api'): enforce the daily spend cap at the funnel.
+    # Perplexity self-reports per-call cost and is legitimately absent from PRICING,
+    # so skip the unpriced-model refuse and enforce only the cumulative cap.
+    from .spend_guard import enforce_daily_cap
+
+    enforce_daily_cap(f"agent:{preset}", check_model_priced=False)
+
     payload = {"preset": preset, "input": prompt}
     data = _json.dumps(payload).encode()
     req = urllib.request.Request(

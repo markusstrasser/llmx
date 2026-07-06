@@ -226,7 +226,14 @@ class LLM:
                 prompt, system=system, temperature=temperature, **kwargs
             )
 
-        # Native SDK call
+        # Native SDK call — this branch is ALWAYS metered (a real API provider;
+        # CLI/subscription providers returned above). Enforce the daily metered-spend
+        # cap at the funnel BEFORE any billed token is spent. Raises SpendCapError
+        # (exit 7) over-cap or on an unpriced model; LLMX_SPEND_OVERRIDE=1 bypasses.
+        from .spend_guard import enforce_daily_cap
+
+        enforce_daily_cap(self.model)
+
         call_kwargs = {**self.kwargs, **kwargs}
         temp = temperature if temperature is not None else self.temperature
 
