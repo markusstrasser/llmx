@@ -910,6 +910,41 @@ def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
     return out
 
 
+def _usage_get(raw, *names):
+    """Return the first present value from SDK objects or dict-shaped usage."""
+    if raw is None:
+        return None
+    for name in names:
+        if isinstance(raw, dict):
+            if name in raw:
+                return raw.get(name)
+        else:
+            value = getattr(raw, name, None)
+            if value is not None:
+                return value
+    return None
+
+
+def _usage_reasoning_tokens(usage) -> Optional[int]:
+    details = _usage_get(
+        usage,
+        "completion_tokens_details",
+        "output_tokens_details",
+    )
+    value = _usage_get(
+        details,
+        "reasoning_tokens",
+        "reasoning",
+        "thinking_tokens",
+    )
+    if value is None:
+        value = _usage_get(usage, "reasoning_tokens", "reasoning", "thinking_tokens")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_usage(provider: str, raw) -> dict:
     """Normalize per-provider usage objects to a flat token dict.
 
@@ -926,19 +961,16 @@ def _normalize_usage(provider: str, raw) -> dict:
             "cached_tokens": None,
         }
     if provider == "google":
-        prompt = getattr(raw, "prompt_token_count", None)
-        completion = getattr(raw, "candidates_token_count", None)
-        reasoning = getattr(raw, "thoughts_token_count", None)
-        cached = getattr(raw, "cached_content_token_count", None)
+        prompt = _usage_get(raw, "prompt_token_count")
+        completion = _usage_get(raw, "candidates_token_count")
+        reasoning = _usage_get(raw, "thoughts_token_count")
+        cached = _usage_get(raw, "cached_content_token_count")
     else:  # openai-compatible
-        prompt = getattr(raw, "prompt_tokens", None)
-        completion = getattr(raw, "completion_tokens", None)
-        details = getattr(raw, "completion_tokens_details", None)
-        reasoning = getattr(details, "reasoning_tokens", None) if details else None
-        prompt_details = getattr(raw, "prompt_tokens_details", None)
-        cached = (
-            getattr(prompt_details, "cached_tokens", None) if prompt_details else None
-        )
+        prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
+        completion = _usage_get(raw, "completion_tokens", "output_tokens")
+        reasoning = _usage_reasoning_tokens(raw)
+        prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
+        cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
         "prompt_tokens": prompt,
@@ -1181,8 +1213,15 @@ def _openai_chat(
             content = response.choices[0].message.content
             if content is None:
                 refusal = getattr(response.choices[0].message, "refusal", None)
+                rtoks = _usage_reasoning_tokens(usage)
+                ctoks = _usage_get(usage, "completion_tokens", "output_tokens")
+                detail = (
+                    f" reasoning_tokens={rtoks}, completion_tokens={ctoks}."
+                    if rtoks is not None or ctoks is not None
+                    else ""
+                )
                 raise ModelError(
-                    f"Model returned no content. Refusal: {refusal}",
+                    f"Model returned no content.{detail} Refusal: {refusal}",
                     provider=provider,
                     model=model,
                 )
@@ -1190,17 +1229,17 @@ def _openai_chat(
             finish_reason = response.choices[0].finish_reason
             print(result_text)
     finally:
-        details = getattr(usage, "completion_tokens_details", None) if usage else None
-        cached = getattr(usage, "prompt_tokens_details", None) if usage else None
+        details = _usage_get(usage, "completion_tokens_details", "output_tokens_details")
+        cached = _usage_get(usage, "prompt_tokens_details", "input_tokens_details")
         log_usage(
             provider=provider,
             model=model,
             transport="api",
             reasoning_effort=reasoning_effort,
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
-            completion_tokens=getattr(usage, "completion_tokens", None),
-            reasoning_tokens=getattr(details, "reasoning_tokens", None),
-            cached_tokens=getattr(cached, "cached_tokens", None),
+            prompt_tokens=_usage_get(usage, "prompt_tokens", "input_tokens"),
+            completion_tokens=_usage_get(usage, "completion_tokens", "output_tokens"),
+            reasoning_tokens=_usage_reasoning_tokens(usage),
+            cached_tokens=_usage_get(cached, "cached_tokens", "cached_input_tokens"),
             latency_s=_time.time() - started,
         )
 
@@ -1209,10 +1248,11 @@ def _openai_chat(
     # emitted nothing. Returning "" here is the silent "produced nothing" fault —
     # raise instead so the caller sees a real error and exit code, not 0 bytes.
     if finish_reason == "length" and not result_text.strip():
-        rtoks = getattr(details, "reasoning_tokens", None) if details else None
-        ctoks = getattr(usage, "completion_tokens", None) if usage else None
+        rtoks = _usage_reasoning_tokens(usage)
+        ctoks = _usage_get(usage, "completion_tokens", "output_tokens")
         detail = (
-            f" reasoning consumed {rtoks}/{ctoks} completion tokens;" if rtoks else ""
+            f" reasoning_tokens={rtoks}, completion_tokens={ctoks};"
+            if rtoks is not None or ctoks is not None else ""
         )
         raise ModelError(
             f"Model returned no visible output — completion budget exhausted by "

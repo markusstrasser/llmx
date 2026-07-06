@@ -1,8 +1,8 @@
 """Per-call usage telemetry. Appends one JSONL line to ~/.claude/llmx-usage.jsonl.
 
 Token counts come from provider responses (OpenAI .usage, Gemini .usage_metadata).
-CLI transports don't expose usage — those lines have null token fields but still
-record model, effort, latency, and transport for call-volume accounting.
+CLI transports usually don't expose provider API usage directly. When a CLI
+emits local accounting metadata, llmx records that with a source field.
 
 Cost estimation is intentionally NOT computed here. Pricing changes; the raw
 tokens are durable. See scripts/usage_summary.py for ad-hoc cost rollups.
@@ -89,6 +89,8 @@ def log_usage(
     cached_tokens: Optional[int],
     latency_s: float,
     error: Optional[str] = None,
+    source: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -104,6 +106,8 @@ def log_usage(
             "cached_tokens": cached_tokens,
             "latency_s": round(latency_s, 3),
             "error": error,
+            "source": source,
+            "note": note,
             "caller": _resolve_caller(),  # WHO invoked llmx (attribution for cost rollups)
             "cwd": os.getcwd(),           # WHICH project (group by basename)
         }

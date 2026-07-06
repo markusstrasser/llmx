@@ -162,6 +162,7 @@ def lite_model_allowed(model: Optional[str]) -> bool:
 # Max bytes for command-line argument before switching to stdin.
 # macOS ARG_MAX is ~260KB but shells/tools choke earlier.
 _ARG_MAX_BYTES = 100_000
+_CODEX_SESSIONS_DIR = Path(os.path.expanduser("~/.codex/sessions"))
 
 
 def configured_cli_provider(provider: str, lite: Optional[str] = None) -> Optional[str]:
@@ -313,6 +314,122 @@ def _cursor_cwd() -> str:
     return str(_CURSOR_RUNTIME_DIR)
 
 
+def _codex_rollout_snapshot(root: Path = _CODEX_SESSIONS_DIR) -> dict[Path, int]:
+    """Capture known Codex rollout mtimes before launching `codex exec`."""
+    if not root.exists():
+        return {}
+    out: dict[Path, int] = {}
+    try:
+        for path in root.glob("*/*/*/rollout-*.jsonl"):
+            try:
+                out[path] = path.stat().st_mtime_ns
+            except OSError:
+                continue
+    except OSError:
+        return {}
+    return out
+
+
+def _read_codex_rollout_usage(path: Path) -> tuple[dict[str, Optional[int]], Optional[str]]:
+    """Read the last token_count event from a Codex rollout JSONL file."""
+    last_usage = None
+    try:
+        with path.open() as fh:
+            for line in fh:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = event.get("payload") if isinstance(event, dict) else None
+                if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                    continue
+                info = payload.get("info") or {}
+                usage = info.get("last_token_usage") or info.get("total_token_usage")
+                if isinstance(usage, dict):
+                    last_usage = usage
+    except OSError as exc:
+        return _null_codex_usage(), f"could not read codex rollout {path}: {exc}"
+
+    if not last_usage:
+        return _null_codex_usage(), f"codex rollout had no token_count event: {path}"
+
+    return {
+        "prompt_tokens": _int_or_none(last_usage.get("input_tokens")),
+        "completion_tokens": _int_or_none(last_usage.get("output_tokens")),
+        "reasoning_tokens": _int_or_none(last_usage.get("reasoning_output_tokens")),
+        "cached_tokens": _int_or_none(last_usage.get("cached_input_tokens")),
+    }, None
+
+
+def _int_or_none(value) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_present(mapping: dict, *keys):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _null_codex_usage() -> dict[str, Optional[int]]:
+    return {
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "reasoning_tokens": None,
+        "cached_tokens": None,
+    }
+
+
+def _latest_codex_rollout_usage(
+    before: dict[Path, int],
+    *,
+    started_at: float,
+    root: Path = _CODEX_SESSIONS_DIR,
+) -> tuple[dict[str, Optional[int]], Optional[str]]:
+    """Find the rollout created/updated by this codex-cli call and parse tokens.
+
+    `codex exec` creates a fresh rollout in ~/.codex/sessions. In agent-driven
+    runs the parent Codex session is also being updated, so prefer newly created
+    files and use changed files only as a fallback.
+    """
+    if not root.exists():
+        return _null_codex_usage(), f"codex sessions dir not found: {root}"
+
+    new_files: list[tuple[int, Path]] = []
+    changed_files: list[tuple[int, Path]] = []
+    cutoff_ns = int((started_at - 2.0) * 1_000_000_000)
+    try:
+        paths = list(root.glob("*/*/*/rollout-*.jsonl"))
+    except OSError as exc:
+        return _null_codex_usage(), f"could not list codex rollouts: {exc}"
+
+    for path in paths:
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if mtime_ns < cutoff_ns:
+            continue
+        previous = before.get(path)
+        if previous is None:
+            new_files.append((mtime_ns, path))
+        elif previous != mtime_ns:
+            changed_files.append((mtime_ns, path))
+
+    candidates = sorted(new_files or changed_files, reverse=True)
+    if not candidates:
+        return _null_codex_usage(), "no codex rollout changed after cli invocation"
+
+    usage, note = _read_codex_rollout_usage(candidates[0][1])
+    return usage, note
+
+
 def _parse_claude_json(stdout: str):
     """Unwrap `claude -p --output-format json` (an events list) → (text, usage|None).
 
@@ -340,10 +457,26 @@ def _parse_claude_json(stdout: str):
         u = e.get("usage") or {}
         mu = e.get("modelUsage") or {}
         model_key = next(iter(mu), None)
+        details = u.get("output_tokens_details") or u.get("completion_tokens_details") or {}
+        reasoning_tokens = _first_present(
+            u,
+            "reasoning_tokens",
+            "thinking_tokens",
+        )
+        if reasoning_tokens is None:
+            reasoning_tokens = _first_present(
+                details,
+                "reasoning_tokens",
+                "thinking_tokens",
+            )
+        # Claude Code's current result JSON exposes input/output/cache tokens.
+        # Some versions/models may add thinking/reasoning tokens; if absent,
+        # keep null rather than writing 0, which would falsely claim measurement.
         usage = {
             "model": model_key.split("[")[0] if isinstance(model_key, str) else None,  # strip [1m] etc → PRICING key
             "input_tokens": u.get("input_tokens"),
             "output_tokens": u.get("output_tokens"),
+            "reasoning_tokens": reasoning_tokens,
             "cache_read_input_tokens": u.get("cache_read_input_tokens"),
             "total_cost_usd": e.get("total_cost_usd"),
         }
@@ -384,9 +517,11 @@ def cli_chat(
     stdin_input = None
     use_stdin = len(prompt.encode()) > _ARG_MAX_BYTES
     temp_schema_path = None
+    codex_rollouts_before: dict[Path, int] = {}
 
     try:
         if binary == "codex":
+            codex_rollouts_before = _codex_rollout_snapshot()
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
             cmd = ["codex", "exec", "--skip-git-repo-check"]
             if lite:
@@ -559,16 +694,55 @@ def cli_chat(
         finally:
             timer.cancel()
 
+        elapsed = time.time() - start
+
+        def _log_codex_usage(note_prefix: Optional[str] = None, error: Optional[str] = None) -> None:
+            if binary != "codex":
+                return
+            try:
+                from .usage_log import log_usage
+
+                usage, note = _latest_codex_rollout_usage(
+                    codex_rollouts_before,
+                    started_at=start,
+                )
+                if note_prefix and note:
+                    note = f"{note_prefix}; {note}"
+                elif note_prefix:
+                    note = note_prefix
+                log_usage(
+                    provider=provider,
+                    model=model or "?",
+                    transport="codex-cli",
+                    reasoning_effort=reasoning_effort,
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                    reasoning_tokens=usage.get("reasoning_tokens"),
+                    cached_tokens=usage.get("cached_tokens"),
+                    latency_s=elapsed,
+                    error=error,
+                    source="codex-rollout",
+                    note=note,
+                )
+            except Exception as exc:
+                logger.debug(f"[cli] codex usage log skipped: {exc}")
+
         if timed_out:
+            _log_codex_usage(
+                note_prefix=f"codex-cli timed out after {timeout}s",
+                error="timeout",
+            )
             logger.info(f"[cli→api] {binary} timed out after {timeout}s (killed process group)")
             return None
-
-        elapsed = time.time() - start
 
         if proc.returncode != 0:
             stderr_hint = stderr.strip()[:300] if stderr else ""
             stdout_hint = stdout.strip()[:200] if stdout else ""
             detail = stderr_hint or stdout_hint or "unknown error"
+            _log_codex_usage(
+                note_prefix=f"codex-cli exited {proc.returncode}: {detail}",
+                error=f"exit_{proc.returncode}",
+            )
             logger.info(f"[cli→api] {binary} exited {proc.returncode}: {detail}")
             return None
 
@@ -597,12 +771,14 @@ def cli_chat(
                         reasoning_effort=reasoning_effort,
                         prompt_tokens=usage.get("input_tokens"),
                         completion_tokens=usage.get("output_tokens"),
-                        reasoning_tokens=None,
+                        reasoning_tokens=usage.get("reasoning_tokens"),
                         cached_tokens=usage.get("cache_read_input_tokens"),
                         latency_s=elapsed,
                     )
                 except Exception as exc:
                     logger.debug(f"[cli] usage log skipped: {exc}")
+        elif binary == "codex":
+            _log_codex_usage()
 
         logger.debug(f"[cli] {binary} responded in {elapsed:.1f}s ({len(text)} chars)")
         return text

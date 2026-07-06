@@ -44,7 +44,15 @@ llmx --fast "Quick question"
 # Control thinking budget (OpenAI, Gemini)
 llmx -m gpt-5.5 --reasoning-effort xhigh "Hard task"
 llmx -m gemini-3-flash --reasoning-effort high "Hard task"
+```
 
+Long-generation calls need explicit wall-clock headroom. The default timeout is
+300s, and llmx auto-raises default timeouts to 600s for `-e high` and 1200s for
+`-e xhigh`, but large `--max-tokens` runs and thinking models can still exceed
+that. For >32k-token generations or deep reasoning, pass `--timeout 900` or
+higher instead of relying on the flat default.
+
+```bash
 # Explicit metered API (opt-in — Claude defaults to subscription)
 llmx -p anthropic-direct -m claude-opus-4-8 "API billing path"
 llmx -p google --search "Latest news on fusion energy"
