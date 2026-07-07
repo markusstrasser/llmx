@@ -30,6 +30,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
     "claude-fable-5": (10.0, 50.0),
     "claude-sonnet-4-6": (3.0, 15.0),
+    # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
+    "qwen/qwen3.6-27b": (0.285, 2.40),
 }
 
 # Context-window limit (max input tokens) per model. Static capability, not from the
