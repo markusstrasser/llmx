@@ -25,10 +25,24 @@ def test_bare_composer_is_cursor():
     assert infer("composer-2.5-fast") == "cursor"
 
 
+def test_cursor_native_grok45_effort_slugs():
+    # Cursor bakes effort into the model id; these must NOT fall through to xAI.
+    for model in (
+        "grok-4.5-medium",
+        "grok-4.5-high",
+        "grok-4.5-xhigh",
+        "grok-4.5-fast-medium",
+        "grok-4.5-fast-high",
+        "grok-4.5-fast-xhigh",
+    ):
+        assert infer(model) == "cursor", f"{model} must route to cursor, got {infer(model)}"
+
+
 def test_no_regression_for_bare_model_names():
     # The fix must not change routing for any non-cursor model.
     expected = {
         "gemini-3-flash": "google", "kimi-k2.5": "kimi", "grok-4": "xai",
+        "grok-4.5": "xai",  # bare API id stays on xAI; Cursor uses effort-suffixed slugs
         "minimax-m3": "minimax", "qwen-3": "cerebras", "gpt-5.5": "openai",
         "claude-opus-4-8": "anthropic", "deepseek-v3": "deepseek",
         "openrouter/x": "openrouter",

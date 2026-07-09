@@ -30,6 +30,14 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
     "claude-fable-5": (10.0, 50.0),
     "claude-sonnet-4-6": (3.0, 15.0),
+    # SpaceXAI Grok 4.5 (docs.x.ai 2026-07-08): base $2/$6; Cursor fast variant $4/$18
+    "grok-4.5": (2.0, 6.0),
+    "grok-4.5-medium": (2.0, 6.0),
+    "grok-4.5-high": (2.0, 6.0),
+    "grok-4.5-xhigh": (2.0, 6.0),
+    "grok-4.5-fast-medium": (4.0, 18.0),
+    "grok-4.5-fast-high": (4.0, 18.0),
+    "grok-4.5-fast-xhigh": (4.0, 18.0),
     # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
     "qwen/qwen3.6-27b": (0.285, 2.40),
 }
@@ -43,6 +51,11 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.5": 1_050_000, "gpt-5.5-pro": 1_050_000,
     "gpt-5.3-chat-latest": 400_000, "gpt-5.3-codex": 400_000,
     "claude-opus-4-8": 1_000_000, "claude-fable-5": 1_000_000, "claude-sonnet-4-6": 1_000_000,
+    # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k
+    "grok-4.5": 500_000,
+    "grok-4.5-medium": 500_000, "grok-4.5-high": 500_000, "grok-4.5-xhigh": 500_000,
+    "grok-4.5-fast-medium": 500_000, "grok-4.5-fast-high": 500_000,
+    "grok-4.5-fast-xhigh": 500_000,
 }
 
 

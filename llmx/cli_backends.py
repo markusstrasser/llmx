@@ -143,6 +143,11 @@ LITE_ALLOWED_MODELS = {
     # 2026-07-05: Fable 5 ships on claude-cli subscription (same OAuth headless
     # -p transport as opus) — operator-directed for arc-agi H1/H2 dispatch lanes.
     "claude-fable-5",
+    # 2026-07-09: Cursor subscription pool — composer (Cursor-exclusive) + Grok 4.5
+    # (SpaceXAI/Cursor joint; effort baked into slug). Bare `grok-4.5` also matches
+    # via startswith(base+"-") for grok-4.5-xhigh etc.
+    "composer-2.5",
+    "grok-4.5",
 }
 
 
