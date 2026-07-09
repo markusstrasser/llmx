@@ -141,35 +141,52 @@ class ModelError(LlmxError):
 
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
-    # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
-    "gpt-5.5": {
+    # OpenAI GPT-5.6 suite (GA 2026-07-09): Sol/Terra/Luna. Effort includes `max`
+    # (beyond xhigh). Pro quality is reasoning.mode=pro on the same model id, not a
+    # separate slug (API docs). Alias `gpt-5.6` → sol via _MODEL_UPGRADES.
+    "gpt-5.6-sol": {
         "temperature": 1.0,
         "fixed": True,
         "reasoning_effort": True,
         "reasoning_effort_levels": [
             "none",
-            "minimal",
             "low",
             "medium",
             "high",
             "xhigh",
+            "max",
         ],
         "default_effort": "medium",
     },
-    "gpt-5.5-pro": {
+    "gpt-5.6-terra": {
         "temperature": 1.0,
         "fixed": True,
         "reasoning_effort": True,
         "reasoning_effort_levels": [
             "none",
-            "minimal",
             "low",
             "medium",
             "high",
             "xhigh",
+            "max",
         ],
-        "default_effort": "high",
+        "default_effort": "medium",
     },
+    "gpt-5.6-luna": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ],
+        "default_effort": "medium",
+    },
+    # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
     "gpt-5.4": {
         "temperature": 1.0,
         "fixed": True,
@@ -308,7 +325,7 @@ PROVIDER_CONFIGS = {
         "flash_lite_model": "gemini-3.1-flash-lite-preview",
     },
     "openai": {
-        "model": "gpt-5.5",
+        "model": "gpt-5.6-sol",
         "legacy_model": "gpt-5.4",
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
@@ -348,7 +365,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "openrouter": {
-        "model": "openai/gpt-5.5",
+        "model": "openai/gpt-5.6-sol",
         "env_var": "OPENROUTER_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -376,7 +393,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     # Z.ai / Zhipu GLM family (GLM-5.2 launched 2026-06-13: 1M context, coding-first,
-    # ~1/6 GPT-5.5 cost). Transport routes through OpenRouter (OPENROUTER_API_KEY) because
+    # ~1/6 GPT-5.6-sol cost). Transport routes through OpenRouter (OPENROUTER_API_KEY) because
     # the direct metered Z.ai API was still rolling out at launch and the GLM Coding Plan
     # endpoint is Anthropic-compatible/subscription-only. Flip base_url + env_var to the
     # direct Z.ai API (https://api.z.ai/api/paas/v4) once a ZAI_API_KEY exists.
@@ -480,8 +497,10 @@ _KNOWN_MODELS = {
         "gemini-3.1-flash-lite-preview",
     ],
     "openai": [
-        "gpt-5.5",
-        "gpt-5.5-pro",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.6",  # alias → sol
         "gpt-5.4",
         "gpt-5.3",
         "gpt-5.2",
@@ -531,10 +550,12 @@ _MODEL_UPGRADES = {
     "gemini-3-pro": "gemini-3.1-pro-preview",
     "gemini-3-flash": "gemini-3-flash-preview",
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
-    "gpt-4o": "gpt-5.5",
+    "gpt-4o": "gpt-5.6-sol",
     "gpt-4o-mini": "gpt-5.1-mini",
-    "gpt-4": "gpt-5.5",
-    "gpt-4-turbo": "gpt-5.5",
+    "gpt-4": "gpt-5.6-sol",
+    "gpt-4-turbo": "gpt-5.6-sol",
+    # GPT-5.6 suite (2026-07-09): bare alias → Sol. GPT-5.5 fully removed — do not upgrade.
+    "gpt-5.6": "gpt-5.6-sol",
     "claude-3.5-sonnet": "claude-sonnet-4-6",
     "claude-3-opus": "claude-opus-4-8",
 }
@@ -1158,6 +1179,7 @@ _REASONING_HEADROOM = {
     "medium": 16_000,
     "high": 32_000,
     "xhigh": 64_000,
+    "max": 96_000,  # GPT-5.6+ beyond-xhigh effort
 }
 
 
@@ -1524,6 +1546,7 @@ def chat(
                 reasoning_effort,
                 transport=f"{provider}-api",
                 provider=provider,
+                model=model_name,
             )
             for msg in effort_warns:
                 logger.warn(msg)

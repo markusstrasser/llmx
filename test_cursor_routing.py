@@ -16,7 +16,7 @@ def test_cursor_prefix_overrides_substring_families():
     # that the bare substring would otherwise select.
     for model in ("cursor/gemini-3-flash", "cursor/kimi-k2.5", "cursor/grok-4",
                   "cursor/minimax-m3", "cursor/qwen-3", "cursor/deepseek-v3",
-                  "cursor/claude-opus-4-8", "cursor/gpt-5.5"):
+                  "cursor/claude-opus-4-8", "cursor/gpt-5.6-sol"):
         assert infer(model) == "cursor", f"{model} must route to cursor, got {infer(model)}"
 
 
@@ -43,7 +43,7 @@ def test_no_regression_for_bare_model_names():
     expected = {
         "gemini-3-flash": "google", "kimi-k2.5": "kimi", "grok-4": "xai",
         "grok-4.5": "xai",  # bare API id stays on xAI; Cursor uses effort-suffixed slugs
-        "minimax-m3": "minimax", "qwen-3": "cerebras", "gpt-5.5": "openai",
+        "minimax-m3": "minimax", "qwen-3": "cerebras", "gpt-5.6-sol": "openai",
         "claude-opus-4-8": "anthropic", "deepseek-v3": "deepseek",
         "openrouter/x": "openrouter",
     }

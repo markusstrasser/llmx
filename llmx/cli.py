@@ -4,7 +4,7 @@ llmx - Unified LLM CLI via native SDKs
 
 Usage:
     llmx "your prompt"
-    llmx --model gpt-5.5 "your prompt"
+    llmx --model gpt-5.6-sol "your prompt"
     cat file.txt | llmx --model claude-sonnet-4-6 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
@@ -403,7 +403,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5.5', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
+    help="Model: 'gpt-5.6-sol', 'claude-sonnet-4-6', 'gemini-3.1-pro-preview', 'kimi-k2.5-thinking', 'cerebras/qwen-3-coder-480b'.",
 )
 @click.option(
     "-p",
@@ -812,9 +812,9 @@ def chat_cmd(
                 reasoning_effort_source = "user-requested-cli-may-ignore"
 
         # High/xhigh reasoning routinely exceeds the flat 300s wall clock
-        # (GPT-5.5 high ≈ 5-10 min, xhigh ≈ 10-15 min). Scale the default;
+        # (GPT-5.6 Sol high ≈ 5-10 min, xhigh ≈ 10-15 min). Scale the default;
         # an explicit --timeout always wins. Keyed on EFFECTIVE effort so
-        # api-default high (e.g. flag-less GPT-5.5) scales too.
+        # api-default high (e.g. flag-less GPT-5.6 Sol) scales too.
         from click.core import ParameterSource
         if ctx.get_parameter_source("timeout") == ParameterSource.DEFAULT:
             scaled = {"high": 600, "xhigh": 1200}.get(
@@ -1048,7 +1048,7 @@ def cli():
 
     Examples:
         llmx "What is 2+2?"                                  # Text generation (default)
-        llmx --model gpt-5.5 "Explain Python"                # Specific model
+        llmx --model gpt-5.6-sol "Explain Python"            # Specific model
         llmx image "a cute robot" -o robot.png               # Image generation
         llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
     """

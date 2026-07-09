@@ -19,7 +19,7 @@ uv tool install --editable /path/to/llmx
 llmx "What is 2+2?"
 
 # Model auto-infers provider
-llmx -m gpt-5.5 "Explain Python"
+llmx -m gpt-5.6-sol "Explain Python"
 llmx -m claude-opus-4-8 "Write code"   # defaults to claude-cli subscription
 llmx -m kimi-k2.5 "Complex task"
 llmx -m cerebras/qwen-3-coder-480b "Fast coding"
@@ -28,7 +28,7 @@ llmx -m cerebras/qwen-3-coder-480b "Fast coding"
 cat code.py | llmx -m claude-opus-4-8 "Review this"
 
 # Subscription routes ($0 OAuth — preferred for GPT/Claude batch work)
-llmx chat --subscription -m gpt-5.5 "Quick task"
+llmx chat --subscription -m gpt-5.6-sol "Quick task"
 llmx chat --subscription -m claude-opus-4-8 "Review this"
 
 # Probe resolved transport before dispatch
@@ -42,7 +42,7 @@ llmx --search "Latest news on fusion energy"
 llmx --fast "Quick question"
 
 # Control thinking budget (OpenAI, Gemini)
-llmx -m gpt-5.5 --reasoning-effort xhigh "Hard task"
+llmx -m gpt-5.6-sol --reasoning-effort xhigh "Hard task"
 llmx -m gemini-3-flash --reasoning-effort high "Hard task"
 ```
 
@@ -170,7 +170,7 @@ prompt = validate_prompt(user_input, min_length=5, max_length=10000)
 | Provider | Default model | Flag |
 |----------|--------------|------|
 | `google` | Gemini 3.1 Pro | (default) |
-| `openai` | GPT-5.5 | `-p openai` |
+| `openai` | GPT-5.6 Sol | `-p openai` |
 | `anthropic` | Claude Opus 4.8 | `-p anthropic` (→ claude-cli subscription) |
 | `anthropic-direct` | Claude Opus 4.8 | `-p anthropic-direct` (metered API, opt-in) |
 | `xai` | Grok 4 | `-p xai` |

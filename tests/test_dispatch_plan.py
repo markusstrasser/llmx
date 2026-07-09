@@ -24,13 +24,30 @@ class TestEffortNormalize(unittest.TestCase):
         applied, _ = map_effort_for_backend("max", transport="claude-cli", provider="anthropic")
         self.assertEqual(applied, "max")
 
-    def test_api_max_maps_xhigh(self):
-        applied, warns = map_effort_for_backend("max", transport="openai-api", provider="openai")
+    def test_api_max_maps_xhigh_pre_56(self):
+        applied, warns = map_effort_for_backend(
+            "max", transport="openai-api", provider="openai", model="gpt-5.4"
+        )
         self.assertEqual(applied, "xhigh")
         self.assertTrue(warns)
 
+    def test_api_max_passthrough_gpt56(self):
+        applied, warns = map_effort_for_backend(
+            "max", transport="openai-api", provider="openai", model="gpt-5.6-sol"
+        )
+        self.assertEqual(applied, "max")
+        self.assertFalse(warns)
+
+    def test_codex_max_passthrough_gpt56(self):
+        applied, _ = map_effort_for_backend(
+            "max", transport="codex-cli", provider="openai", model="gpt-5.6-terra"
+        )
+        self.assertEqual(applied, "max")
+
     def test_resolve_effort_api_max(self):
-        applied, _ = resolve_effort("max", transport="openai-api", provider="openai")
+        applied, _ = resolve_effort(
+            "max", transport="openai-api", provider="openai", model="gpt-5.4"
+        )
         self.assertEqual(applied, "xhigh")
 
 

@@ -18,7 +18,7 @@ from .cli_backends import (
     preferred_cli_provider,
     subscription_route,
 )
-from .providers import get_model_name, get_model_restriction, infer_provider_from_model
+from .providers import get_model_name, get_model_restriction, infer_provider_from_model, _auto_upgrade_model
 
 SCHEMA_VERSION = "llmx-routing.v1"
 
@@ -53,16 +53,21 @@ def map_effort_for_backend(
     *,
     transport: str,
     provider: str,
+    model: Optional[str] = None,
 ) -> tuple[Optional[str], list[str]]:
     """Map canonical/user effort to what the chosen backend will receive."""
     if not effort:
         return None, []
     warnings: list[str] = []
     e = effort.lower()
+    model_l = (model or "").lower()
+    # GPT-5.6 suite natively supports effort=max (beyond xhigh). Older GPT-5.x
+    # and non-OpenAI API transports still map max → xhigh.
+    gpt56 = "gpt-5.6" in model_l
     if transport.endswith("-api") or provider in {"openai", "google", "anthropic-direct"}:
-        if e == "max":
+        if e == "max" and not gpt56:
             return "xhigh", ["effort max mapped to xhigh for API transport"]
-        return e if e != "max" else "xhigh", warnings
+        return e, warnings
     if transport == "claude-cli":
         # Claude Code headless --effort: low|medium|high|max
         mapping = {
@@ -79,8 +84,11 @@ def map_effort_for_backend(
             warnings.append(f"effort {e} mapped to {applied} for claude-cli")
         return applied, warnings
     if transport == "codex-cli":
+        # Codex: GPT-5.6 accepts max; older models map max → xhigh
+        if e == "max" and not gpt56:
+            return "xhigh", ["effort max mapped to xhigh for codex-cli"]
         mapping = {
-            "max": "xhigh",
+            "max": "max",
             "xhigh": "xhigh",
             "high": "high",
             "medium": "medium",
@@ -89,8 +97,6 @@ def map_effort_for_backend(
             "none": "minimal",
         }
         applied = mapping.get(e, "high")
-        if e == "max":
-            warnings.append("effort max mapped to xhigh for codex-cli")
         return applied, warnings
     # cursor-cli and unknown: effort not forwarded
     warnings.append(f"effort ignored for transport {transport}")
@@ -102,13 +108,14 @@ def resolve_effort(
     *,
     transport: str,
     provider: str,
+    model: Optional[str] = None,
 ) -> tuple[Optional[str], list[str]]:
     """Normalize user effort then map to backend-specific value."""
     if not effort:
         return None, []
     token, warns = normalize_effort_input(effort)
     applied, backend_warns = map_effort_for_backend(
-        token, transport=transport, provider=provider
+        token, transport=transport, provider=provider, model=model
     )
     return applied, warns + backend_warns
 
@@ -173,6 +180,12 @@ def build_dispatch_plan(
     effort_token, effort_warn = normalize_effort_input(reasoning_effort)
     warnings.extend(effort_warn)
 
+    if model:
+        upgraded = _auto_upgrade_model(model)
+        if upgraded != model:
+            warnings.append(f"model {model!r} auto-upgraded to {upgraded!r}")
+            model = upgraded
+
     final_provider = provider or "google"
     if model and not provider:
         inferred = infer_provider_from_model(model)
@@ -229,6 +242,7 @@ def build_dispatch_plan(
         effort_token,
         transport=planned_transport,
         provider=final_provider,
+        model=planned_model,
     )
     warnings.extend(backend_warn)
 

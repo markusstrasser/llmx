@@ -128,16 +128,19 @@ def _research_mcp_args() -> list[str]:
         )
     return ["run", "--directory", target, "research-mcp"]
 
-# Lite mode is restricted to three frontier models. Anthropic routes via
+# Lite mode is restricted to frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
-# research-mcp only); gpt-5.5 routes via codex-cli. gemini-3-flash-preview
+# research-mcp only); gpt-5.6-* routes via codex-cli. gemini-3-flash-preview
 # stays allowed for back-compat but no longer has a CLI backend — with the
 # free gemini-cli retired (2026-06-18) it routes to the paid Gemini API and
 # --lite only contributes the no-tools prompt prefix (no cwd/MCP stripping,
 # no cost saving) for Google.
 LITE_ALLOWED_MODELS = {
-    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6",  # alias → sol (startswith match covers suite)
     "gemini-3-flash-preview",
     "claude-opus-4-8",
     # 2026-07-05: Fable 5 ships on claude-cli subscription (same OAuth headless
@@ -224,7 +227,7 @@ def needs_api_fallback(
         return f"{binary} not found in PATH"
     # codex-cli WAS exempted here (it has `codex exec --output-schema`), but that path is broken on
     # codex v0.140.0 — it exits 1 with a generic CLI error instead of honoring the schema (reproduced
-    # 2026-06-18: `gpt-5.5 --subscription --schema`). Treat schema as CLI-unsupported for ALL CLIs:
+    # 2026-06-18: GPT `--subscription --schema`). Treat schema as CLI-unsupported for ALL CLIs:
     # this falls back to the API (which does structured output) on the metered lane, or raises a clear
     # "use --auth api" error on subscription — instead of an opaque codex failure. Re-add the
     # `and provider != "codex-cli"` guard if/when codex --output-schema is fixed upstream.
@@ -553,6 +556,7 @@ def cli_chat(
                     reasoning_effort,
                     transport="codex-cli",
                     provider="openai",
+                    model=model,
                 )
                 if codex_effort:
                     cmd.extend(["-c", f'model_reasoning_effort="{codex_effort}"'])

@@ -84,7 +84,7 @@ class LLM:
     """Stateful LLM client for multiple calls
 
     Example:
-        >>> llm = LLM(provider="openai", model="gpt-5.5", temperature=0.7)
+        >>> llm = LLM(provider="openai", model="gpt-5.6-sol", temperature=0.7)
         >>> response = llm.chat("What is 2+2?")
         >>> print(response.content)
         4
