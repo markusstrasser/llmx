@@ -36,7 +36,8 @@ def _client_factory(*_args, **_kwargs):
 
 
 def test_success_is_typed_and_cached_without_second_call(tmp_path: Path) -> None:
-    client_factory = Mock(side_effect=_client_factory)
+    client = _client_factory()
+    client_factory = Mock(return_value=client)
     first = run_subscription_probe(
         provider="anthropic",
         model="claude-opus-4-8",
@@ -59,6 +60,11 @@ def test_success_is_typed_and_cached_without_second_call(tmp_path: Path) -> None
     assert first.cached is False
     assert second.cached is True
     assert client_factory.call_count == 1
+    client.chat.assert_called_once_with(
+        "Reply exactly OK.",
+        reasoning_effort="low",
+        timeout=120,
+    )
 
 
 def test_quota_failure_preserves_exit_six_and_never_falls_back(tmp_path: Path) -> None:

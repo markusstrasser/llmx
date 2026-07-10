@@ -256,7 +256,6 @@ def run_subscription_probe(
         response = client.chat(
             "Reply exactly OK.",
             reasoning_effort="low",
-            max_tokens=8,
             timeout=timeout,
         )
         response_text = response.content.strip()
