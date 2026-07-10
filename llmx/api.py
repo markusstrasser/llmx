@@ -9,17 +9,28 @@ from typing import Optional, List, Dict, Any, Iterator
 from dataclasses import dataclass
 
 from .providers import (
-    get_model_name,
-    check_api_key,
+    OPENAI_COMPAT_URLS,
     _build_search_kwargs,
-    infer_provider_from_model,
-    _normalize_model,
     _get_api_key,
     _google_chat,
     _openai_chat,
-    OPENAI_COMPAT_URLS,
     RateLimitError,
+    check_api_key,
+    get_model_name,
+    raise_cli_backend_failure,
 )
+from .auth import auth_to_llmx_kwargs, resolve_auth
+from .cli_backends import (
+    CLI_PROVIDERS,
+    CliBackendFailure,
+    cli_chat,
+    needs_api_fallback,
+    preferred_cli_provider,
+    resolve_cli_api_fallback,
+    subscription_route,
+)
+from .inspect import capture_call
+from .logger import logger
 
 # Dispatch auto-retry on TRANSIENT failures (RateLimitError + its ServiceUnavailableError
 # subclass = 429/503/overload/connection). Exponential backoff + JITTER (the jitter matters:
@@ -38,18 +49,6 @@ def _resolve_max_attempts(call_kwargs: dict) -> int:
         return max(1, int(raw))
     except (TypeError, ValueError):
         return 4
-
-
-from .auth import auth_to_llmx_kwargs, resolve_auth
-from .cli_backends import (
-    CLI_PROVIDERS,
-    needs_api_fallback,
-    cli_chat,
-    preferred_cli_provider,
-    resolve_cli_api_fallback,
-)
-from .logger import logger
-from .inspect import capture_call
 
 
 @dataclass
@@ -115,9 +114,7 @@ class LLM:
                 api_only=api_only,
             )
         kwargs.update(
-            auth_to_llmx_kwargs(
-                resolved_auth, lite=kwargs.get("lite"), mode=mode
-            )
+            auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode)
         )
         kwargs["auth"] = resolved_auth
         lite = kwargs.get("lite")
@@ -179,7 +176,7 @@ class LLM:
             )
             if not fallback_reason:
                 start_time = time.time()
-                text = cli_chat(
+                cli_result = cli_chat(
                     self._cli_provider,
                     prompt,
                     self.model,
@@ -190,10 +187,10 @@ class LLM:
                     mode=mode,
                     reasoning_effort=reasoning_effort,
                 )
-                if text is not None:
+                if isinstance(cli_result, str):
                     latency = time.time() - start_time
                     return Response(
-                        content=text,
+                        content=cli_result,
                         provider=self._cli_provider,
                         model=self.model or self.provider,
                         usage={
@@ -204,7 +201,21 @@ class LLM:
                         latency=latency,
                         raw=None,
                     )
-                fallback_reason = "CLI error"
+                if not isinstance(cli_result, CliBackendFailure):
+                    raise TypeError(
+                        f"Unexpected CLI result type: {type(cli_result).__name__}"
+                    )
+                if (
+                    subscription_route(auth=auth, lite=lite)
+                    or CLI_PROVIDERS[self._cli_provider]["api_fallback"] is None
+                ):
+                    raise_cli_backend_failure(
+                        cli_result,
+                        provider=self._cli_provider,
+                        model=self.model or self.provider,
+                    )
+                # Explicit API-auth routes may retain the intentional CLI→API fallback.
+                fallback_reason = cli_result.fallback_reason()
             api_provider = resolve_cli_api_fallback(
                 self._cli_provider,
                 auth=auth,

@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional
 
 from google import genai
 from google.genai import types
@@ -17,6 +17,9 @@ from openai import OpenAI
 from rich.console import Console
 
 from .logger import logger
+
+if TYPE_CHECKING:
+    from .cli_backends import CliBackendFailure
 
 console = Console()
 
@@ -38,7 +41,9 @@ EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
 EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
-EXIT_SPEND_CAP = 7  # daily metered-spend cap reached, or unpriced model — policy refusal
+EXIT_SPEND_CAP = (
+    7  # daily metered-spend cap reached, or unpriced model — policy refusal
+)
 
 
 class LlmxError(RuntimeError):
@@ -137,6 +142,21 @@ class ModelError(LlmxError):
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, error_type="model_error", **kwargs)
+
+
+def raise_cli_backend_failure(
+    failure: "CliBackendFailure",
+    *,
+    provider: str,
+    model: str,
+) -> NoReturn:
+    """Map a CLI transport failure into llmx's canonical public error types."""
+    raise failure.kind(
+        failure.detail,
+        provider=provider,
+        model=model,
+        status_code=failure.status,
+    )
 
 
 # Model-specific parameter restrictions
@@ -1040,7 +1060,9 @@ def _normalize_usage(provider: str, raw) -> dict:
         prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
         completion = _usage_get(raw, "completion_tokens", "output_tokens")
         reasoning = _usage_reasoning_tokens(raw)
-        prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
+        prompt_details = _usage_get(
+            raw, "prompt_tokens_details", "input_tokens_details"
+        )
         cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
@@ -1301,7 +1323,6 @@ def _openai_chat(
             finish_reason = response.choices[0].finish_reason
             print(result_text)
     finally:
-        details = _usage_get(usage, "completion_tokens_details", "output_tokens_details")
         cached = _usage_get(usage, "prompt_tokens_details", "input_tokens_details")
         log_usage(
             provider=provider,
@@ -1324,7 +1345,8 @@ def _openai_chat(
         ctoks = _usage_get(usage, "completion_tokens", "output_tokens")
         detail = (
             f" reasoning_tokens={rtoks}, completion_tokens={ctoks};"
-            if rtoks is not None or ctoks is not None else ""
+            if rtoks is not None or ctoks is not None
+            else ""
         )
         raise ModelError(
             f"Model returned no visible output — completion budget exhausted by "
@@ -1443,11 +1465,13 @@ def chat(
     try:
         # CLI backend handling — intercept before API logic
         from .cli_backends import (
+            CliBackendFailure,
             CLI_PROVIDERS,
             needs_api_fallback,
             cli_chat,
             preferred_cli_provider,
             resolve_cli_api_fallback,
+            subscription_route,
         )
 
         cli_provider = preferred_cli_provider(
@@ -1487,7 +1511,7 @@ def chat(
                 provider = api_provider
                 model = cli_model
             else:
-                text = cli_chat(
+                cli_result = cli_chat(
                     cli_provider,
                     prompt,
                     cli_model,
@@ -1498,22 +1522,37 @@ def chat(
                     mode=mode,
                     reasoning_effort=reasoning_effort,
                 )
-                if text is not None:
-                    print(text)
-                    return text
-                # CLI failed — fall back to API only on auth=api routes
+                if isinstance(cli_result, str):
+                    print(cli_result)
+                    return cli_result
+                if not isinstance(cli_result, CliBackendFailure):
+                    raise TypeError(
+                        f"Unexpected CLI result type: {type(cli_result).__name__}"
+                    )
+                if (
+                    subscription_route(auth=auth, lite=lite)
+                    or CLI_PROVIDERS[cli_provider]["api_fallback"] is None
+                ):
+                    raise_cli_backend_failure(
+                        cli_result,
+                        provider=cli_provider,
+                        model=cli_model,
+                    )
+                # Explicit API-auth routes may retain the intentional CLI→API fallback.
+                fallback_reason = cli_result.fallback_reason()
                 api_provider = resolve_cli_api_fallback(
                     cli_provider,
                     auth=auth,
                     lite=lite,
-                    reason="CLI returned error",
+                    reason=fallback_reason,
                 )
                 elapsed_cli = int(time.time() - start_time)
                 remaining = max(timeout - elapsed_cli, 5)
                 if use_alarm:
                     signal.alarm(remaining)
                 logger.info(
-                    f"[cli→api] {cli_provider} → {api_provider} (CLI returned error, {remaining}s remaining)"
+                    f"[cli→api] {cli_provider} → {api_provider} "
+                    f"({fallback_reason}, {remaining}s remaining)"
                 )
                 provider = api_provider
                 model = cli_model

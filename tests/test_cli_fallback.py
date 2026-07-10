@@ -1,10 +1,45 @@
 """Tests for subscription-safe CLI→API fallback."""
 
+import json
 import unittest
 from unittest.mock import patch
 
-from llmx.api import LLM
-from llmx.cli_backends import resolve_cli_api_fallback, subscription_route
+from click.testing import CliRunner
+
+from llmx.api import LLM, Response
+from llmx.cli import cli
+from llmx.cli_backends import (
+    CliBackendFailure,
+    _parse_claude_json,
+    cli_chat,
+    resolve_cli_api_fallback,
+    subscription_route,
+)
+from llmx.providers import (
+    ApiKeyError,
+    LlmxError,
+    ModelError,
+    QuotaError,
+    RateLimitError,
+    ServiceUnavailableError,
+    TimeoutError_,
+)
+
+
+MONTHLY_SPEND_DETAIL = "You've hit your monthly spend limit"
+CAPTURED_MONTHLY_SPEND_JSON = json.dumps(
+    {
+        "type": "result",
+        "is_error": True,
+        "api_error_status": 429,
+        "result": MONTHLY_SPEND_DETAIL,
+    }
+)
+MONTHLY_SPEND_FAILURE = CliBackendFailure(
+    kind=QuotaError,
+    status=429,
+    detail=MONTHLY_SPEND_DETAIL,
+)
 
 
 class TestSubscriptionRoute(unittest.TestCase):
@@ -39,19 +74,171 @@ class TestResolveCliApiFallback(unittest.TestCase):
             resolve_cli_api_fallback("cursor-cli", auth="api", reason="schema")
 
 
+class TestClaudeCliFailureParsing(unittest.TestCase):
+    @patch("llmx.cli_backends.subprocess.Popen")
+    def test_captured_monthly_spend_json_returns_typed_quota(self, popen):
+        process = popen.return_value
+        process.pid = 123
+        process.returncode = 1
+        process.communicate.return_value = (
+            CAPTURED_MONTHLY_SPEND_JSON,
+            "Claude request failed",
+        )
+
+        result = cli_chat(
+            "claude-cli",
+            "hi",
+            "claude-opus-4-8",
+            30,
+            mode="agent",
+        )
+
+        self.assertEqual(result, MONTHLY_SPEND_FAILURE)
+
+    def test_transient_429_is_not_quota(self):
+        detail = "Rate limit quota exceeded. Please retry shortly."
+        result, usage = _parse_claude_json(
+            json.dumps(
+                {
+                    "type": "result",
+                    "is_error": True,
+                    "api_error_status": 429,
+                    "result": detail,
+                }
+            )
+        )
+
+        self.assertEqual(
+            result,
+            CliBackendFailure(
+                kind=RateLimitError,
+                status=429,
+                detail=detail,
+            ),
+        )
+        self.assertIsNone(usage)
+
+    def test_other_claude_error_kinds(self):
+        cases = (
+            (504, "Request timed out", TimeoutError_),
+            (401, "Authentication token expired", ApiKeyError),
+            (404, "Model not found", ModelError),
+            (
+                503,
+                "Service temporarily unavailable",
+                ServiceUnavailableError,
+            ),
+            (400, "Malformed request", LlmxError),
+        )
+        for status, detail, expected_kind in cases:
+            with self.subTest(status=status, detail=detail):
+                result, usage = _parse_claude_json(
+                    json.dumps(
+                        {
+                            "type": "result",
+                            "is_error": True,
+                            "api_error_status": status,
+                            "result": detail,
+                        }
+                    )
+                )
+                self.assertIsInstance(result, CliBackendFailure)
+                self.assertEqual(result.kind, expected_kind)
+                self.assertEqual(result.status, status)
+                self.assertEqual(result.detail, detail)
+                self.assertIsNone(usage)
+
+
 class TestLlmSubscriptionFallback(unittest.TestCase):
-    @patch("llmx.api.cli_chat", return_value=None)
-    @patch("llmx.api.needs_api_fallback", return_value=None)
-    @patch("llmx.api.preferred_cli_provider", return_value="claude-cli")
-    def test_subscription_cli_failure_raises(self, *_mocks):
-        llm = LLM(provider="anthropic", auth="subscription", mode="chat")
-        with self.assertRaises(RuntimeError) as ctx:
-            llm.chat("hi")
-        self.assertIn("forbids", str(ctx.exception))
+    def test_subscription_quota_maps_without_api_fallback(self):
+        with (
+            patch("llmx.api.preferred_cli_provider", return_value="claude-cli"),
+            patch("llmx.api.needs_api_fallback", return_value=None),
+            patch("llmx.api.cli_chat", return_value=MONTHLY_SPEND_FAILURE),
+            patch("llmx.api.resolve_cli_api_fallback") as fallback,
+        ):
+            llm = LLM(provider="anthropic", auth="subscription", mode="chat")
+            with self.assertRaises(QuotaError) as raised:
+                llm.chat("hi")
+
+        error = raised.exception
+        self.assertEqual(error.exit_code, 6)
+        self.assertEqual(error.status_code, 429)
+        self.assertEqual(str(error), MONTHLY_SPEND_DETAIL)
+        fallback.assert_not_called()
+
+    def test_api_auth_retains_intentional_fallback(self):
+        expected = Response(
+            content="api response",
+            provider="anthropic",
+            model="claude-opus-4-8",
+            usage={},
+            latency=0.1,
+            raw=None,
+        )
+        with (
+            patch("llmx.api.preferred_cli_provider", return_value="claude-cli"),
+            patch("llmx.api.needs_api_fallback", return_value=None),
+            patch("llmx.api.cli_chat", return_value=MONTHLY_SPEND_FAILURE),
+        ):
+            llm = LLM(
+                provider="claude-cli",
+                model="claude-opus-4-8",
+                auth="subscription",
+            )
+            with patch("llmx.api.LLM") as fallback_class:
+                fallback_client = fallback_class.return_value
+                fallback_client.chat.return_value = expected
+
+                result = llm.chat("hi", auth="api", lite=None)
+
+        self.assertIs(result, expected)
+        fallback_class.assert_called_once()
+        fallback_kwargs = fallback_class.call_args.kwargs
+        self.assertEqual(fallback_kwargs["provider"], "anthropic")
+        self.assertEqual(fallback_kwargs["auth"], "api")
+        self.assertTrue(fallback_kwargs["api_only"])
+        fallback_client.chat.assert_called_once_with(
+            "hi", system=None, temperature=None, auth="api", lite=None
+        )
+
+
+class TestCliExitCode(unittest.TestCase):
+    def test_quota_error_exits_6(self):
+        quota_error = QuotaError(
+            MONTHLY_SPEND_DETAIL,
+            provider="claude-cli",
+            model="claude-opus-4-8",
+            status_code=429,
+        )
+        with (
+            patch("llmx.cli_backends.shutil.which", return_value="/usr/bin/claude"),
+            patch("llmx.cli.chat", side_effect=quota_error),
+        ):
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "chat",
+                    "--subscription",
+                    "--provider",
+                    "anthropic",
+                    "--model",
+                    "claude-opus-4-8",
+                    "hi",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 6, result.output)
+        self.assertIn("type=quota_exhausted", result.output)
+        self.assertIn("status=429", result.output)
+        self.assertIn(MONTHLY_SPEND_DETAIL, result.output)
 
 
 class TestProviderSubscriptionFallback(unittest.TestCase):
-    @patch("llmx.cli_backends.needs_api_fallback", return_value="structured output not supported by CLI")
+    @patch(
+        "llmx.cli_backends.needs_api_fallback",
+        return_value="structured output not supported by CLI",
+    )
     @patch("llmx.cli_backends.preferred_cli_provider", return_value="claude-cli")
     def test_subscription_forced_fallback_raises_with_reason(self, *_mocks):
         from llmx.providers import chat
@@ -73,6 +260,40 @@ class TestProviderSubscriptionFallback(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("structured output not supported by CLI", message)
         self.assertIn("auth=subscription forbids metered API fallback", message)
+
+    def test_subscription_quota_maps_without_api_fallback(self):
+        from llmx.providers import chat
+
+        with (
+            patch(
+                "llmx.cli_backends.preferred_cli_provider",
+                return_value="claude-cli",
+            ),
+            patch("llmx.cli_backends.needs_api_fallback", return_value=None),
+            patch(
+                "llmx.cli_backends.cli_chat",
+                return_value=MONTHLY_SPEND_FAILURE,
+            ),
+            patch("llmx.cli_backends.resolve_cli_api_fallback") as fallback,
+        ):
+            with self.assertRaises(QuotaError) as raised:
+                chat(
+                    "hi",
+                    provider="anthropic",
+                    model="claude-opus-4-8",
+                    temperature=0.7,
+                    reasoning_effort="medium",
+                    stream=False,
+                    debug=False,
+                    json_output=False,
+                    auth="subscription",
+                )
+
+        error = raised.exception
+        self.assertEqual(error.exit_code, 6)
+        self.assertEqual(error.status_code, 429)
+        self.assertEqual(str(error), MONTHLY_SPEND_DETAIL)
+        fallback.assert_not_called()
 
 
 if __name__ == "__main__":

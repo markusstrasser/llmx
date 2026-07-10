@@ -20,10 +20,36 @@ import shutil
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypeAlias
 
 from .logger import logger
+from .providers import (
+    ApiKeyError,
+    LlmxError,
+    ModelError,
+    QuotaError,
+    RateLimitError,
+    ServiceUnavailableError,
+    TimeoutError_,
+)
+
+
+@dataclass(frozen=True)
+class CliBackendFailure:
+    """Typed CLI transport failure before conversion to the public error API."""
+
+    kind: type[LlmxError]
+    status: int
+    detail: str
+
+    def fallback_reason(self) -> str:
+        status = f" status={self.status}" if self.status else ""
+        return f"{self.kind.__name__}{status}: {self.detail}"
+
+
+CliBackendResult: TypeAlias = str | CliBackendFailure
 
 # CLI provider configs — kept separate from PROVIDER_CONFIGS (different lifecycle)
 CLI_PROVIDERS = {
@@ -128,6 +154,7 @@ def _research_mcp_args() -> list[str]:
         )
     return ["run", "--directory", target, "research-mcp"]
 
+
 # Lite mode is restricted to frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
@@ -166,6 +193,7 @@ def lite_model_allowed(model: Optional[str]) -> bool:
         if model == allowed or model == base or model.startswith(base + "-"):
             return True
     return False
+
 
 # Max bytes for command-line argument before switching to stdin.
 # macOS ARG_MAX is ~260KB but shells/tools choke earlier.
@@ -258,7 +286,9 @@ def needs_api_fallback(
     return None
 
 
-def subscription_route(*, auth: Optional[str] = None, lite: Optional[str] = None) -> bool:
+def subscription_route(
+    *, auth: Optional[str] = None, lite: Optional[str] = None
+) -> bool:
     """True when the caller chose subscription billing (CLI OAuth / app sub)."""
     return auth == "subscription" or lite in _LITE_MODES
 
@@ -349,7 +379,9 @@ def _codex_rollout_snapshot(root: Path = _CODEX_SESSIONS_DIR) -> dict[Path, int]
     return out
 
 
-def _read_codex_rollout_usage(path: Path) -> tuple[dict[str, Optional[int]], Optional[str]]:
+def _read_codex_rollout_usage(
+    path: Path,
+) -> tuple[dict[str, Optional[int]], Optional[str]]:
     """Read the last token_count event from a Codex rollout JSONL file."""
     last_usage = None
     try:
@@ -360,7 +392,10 @@ def _read_codex_rollout_usage(path: Path) -> tuple[dict[str, Optional[int]], Opt
                 except json.JSONDecodeError:
                     continue
                 payload = event.get("payload") if isinstance(event, dict) else None
-                if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("type") != "token_count"
+                ):
                     continue
                 info = payload.get("info") or {}
                 usage = info.get("last_token_usage") or info.get("total_token_usage")
@@ -449,36 +484,166 @@ def _latest_codex_rollout_usage(
     return usage, note
 
 
-def _parse_claude_json(stdout: str):
-    """Unwrap `claude -p --output-format json` (an events list) → (text, usage|None).
+_QUOTA_MARKERS = (
+    "billing",
+    "monthly spend limit",
+    "monthly usage limit",
+    "credit balance",
+    "insufficient quota",
+    "insufficient_quota",
+    "spend limit",
+    "usage cap",
+)
+_TIMEOUT_MARKERS = ("deadline exceeded", "deadline_exceeded", "timed out", "timeout")
+_MODEL_MARKERS = (
+    "invalid model",
+    "model does not exist",
+    "model is not available",
+    "model isn't available",
+    "model not found",
+    "unknown model",
+    "unsupported model",
+)
+_AUTH_MARKERS = (
+    "authentication",
+    "invalid api key",
+    "invalid oauth",
+    "invalid_api_key",
+    "login required",
+    "not logged in",
+    "oauth token",
+    "please log in",
+    "token expired",
+    "unauthorized",
+)
+_RATE_LIMIT_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "requests per minute",
+    "tokens per minute",
+    "too many requests",
+)
+_SERVICE_UNAVAILABLE_MARKERS = (
+    "at capacity",
+    "overloaded",
+    "temporarily unavailable",
+)
+
+
+def _classify_cli_failure(detail: str, status: int = 0) -> CliBackendFailure:
+    """Classify transport detail, using text to disambiguate overloaded statuses."""
+    normalized = detail.casefold()
+    has_rate_limit_marker = any(marker in normalized for marker in _RATE_LIMIT_MARKERS)
+    if (
+        status == 402
+        or any(marker in normalized for marker in _QUOTA_MARKERS)
+        or ("quota" in normalized and not has_rate_limit_marker)
+    ):
+        kind = QuotaError
+    elif status in {408, 504} or any(
+        marker in normalized for marker in _TIMEOUT_MARKERS
+    ):
+        kind = TimeoutError_
+    elif status == 404 or any(marker in normalized for marker in _MODEL_MARKERS):
+        kind = ModelError
+    elif status in {401, 403} or any(marker in normalized for marker in _AUTH_MARKERS):
+        kind = ApiKeyError
+    elif status == 429 or has_rate_limit_marker:
+        kind = RateLimitError
+    elif status in {500, 502, 503, 529} or any(
+        marker in normalized for marker in _SERVICE_UNAVAILABLE_MARKERS
+    ):
+        kind = ServiceUnavailableError
+    else:
+        kind = LlmxError
+    return CliBackendFailure(kind=kind, status=status, detail=detail)
+
+
+def _claude_error_detail(value) -> str:
+    if isinstance(value, str) and value:
+        return value
+    if value is not None:
+        try:
+            return json.dumps(value, sort_keys=True)
+        except (TypeError, ValueError):
+            return repr(value)
+    return "Claude CLI reported an error without detail"
+
+
+def _claude_payload_reports_error(stdout: str) -> bool:
+    """Return whether stdout is structured Claude JSON with an error result."""
+    try:
+        events = json.loads(stdout)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if isinstance(events, dict):
+        events = [events]
+    return isinstance(events, list) and any(
+        isinstance(event, dict)
+        and event.get("type") == "result"
+        and bool(event.get("is_error"))
+        for event in events
+    )
+
+
+def _parse_claude_json(
+    stdout: str,
+) -> tuple[CliBackendResult, Optional[dict]]:
+    """Unwrap `claude -p --output-format json` into text or a typed failure.
 
     text = the result event's `result` (the model's answer, schema-string or prose).
     usage = real tokens + API-equivalent total_cost_usd (present even on subscription).
-    On is_error or parse failure → (None, None): the caller treats None as a CLI miss
-    and falls back to API (the pre-existing failure semantics — never returns broken text).
+    Structured errors preserve their kind, API status, and exact result detail.
     """
     try:
         events = json.loads(stdout)
-    except Exception:
-        return None, None
+    except (TypeError, json.JSONDecodeError) as exc:
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail=f"Claude CLI returned invalid JSON: {exc}",
+            ),
+            None,
+        )
     if isinstance(events, dict):
         events = [events]
     if not isinstance(events, list):
-        return None, None
-    for e in events:
-        if not isinstance(e, dict) or e.get("type") != "result":
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail="Claude CLI JSON did not contain a result event list",
+            ),
+            None,
+        )
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "result":
             continue
-        if e.get("is_error"):
-            return None, None
-        r = e.get("result")
-        if not isinstance(r, str):
-            return None, None
-        u = e.get("usage") or {}
-        mu = e.get("modelUsage") or {}
-        model_key = next(iter(mu), None)
-        details = u.get("output_tokens_details") or u.get("completion_tokens_details") or {}
+        if event.get("is_error"):
+            status = _int_or_none(event.get("api_error_status")) or 0
+            detail = _claude_error_detail(event.get("result"))
+            return _classify_cli_failure(detail, status), None
+        result = event.get("result")
+        if not isinstance(result, str):
+            return (
+                CliBackendFailure(
+                    kind=LlmxError,
+                    status=0,
+                    detail="Claude CLI result event contained no response text",
+                ),
+                None,
+            )
+        raw_usage = event.get("usage") or {}
+        model_usage = event.get("modelUsage") or {}
+        model_key = next(iter(model_usage), None)
+        details = (
+            raw_usage.get("output_tokens_details")
+            or raw_usage.get("completion_tokens_details")
+            or {}
+        )
         reasoning_tokens = _first_present(
-            u,
+            raw_usage,
             "reasoning_tokens",
             "thinking_tokens",
         )
@@ -492,15 +657,24 @@ def _parse_claude_json(stdout: str):
         # Some versions/models may add thinking/reasoning tokens; if absent,
         # keep null rather than writing 0, which would falsely claim measurement.
         usage = {
-            "model": model_key.split("[")[0] if isinstance(model_key, str) else None,  # strip [1m] etc → PRICING key
-            "input_tokens": u.get("input_tokens"),
-            "output_tokens": u.get("output_tokens"),
+            "model": model_key.split("[")[0]
+            if isinstance(model_key, str)
+            else None,  # strip [1m] etc → PRICING key
+            "input_tokens": raw_usage.get("input_tokens"),
+            "output_tokens": raw_usage.get("output_tokens"),
             "reasoning_tokens": reasoning_tokens,
-            "cache_read_input_tokens": u.get("cache_read_input_tokens"),
-            "total_cost_usd": e.get("total_cost_usd"),
+            "cache_read_input_tokens": raw_usage.get("cache_read_input_tokens"),
+            "total_cost_usd": event.get("total_cost_usd"),
         }
-        return r, usage
-    return None, None
+        return result, usage
+    return (
+        CliBackendFailure(
+            kind=LlmxError,
+            status=0,
+            detail="Claude CLI JSON contained no result event",
+        ),
+        None,
+    )
 
 
 def cli_chat(
@@ -514,10 +688,10 @@ def cli_chat(
     lite: Optional[str] = None,
     mode: str = "chat",
     reasoning_effort: Optional[str] = None,
-) -> Optional[str]:
+) -> CliBackendResult:
     """Execute one-shot chat via CLI binary.
 
-    Returns response text on success, None on failure (caller should fall back to API).
+    Returns response text on success or a typed failure for caller policy handling.
     For long prompts (>100KB), pipes via stdin to avoid ARG_MAX limits.
 
     `lite` ('bare' or 'research') runs the CLI in a stripped-down profile —
@@ -559,14 +733,24 @@ def cli_chat(
                 cmd.append("--ignore-rules")
                 if lite == "research":
                     args_json = json.dumps(_research_mcp_args())
-                    cmd.extend([
-                        "-c", 'mcp_servers.research.command="uv"',
-                        "-c", f"mcp_servers.research.args={args_json}",
-                    ])
+                    cmd.extend(
+                        [
+                            "-c",
+                            'mcp_servers.research.command="uv"',
+                            "-c",
+                            f"mcp_servers.research.args={args_json}",
+                        ]
+                    )
             if model:
                 cmd.extend(["-m", model])
             if reasoning_effort and reasoning_effort in {
-                "minimal", "low", "medium", "high", "xhigh", "max", "none"
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "none",
             }:
                 from .dispatch_plan import resolve_effort
 
@@ -597,36 +781,48 @@ def cli_chat(
             # the OAuth subscription path is used (api-key path can fail
             # with low credit balance even when subscription works fine).
             cmd = [
-                "claude", "-p",
+                "claude",
+                "-p",
                 "--no-session-persistence",
                 # json (not text): the result event carries REAL usage + the
                 # API-equivalent total_cost_usd even on the OAuth subscription path
                 # (verified 2026-06-16). We unwrap result.result for the caller, so
                 # this is transparent to the text-return contract. Closes the
                 # subscription-usage blind spot (was 100% api-transport in the log).
-                "--output-format", "json",
+                "--output-format",
+                "json",
                 "--disable-slash-commands",
             ]
             if mode == "agent" and not lite:
                 cmd.extend(["--permission-mode", "bypassPermissions"])
             elif lite == "research":
-                mcp_cfg = json.dumps({
-                    "mcpServers": {
-                        "research": {
-                            "command": "uv",
-                            "args": _research_mcp_args(),
+                mcp_cfg = json.dumps(
+                    {
+                        "mcpServers": {
+                            "research": {
+                                "command": "uv",
+                                "args": _research_mcp_args(),
+                            }
                         }
                     }
-                })
-                cmd.extend([
-                    "--mcp-config", mcp_cfg,
-                    "--allowedTools", "mcp__research",
-                ])
+                )
+                cmd.extend(
+                    [
+                        "--mcp-config",
+                        mcp_cfg,
+                        "--allowedTools",
+                        "mcp__research",
+                    ]
+                )
             else:
-                cmd.extend([
-                    "--mcp-config", '{"mcpServers":{}}',
-                    "--allowedTools", "",
-                ])
+                cmd.extend(
+                    [
+                        "--mcp-config",
+                        '{"mcpServers":{}}',
+                        "--allowedTools",
+                        "",
+                    ]
+                )
             if model:
                 cmd.extend(["--model", model])
             if reasoning_effort:
@@ -648,16 +844,23 @@ def cli_chat(
             # positional reads stdin); errors exit non-zero with stderr, so the
             # shared returncode/empty-output handling below catches them.
             cmd = [
-                "cursor-agent", "-p",
-                "--output-format", "text",
-                "--mode", "ask",
+                "cursor-agent",
+                "-p",
+                "--output-format",
+                "text",
+                "--mode",
+                "ask",
                 "--trust",
             ]
             if model:
                 cmd.extend(["--model", model])
             stdin_input = prompt
         else:
-            return None
+            return CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail=f"Unsupported CLI binary: {binary}",
+            )
 
         start = time.time()
         # Use Popen with process group + threading timer for reliable timeout.
@@ -703,8 +906,13 @@ def cli_chat(
                 logger.debug("[cli] claude-cli OAuth (API keys stripped)")
 
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, stdin=subprocess.PIPE, env=env, cwd=cwd,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            stdin=subprocess.PIPE,
+            env=env,
+            cwd=cwd,
             start_new_session=True,  # new process group for clean kill
         )
 
@@ -727,7 +935,9 @@ def cli_chat(
 
         elapsed = time.time() - start
 
-        def _log_codex_usage(note_prefix: Optional[str] = None, error: Optional[str] = None) -> None:
+        def _log_codex_usage(
+            note_prefix: Optional[str] = None, error: Optional[str] = None
+        ) -> None:
             if binary != "codex":
                 return
             try:
@@ -763,10 +973,23 @@ def cli_chat(
                 note_prefix=f"codex-cli timed out after {timeout}s",
                 error="timeout",
             )
-            logger.info(f"[cli→api] {binary} timed out after {timeout}s (killed process group)")
-            return None
+            logger.info(
+                f"[cli→api] {binary} timed out after {timeout}s (killed process group)"
+            )
+            return CliBackendFailure(
+                kind=TimeoutError_,
+                status=0,
+                detail=f"{binary} timed out after {timeout}s",
+            )
 
         if proc.returncode != 0:
+            if binary == "claude" and _claude_payload_reports_error(stdout):
+                parsed_result, _ = _parse_claude_json(stdout)
+                if isinstance(parsed_result, CliBackendFailure):
+                    logger.info(
+                        f"[cli] claude failed: {parsed_result.fallback_reason()}"
+                    )
+                    return parsed_result
             stderr_hint = stderr.strip()[:300] if stderr else ""
             stdout_hint = stdout.strip()[:200] if stdout else ""
             detail = stderr_hint or stdout_hint or "unknown error"
@@ -775,26 +998,31 @@ def cli_chat(
                 error=f"exit_{proc.returncode}",
             )
             logger.info(f"[cli→api] {binary} exited {proc.returncode}: {detail}")
-            return None
+            return _classify_cli_failure(detail)
 
         text = stdout.strip()
         if not text:
             logger.info(f"[cli→api] {binary} returned empty output")
-            return None
+            return CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail=f"{binary} returned empty output",
+            )
 
         # claude --output-format json: unwrap the result text + log REAL usage at this
         # chokepoint (both CLI/sub paths funnel here). Closes the blind spot where
         # subscription calls never reached log_usage. Best-effort: a log failure never
-        # breaks the call; a json-parse failure falls back to API (clean miss).
+        # breaks the call; typed parse failures are returned to the policy boundary.
         if binary == "claude":
-            parsed_text, usage = _parse_claude_json(text)
-            if parsed_text is None:
-                logger.info(f"[cli→api] claude json parse/error; treating as CLI miss")
-                return None
-            text = parsed_text
+            parsed_result, usage = _parse_claude_json(text)
+            if isinstance(parsed_result, CliBackendFailure):
+                logger.info(f"[cli] claude failed: {parsed_result.fallback_reason()}")
+                return parsed_result
+            text = parsed_result
             if usage:
                 try:
                     from .usage_log import log_usage
+
                     log_usage(
                         provider=provider,
                         model=usage.get("model") or model or "?",
@@ -816,10 +1044,18 @@ def cli_chat(
 
     except subprocess.TimeoutExpired:
         logger.info(f"[cli→api] {binary} timed out after {timeout}s")
-        return None
+        return CliBackendFailure(
+            kind=TimeoutError_,
+            status=0,
+            detail=f"{binary} timed out after {timeout}s",
+        )
     except FileNotFoundError:
         logger.info(f"[cli→api] {binary} not found")
-        return None
+        return CliBackendFailure(
+            kind=LlmxError,
+            status=0,
+            detail=f"{binary} not found",
+        )
     finally:
         if temp_schema_path:
             try:

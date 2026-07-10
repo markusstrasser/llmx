@@ -82,9 +82,9 @@ class TestClaudeCliUsage(unittest.TestCase):
             }
         )
 
-        text, usage = _parse_claude_json(stdout)
+        result, usage = _parse_claude_json(stdout)
 
-        self.assertEqual(text, "ok")
+        self.assertEqual(result, "ok")
         self.assertEqual(usage["model"], "claude-fable-5")
         self.assertIsNone(usage["reasoning_tokens"])
 
