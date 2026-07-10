@@ -442,7 +442,10 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     "--timeout",
     default=300,
     type=int,
-    help="Wall-clock timeout seconds (default: 300; auto-raised to 600/1200 for -e high/xhigh unless set explicitly)",
+    help=(
+        "Wall-clock timeout seconds (default: 300; auto-raised for agent mode "
+        "and high/xhigh/max effort unless set explicitly)"
+    ),
 )
 @click.option("--debug", is_flag=True, help="Debug logging")
 @click.option("--json", "json_output", is_flag=True, help="JSON output")
@@ -583,7 +586,11 @@ def chat_cmd(
     dry_run,
 ):
     """Text generation with LLMs (default command)."""
-    from .dispatch_plan import build_dispatch_plan, normalize_effort_input
+    from .dispatch_plan import (
+        build_dispatch_plan,
+        default_timeout_for,
+        normalize_effort_input,
+    )
 
     configure_logger(debug=debug, json_mode=json_output)
 
@@ -811,19 +818,19 @@ def chat_cmd(
             else:
                 reasoning_effort_source = "user-requested-cli-may-ignore"
 
-        # High/xhigh reasoning routinely exceeds the flat 300s wall clock
-        # (GPT-5.6 Sol high ≈ 5-10 min, xhigh ≈ 10-15 min). Scale the default;
-        # an explicit --timeout always wins. Keyed on EFFECTIVE effort so
-        # api-default high (e.g. flag-less GPT-5.6 Sol) scales too.
+        # Repository agents and high-effort reasoning routinely exceed the flat
+        # chat timeout. Scale only the default; an explicit operator bound wins.
+        # Key on EFFECTIVE effort so provider defaults scale consistently.
         from click.core import ParameterSource
         if ctx.get_parameter_source("timeout") == ParameterSource.DEFAULT:
-            scaled = {"high": 600, "xhigh": 1200}.get(
-                (effective_reasoning_effort or "").lower()
+            scaled = default_timeout_for(
+                mode=dispatch_plan.mode,
+                effort=effective_reasoning_effort,
             )
-            if scaled and scaled > timeout:
+            if scaled > timeout:
                 timeout = scaled
                 logger.info(
-                    f"Timeout auto-raised to {timeout}s for "
+                    f"Timeout auto-raised to {timeout}s for mode={dispatch_plan.mode} "
                     f"reasoning_effort={effective_reasoning_effort}"
                 )
                 dispatch_plan.timeout = timeout

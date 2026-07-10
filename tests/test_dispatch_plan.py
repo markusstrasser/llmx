@@ -4,6 +4,7 @@ import unittest
 
 from llmx.dispatch_plan import (
     combine_file_context,
+    default_timeout_for,
     map_effort_for_backend,
     normalize_effort_input,
     resolve_effort,
@@ -49,6 +50,20 @@ class TestEffortNormalize(unittest.TestCase):
             "max", transport="openai-api", provider="openai", model="gpt-5.4"
         )
         self.assertEqual(applied, "xhigh")
+
+
+class TestDefaultTimeout(unittest.TestCase):
+    def test_chat_defaults_preserve_short_low_effort_calls(self):
+        self.assertEqual(default_timeout_for(mode="chat", effort="low"), 300)
+
+    def test_effort_floors_scale_monotonically(self):
+        self.assertEqual(default_timeout_for(mode="chat", effort="high"), 600)
+        self.assertEqual(default_timeout_for(mode="chat", effort="xhigh"), 1200)
+        self.assertEqual(default_timeout_for(mode="chat", effort="max"), 3600)
+
+    def test_agent_mode_has_tool_use_floor(self):
+        self.assertEqual(default_timeout_for(mode="agent", effort="low"), 1800)
+        self.assertEqual(default_timeout_for(mode="agent", effort="max"), 3600)
 
 
 class TestLlmLiteRouting(unittest.TestCase):

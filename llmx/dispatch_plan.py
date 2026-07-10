@@ -158,6 +158,22 @@ class DispatchPlan:
         )
 
 
+def default_timeout_for(*, mode: str | None, effort: str | None) -> int:
+    """Return the safe wall-clock default for one dispatch shape.
+
+    Workspace agents spend material time reading and invoking tools before the
+    model can answer. Max-effort reasoning is also strictly longer than xhigh.
+    A five-minute chat default is therefore not a valid agent/max default.
+    """
+    effort_floor = {
+        "high": 600,
+        "xhigh": 1200,
+        "max": 3600,
+    }.get((effort or "").lower(), 300)
+    mode_floor = 1800 if mode == "agent" else 300
+    return max(effort_floor, mode_floor)
+
+
 def build_dispatch_plan(
     *,
     provider: Optional[str],
