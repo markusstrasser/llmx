@@ -31,6 +31,10 @@ cat code.py | llmx -m claude-opus-4-8 "Review this"
 llmx chat --subscription -m gpt-5.6-sol "Quick task"
 llmx chat --subscription -m claude-opus-4-8 "Review this"
 
+# Repository-aware agent route: caller cwd + project rules + native tools
+llmx chat --subscription --mode agent -m claude-opus-4-8 \
+  "Inspect this repository and report findings with file:line evidence"
+
 # Probe resolved transport before dispatch
 llmx chat --dry-run --subscription -m claude-opus-4-8 -e max "ping"
 llmx info --write-mirror   # → ~/.claude/cache/llmx-routing.json
@@ -184,6 +188,11 @@ Transport defaults:
 - `google` → paid Gemini API (free Gemini CLI retired 2026-05-31).
 - `openai` → OpenAI API by default; `codex-cli` via `--subscription` / `--lite bare`.
 - `anthropic` → **claude-cli subscription by default** (OAuth, API keys stripped). Use `-p anthropic-direct` for metered API.
+- `--mode chat` runs from an isolated cache with tools disabled. `--mode agent`
+  preserves the caller's working directory, project instructions, and native CLI
+  tools; it is an explicit autonomous route with non-interactive approvals.
+- Legacy `--lite research` remains an isolated research-MCP-only profile. It is
+  not equivalent to workspace agent mode.
 - `codex-cli` supports JSON schema output via `codex exec --output-schema`.
 - `-s` (system messages) works with CLI transports — folded into the prompt as `<system>` XML.
 - `llmx info --write-mirror` writes routing facts to `~/.claude/cache/llmx-routing.json`.

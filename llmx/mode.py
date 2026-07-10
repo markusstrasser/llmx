@@ -9,13 +9,6 @@ from .auth import AuthKind
 ModeKind = Literal["chat", "agent"]
 MODE_CHOICES: tuple[ModeKind, ...] = ("chat", "agent")
 
-# Internal CLI profile names (legacy --lite); derived from mode, not caller-facing.
-LITE_FOR_MODE: dict[ModeKind, str] = {
-    "chat": "bare",
-    "agent": "research",
-}
-
-
 def normalize_mode(value: Optional[str]) -> ModeKind:
     if value is None:
         raise ValueError("mode is required")
@@ -44,10 +37,13 @@ def resolve_mode(
             raise ValueError(f"--lite {lite} conflicts with --mode {mode}")
 
     if lite == "bare":
-        warnings.append("--lite bare is deprecated; use --mode chat")
+        warnings.append("--lite bare selects the legacy isolated no-tools profile")
         return "chat", "lite_deprecated", "bare", warnings
     if lite == "research":
-        warnings.append("--lite research is deprecated; use --mode agent")
+        warnings.append(
+            "--lite research selects the legacy isolated research-MCP profile; "
+            "--mode agent is caller-workspace execution"
+        )
         return "agent", "lite_deprecated", "research", warnings
 
     if mode is not None:
@@ -66,8 +62,11 @@ def resolve_mode(
             source = "auth_forced"
         return resolved, source, None, warnings
 
-    # subscription → CLI transport; lite profile selects tool surface
-    effective_lite = LITE_FOR_MODE[resolved]
+    # ``chat`` is the neutral request/response profile. ``agent`` is not a lite
+    # profile: it keeps the caller's cwd, project instructions, and native CLI
+    # tools. Legacy ``--lite research`` remains an explicitly isolated research
+    # profile and is resolved above.
+    effective_lite = "bare" if resolved == "chat" else None
     return resolved, source, effective_lite, warnings
 
 

@@ -121,7 +121,11 @@ class LLM:
         )
         kwargs["auth"] = resolved_auth
         lite = kwargs.get("lite")
-        self._cli_provider = preferred_cli_provider(provider, lite=lite)
+        self._cli_provider = preferred_cli_provider(
+            provider,
+            lite=lite,
+            subscription=resolved_auth == "subscription",
+        )
         self.temperature = temperature
         self.search = search
         self.kwargs = kwargs
@@ -163,6 +167,7 @@ class LLM:
             max_tokens = merged.get("max_tokens")
             auth = merged.get("auth")
             lite = merged.get("lite")
+            mode = merged.get("mode", "chat")
             fallback_reason = needs_api_fallback(
                 self._cli_provider,
                 schema,
@@ -182,6 +187,7 @@ class LLM:
                     schema=schema,
                     system=system,
                     lite=lite,
+                    mode=mode,
                     reasoning_effort=reasoning_effort,
                 )
                 if text is not None:

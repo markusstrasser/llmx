@@ -209,7 +209,11 @@ def build_dispatch_plan(
     )
     warnings.extend(mode_warns)
 
-    cli_provider = preferred_cli_provider(final_provider, lite=effective_lite)
+    cli_provider = preferred_cli_provider(
+        final_provider,
+        lite=effective_lite,
+        subscription=resolved_auth == "subscription",
+    )
     if cli_provider:
         logical_provider = (
             CLI_PROVIDERS[cli_provider]["api_fallback"]

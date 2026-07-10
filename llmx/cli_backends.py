@@ -190,16 +190,27 @@ def binary_available(provider: str) -> bool:
     return shutil.which(config["binary"]) is not None
 
 
-def preferred_cli_provider(provider: str, lite: Optional[str] = None) -> Optional[str]:
+def preferred_cli_provider(
+    provider: str,
+    lite: Optional[str] = None,
+    *,
+    subscription: bool = False,
+) -> Optional[str]:
     """Return the CLI backend to prefer for a provider.
 
     Explicit CLI providers always resolve, even if the binary is missing, so callers can
     surface a precise fallback reason. Logical providers (openai/google) only resolve when
     the corresponding CLI is installed.
 
-    `lite` ('bare' or 'research') routes openai → codex-cli (cost-saving mode).
+    `lite` ('bare' or 'research') routes logical providers through an isolated
+    CLI profile. ``subscription=True`` routes the same logical providers through
+    their native CLI without implying isolation; this is what workspace agent
+    mode uses.
     """
-    cli_provider = configured_cli_provider(provider, lite=lite)
+    cli_provider = configured_cli_provider(
+        provider,
+        lite=lite or ("bare" if subscription else None),
+    )
     if not cli_provider:
         return None
     if provider in CLI_PROVIDERS:
@@ -501,6 +512,7 @@ def cli_chat(
     schema=None,
     system: Optional[str] = None,
     lite: Optional[str] = None,
+    mode: str = "chat",
     reasoning_effort: Optional[str] = None,
 ) -> Optional[str]:
     """Execute one-shot chat via CLI binary.
@@ -511,6 +523,10 @@ def cli_chat(
     `lite` ('bare' or 'research') runs the CLI in a stripped-down profile —
     no MCPs (bare) or research-MCP only (research), empty cwd, prompt prefix
     advising the model what's available.
+
+    ``mode='agent'`` is deliberately different: it preserves the caller's cwd,
+    project instructions, and native CLI tool surface. Agent mode is explicit
+    autonomous execution, so headless CLIs run without interactive approvals.
     """
     # Fold system message into prompt — CLIs don't have a system flag
     if system:
@@ -532,6 +548,8 @@ def cli_chat(
             codex_rollouts_before = _codex_rollout_snapshot()
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
             cmd = ["codex", "exec", "--skip-git-repo-check"]
+            if mode == "agent" and not lite:
+                cmd.append("--full-auto")
             if lite:
                 # Lite mode: skip config.toml entirely so codex doesn't re-enable
                 # bundled plugins on each launch. Inject MCPs via -c overrides.
@@ -573,9 +591,9 @@ def cli_chat(
             else:
                 cmd.append(prompt)
         elif binary == "claude":
-            # claude -p (headless). Lite-only path — Claude Code is heavy by
-            # default; we pass flags to skip skills/CLAUDE.md/sessions and
-            # restrict MCP/tools. Auth: drop ANTHROPIC_API_KEY from env so
+            # claude -p (headless). Lite profiles skip project context and
+            # restrict MCP/tools; agent mode intentionally keeps the caller's
+            # project context and native tool surface. Auth: drop ANTHROPIC_API_KEY from env so
             # the OAuth subscription path is used (api-key path can fail
             # with low credit balance even when subscription works fine).
             cmd = [
@@ -589,7 +607,9 @@ def cli_chat(
                 "--output-format", "json",
                 "--disable-slash-commands",
             ]
-            if lite == "research":
+            if mode == "agent" and not lite:
+                cmd.extend(["--permission-mode", "bypassPermissions"])
+            elif lite == "research":
                 mcp_cfg = json.dumps({
                     "mcpServers": {
                         "research": {
@@ -671,9 +691,11 @@ def cli_chat(
             if lite:
                 cwd = _lite_cwd(lite)
                 logger.debug(f"[cli] lite={lite} cwd={cwd}")
-            elif binary == "claude":
+            elif binary == "claude" and mode != "agent":
                 cwd = _lite_cwd("bare")
                 logger.debug("[cli] claude subscription cwd (bare cache)")
+            elif binary == "claude":
+                logger.debug(f"[cli] claude workspace agent cwd={Path.cwd()}")
             env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_ID"}
             if binary == "claude":
                 env.pop("ANTHROPIC_API_KEY", None)

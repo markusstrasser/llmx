@@ -86,6 +86,26 @@ class TestLlmLiteRouting(unittest.TestCase):
         self.assertEqual(plan.lite, "bare")
         self.assertEqual(plan.transport, "claude-cli")
 
+    def test_anthropic_agent_uses_subscription_cli_without_lite_profile(self):
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        plan = build_dispatch_plan(
+            provider="anthropic",
+            model="claude-opus-4-8",
+            reasoning_effort="max",
+            timeout=3600,
+            lite=None,
+            mode="agent",
+            auth="subscription",
+            subscription=False,
+            api_only=None,
+            use_old=False,
+        )
+        self.assertEqual(plan.auth, "subscription")
+        self.assertEqual(plan.mode, "agent")
+        self.assertIsNone(plan.lite)
+        self.assertEqual(plan.transport, "claude-cli")
+
 
 class TestFileContext(unittest.TestCase):
     def test_boundaries(self):

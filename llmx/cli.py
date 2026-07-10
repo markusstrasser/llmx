@@ -512,15 +512,15 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     type=click.Choice(["chat", "agent"]),
     default=None,
     help=(
-        "Interaction shape: chat=one-shot req/res; agent=CLI tools/MCP loop "
-        "(subscription only). Default chat."
+        "Interaction shape: chat=isolated one-shot req/res; agent=caller-workspace "
+        "CLI tool loop (subscription only, non-interactive approvals). Default chat."
     ),
 )
 @click.option(
     "--lite",
     type=click.Choice(["bare", "research"], case_sensitive=False),
     default=None,
-    help="Deprecated alias for --mode (bare→chat, research→agent).",
+    help="Legacy isolated CLI profile: bare=no tools; research=research MCP only.",
 )
 @click.option(
     "--flex",
@@ -887,6 +887,7 @@ def chat_cmd(
             schema=schema,
             max_tokens=max_tokens,
             lite=dispatch_plan.lite,
+            mode=dispatch_plan.mode,
             service_tier="flex" if flex else None,
             auth=dispatch_plan.auth,
         )

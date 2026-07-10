@@ -50,7 +50,7 @@ class TestResolveAuth(unittest.TestCase):
         )
         self.assertEqual(
             auth_to_llmx_kwargs("subscription", mode="agent"),
-            {"api_only": False, "lite": "research", "auth": "subscription", "mode": "agent"},
+            {"api_only": False, "lite": None, "auth": "subscription", "mode": "agent"},
         )
 
 

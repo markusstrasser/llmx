@@ -16,7 +16,14 @@ class TestResolveMode(unittest.TestCase):
         mode, source, lite, _ = resolve_mode(mode="agent", auth="subscription")
         self.assertEqual(mode, "agent")
         self.assertEqual(source, "explicit")
+        self.assertIsNone(lite)
+
+    def test_legacy_research_profile_remains_isolated(self):
+        mode, source, lite, warns = resolve_mode(lite="research", auth="subscription")
+        self.assertEqual(mode, "agent")
+        self.assertEqual(source, "lite_deprecated")
         self.assertEqual(lite, "research")
+        self.assertTrue(warns)
 
     def test_lite_bare_deprecated(self):
         mode, source, lite, warns = resolve_mode(lite="bare", auth="subscription")

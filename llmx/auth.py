@@ -91,7 +91,7 @@ def auth_to_llmx_kwargs(auth: AuthKind, *, lite: Optional[str] = None, mode: Opt
     if auth == "subscription":
         return {
             "api_only": False,
-            "lite": effective_lite or "bare",
+            "lite": effective_lite,
             "auth": auth,
             "mode": resolved_mode,
         }

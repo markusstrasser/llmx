@@ -1407,6 +1407,7 @@ def chat(
     schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
     lite: Optional[str] = None,
+    mode: str = "chat",
     service_tier: Optional[str] = None,
     auth: Optional[str] = None,
 ) -> Optional[str]:
@@ -1449,7 +1450,11 @@ def chat(
             resolve_cli_api_fallback,
         )
 
-        cli_provider = preferred_cli_provider(provider, lite=lite)
+        cli_provider = preferred_cli_provider(
+            provider,
+            lite=lite,
+            subscription=auth == "subscription",
+        )
         if cli_provider:
             logical_provider = (
                 provider
@@ -1490,6 +1495,7 @@ def chat(
                     schema=schema,
                     system=system,
                     lite=lite,
+                    mode=mode,
                     reasoning_effort=reasoning_effort,
                 )
                 if text is not None:
