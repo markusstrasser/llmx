@@ -11,6 +11,8 @@ Usage:
     llmx svg "physics momentum arrow icon" -o momentum.svg
 """
 
+# ruff: noqa: E402
+
 import sys
 import os
 import json
@@ -18,7 +20,6 @@ from pathlib import Path
 import click
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.markdown import Markdown
 
 # Load .env from current directory and parents
 load_dotenv()
@@ -29,7 +30,7 @@ from . import __version__
 from .providers import (
     chat, compare as compare_providers, list_providers, infer_provider_from_model,
     LlmxError, RateLimitError, QuotaError, TimeoutError_, SearchUnavailableError,
-    EXIT_GENERAL, PROVIDER_CONFIGS, get_model_name, get_model_restriction,
+    EXIT_GENERAL, get_model_restriction,
 )
 from .cli_backends import (
     lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
@@ -60,7 +61,17 @@ class _TeeWriter:
 
 
 # Subcommand names for detection
-SUBCOMMANDS = {"image", "svg", "vision", "research", "batch", "info", "keys", "chat"}
+SUBCOMMANDS = {
+    "image",
+    "svg",
+    "vision",
+    "research",
+    "batch",
+    "info",
+    "probe",
+    "keys",
+    "chat",
+}
 
 
 # ============================================================================
@@ -749,7 +760,7 @@ def chat_cmd(
                     logger.info(f"--fast: no fast model for {fast_provider}, using default")
             if not reasoning_effort:
                 reasoning_effort = "low"
-                logger.info(f"--fast: reasoning_effort=low")
+                logger.info("--fast: reasoning_effort=low")
 
         if model and not provider:
             inferred = infer_provider_from_model(model)
@@ -1074,7 +1085,10 @@ cli.add_command(research_cmd, name="research")
 
 # Batch (Gemini Batch API)
 from .batch_cmd import batch_group
+from .probe_cmd import probe_cmd
+
 cli.add_command(batch_group, name="batch")
+cli.add_command(probe_cmd, name="probe")
 
 
 # ── Keys management (macOS Keychain) ────────────────────────
