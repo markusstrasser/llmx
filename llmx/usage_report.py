@@ -45,6 +45,11 @@ PRICING: dict[str, tuple[float, float]] = {
     "grok-4.5-fast-xhigh": (4.0, 18.0),
     # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
     "qwen/qwen3.6-27b": (0.285, 2.40),
+    # dense-student screen candidates (arc-agi research/2026-07-10-dense-student-candidates.md,
+    # web-verified 2026-07-10; per-M USD prompt/completion)
+    "google/gemma-4-31b-it": (0.12, 0.35),
+    "qwen/qwen3-32b": (0.08, 0.28),
+    "mistralai/mistral-small-3.2-24b-instruct": (0.075, 0.20),
 }
 
 # Context-window limit (max input tokens) per model. Static capability, not from the
@@ -57,6 +62,11 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.6-terra": 1_050_000, "gpt-5.6-luna": 1_050_000,
     "gpt-5.3-chat-latest": 400_000, "gpt-5.3-codex": 400_000,
     "claude-opus-4-8": 1_000_000, "claude-fable-5": 1_000_000, "claude-sonnet-4-6": 1_000_000,
+    # dense-student screen candidates (2026-07-10): gemma4 256K, qwen3-32b 32K native
+    # (131K YaRN — native registered), mistral-small-3.2 128K
+    "google/gemma-4-31b-it": 256_000,
+    "qwen/qwen3-32b": 32_768,
+    "mistralai/mistral-small-3.2-24b-instruct": 128_000,
     # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k
     "grok-4.5": 500_000,
     "grok-4.5-medium": 500_000, "grok-4.5-high": 500_000, "grok-4.5-xhigh": 500_000,
