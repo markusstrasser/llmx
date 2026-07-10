@@ -31,7 +31,13 @@ from .cli_backends import (
 )
 from .inspect import capture_call
 from .logger import logger
-
+from .dispatch_api import (  # noqa: F401 — re-export for `from llmx.api import dispatch`
+    DispatchResult,
+    classify_dispatch_error,
+    compose_prompt,
+    dispatch,
+    load_context_paths,
+)
 # Dispatch auto-retry on TRANSIENT failures (RateLimitError + its ServiceUnavailableError
 # subclass = 429/503/overload/connection). Exponential backoff + JITTER (the jitter matters:
 # under concurrent multi-session load, deterministic backoff thundering-herds). Non-transient

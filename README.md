@@ -98,9 +98,25 @@ llmx research --mini "compare React vs Svelte" -o report.md
 ## Python API
 
 ```python
-from llmx import chat, LLM, batch
+from llmx import chat, dispatch, DispatchResult, LLM, batch
 
-# One-shot call
+# Structured one-shot (preferred for scripts — status taxonomy, no raise on rate-limit)
+result = dispatch(
+    "What is 2+2?",
+    provider="openai",
+    auth="api",
+    context_paths=["ctx-a.md", "ctx-b.md"],  # concatenated with path boundaries
+)
+if result.ok():
+    print(result.text, result.usage, result.transport)
+else:
+    print(result.status, result.error_message, result.exit_code)
+
+# Dry-run: resolve transport without calling a model
+plan = dispatch("ping", model="claude-opus-4-8", subscription=True, dry_run=True)
+print(plan.dry_run_plan)
+
+# Legacy one-shot (raises on failure)
 response = chat("What is 2+2?", provider="openai")
 print(response.content)   # "4"
 print(response.usage)     # {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
