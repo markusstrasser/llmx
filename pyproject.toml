@@ -36,4 +36,7 @@ typeCheckingMode = "basic"
 exclude = ["build/"]
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.21",
+]
