@@ -344,23 +344,88 @@ def _lite_cwd(lite: str) -> str:
             f"--lite mode {lite!r} skeleton {skel} missing — llmx install corrupt?"
         )
     runtime = _LITE_RUNTIME_ROOT / lite
-    runtime.mkdir(parents=True, exist_ok=True)
-    return str(runtime)
+    caller = Path.cwd()
+    if _is_llmx_cache_path(caller):
+        runtime.mkdir(parents=True, exist_ok=True)
+        return str(runtime)
+    return str(_caller_cache_subdir(runtime, caller))
 
 
 _CURSOR_RUNTIME_DIR = Path(os.path.expanduser("~/.cache/llmx/cursor"))
+_LLMX_CACHE_ROOT = Path(os.path.expanduser("~/.cache/llmx"))
+_DISPATCH_ATTRIBUTION = _LLMX_CACHE_ROOT / "dispatch-attribution.jsonl"
+_CALLER_MARKER = ".llmx-caller-cwd"
+
+
+def _is_llmx_cache_path(path: str | Path) -> bool:
+    """True when path is under ~/.cache/llmx (resolved), not a substring false-positive."""
+    try:
+        resolved = Path(path).expanduser().resolve()
+        root = _LLMX_CACHE_ROOT.resolve()
+        return resolved == root or root in resolved.parents
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _caller_cache_subdir(base: Path, caller: Path) -> Path:
+    """Per-caller empty cache dir so concurrent dispatches don't share one cwd.
+
+    Shared ~/.cache/llmx/cursor (or lite/bare) cannot attribute two in-flight
+    projects — Opus 2026-07-12 FIX-THEN-LAND. Hash keeps paths short + stable.
+    """
+    import hashlib
+
+    digest = hashlib.sha1(str(caller.resolve()).encode()).hexdigest()[:12]
+    d = base / digest
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        (d / _CALLER_MARKER).write_text(str(caller.resolve()) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.debug(f"[cli] caller-marker write failed: {exc}")
+    return d
+
+
+def _record_dispatch_attribution(*, cli_cwd: str, caller_cwd: str) -> None:
+    """Append durable caller→cache-cwd row (bounded; agentlogs prefers cwd marker)."""
+    import json
+    from datetime import datetime, timezone
+
+    try:
+        _LLMX_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "cli_cwd": str(Path(cli_cwd).expanduser().resolve()),
+            "caller_cwd": str(Path(caller_cwd).expanduser().resolve()),
+            "pid": os.getpid(),
+        }
+        line = json.dumps(row, ensure_ascii=False) + "\n"
+        with _DISPATCH_ATTRIBUTION.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+        # Soft rotation: keep last ~5000 lines so pid reuse can't resurrect weeks-old rows.
+        try:
+            raw = _DISPATCH_ATTRIBUTION.read_text(encoding="utf-8").splitlines()
+            if len(raw) > 5000:
+                _DISPATCH_ATTRIBUTION.write_text(
+                    "\n".join(raw[-4000:]) + "\n", encoding="utf-8"
+                )
+        except OSError:
+            pass
+    except OSError as exc:
+        logger.debug(f"[cli] dispatch-attribution write failed: {exc}")
 
 
 def _cursor_cwd() -> str:
-    """Neutral empty cwd for cursor-agent.
+    """Neutral empty cwd for cursor-agent, scoped per caller workspace.
 
-    cursor-agent reads the workspace it runs in (rules, AGENTS.md, file tree)
-    and folds it into context. For a clean model-query transport we run from an
-    empty cache dir so the answer depends only on the prompt — not on wherever
-    llmx happened to be invoked. Auto-created, idempotent.
+    cursor-agent reads the workspace it runs in (rules, AGENTS.md, file tree).
+    We still avoid folding the caller's tree into context by using an empty
+    cache dir — but the dir is per-caller so agentlogs can attribute the session.
     """
-    _CURSOR_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    return str(_CURSOR_RUNTIME_DIR)
+    caller = Path.cwd()
+    if _is_llmx_cache_path(caller):
+        _CURSOR_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        return str(_CURSOR_RUNTIME_DIR)
+    return str(_caller_cache_subdir(_CURSOR_RUNTIME_DIR, caller))
 
 
 def _codex_rollout_snapshot(root: Path = _CODEX_SESSIONS_DIR) -> dict[Path, int]:
@@ -904,6 +969,21 @@ def cli_chat(
                 env.pop("ANTHROPIC_API_KEY", None)
                 env.pop("CLAUDE_API_KEY", None)
                 logger.debug("[cli] claude-cli OAuth (API keys stripped)")
+
+        # When the CLI runs from llmx's cache cwd, record durable attribution
+        # (cwd marker + sidecar). Child env does NOT survive into transcripts.
+        if cwd and _is_llmx_cache_path(cwd):
+            caller = Path.cwd()
+            if not _is_llmx_cache_path(caller):
+                _record_dispatch_attribution(cli_cwd=str(cwd), caller_cwd=str(caller))
+                # Marker may already exist from _caller_cache_subdir; refresh.
+                try:
+                    Path(cwd).mkdir(parents=True, exist_ok=True)
+                    (Path(cwd) / _CALLER_MARKER).write_text(
+                        str(caller.resolve()) + "\n", encoding="utf-8"
+                    )
+                except OSError as exc:
+                    logger.debug(f"[cli] caller-marker refresh failed: {exc}")
 
         proc = subprocess.Popen(
             cmd,
