@@ -13,7 +13,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from llmx.providers import SpendCapError
+from llmx.providers import GeminiPolicyError, SpendCapError
 from llmx import spend_guard as sg
 
 
@@ -129,6 +129,45 @@ class TestSpendGuard(unittest.TestCase):
         spend, ok = sg.metered_spend_today("/nonexistent/does/not/exist.jsonl")
         self.assertFalse(ok)
         self.assertEqual(spend, 0.0)
+
+
+class TestGeminiPolicy(unittest.TestCase):
+    """Gemini critique-only policy (operator, 2026-07-14)."""
+
+    def setUp(self):
+        os.environ.pop(sg._GEMINI_ALLOW_ENV, None)
+        os.environ.pop(sg._OVERRIDE_ENV, None)
+
+    tearDown = setUp
+
+    def test_gemini_refused_without_allow_env(self):
+        with self.assertRaises(GeminiPolicyError) as cm:
+            sg.enforce_gemini_policy("gemini-3-flash-preview")
+        self.assertEqual(cm.exception.exit_code, 7)
+        self.assertIn("critique-only", str(cm.exception))
+
+    def test_gemini_allowed_with_env(self):
+        os.environ[sg._GEMINI_ALLOW_ENV] = "1"
+        sg.enforce_gemini_policy("gemini-3.5-flash")  # no raise
+
+    def test_non_gemini_unaffected(self):
+        sg.enforce_gemini_policy("claude-opus-4-8")  # no raise
+        sg.enforce_gemini_policy("gpt-5.6-luna")  # no raise
+
+    def test_spend_override_does_not_bypass_policy(self):
+        os.environ[sg._OVERRIDE_ENV] = "1"
+        p = _ledger()
+        try:
+            with self.assertRaises(GeminiPolicyError):
+                sg.enforce_daily_cap("gemini-3-flash-preview", log_path=p)
+        finally:
+            Path(p).unlink(missing_ok=True)
+
+    def test_policy_error_is_spendcap_subclass(self):
+        # Callers catching SpendCapError keep working; error_type distinguishes.
+        err = GeminiPolicyError("x", model="gemini-x")
+        self.assertIsInstance(err, SpendCapError)
+        self.assertEqual(err.error_type, "gemini_policy")
 
 
 if __name__ == "__main__":

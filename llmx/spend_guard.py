@@ -35,7 +35,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .providers import SpendCapError
+from .providers import GeminiPolicyError, SpendCapError
 from .usage_report import DEFAULT_LOG, PRICING, est_cost
 
 # The constitution / invariants.md daily cap. ONE number; the launchd alarm
@@ -43,6 +43,30 @@ from .usage_report import DEFAULT_LOG, PRICING, est_cost
 DAILY_CAP_USD = 25.0
 
 _OVERRIDE_ENV = "LLMX_SPEND_OVERRIDE"
+_GEMINI_ALLOW_ENV = "LLMX_GEMINI_OK"
+
+
+def enforce_gemini_policy(model: str) -> None:
+    """Gemini is critique-only (operator policy 2026-07-14).
+
+    June 2026's ~€700 Google bill came from Gemini running everywhere — critique
+    cosigner, launchd shadow jobs, direct-SDK pipelines. Policy: metered gemini-*
+    dispatch is allowed ONLY from the /critique engine, which sets
+    ``LLMX_GEMINI_OK=1`` for its axis dispatches. Everything else refuses here,
+    BEFORE any billed token. ``LLMX_SPEND_OVERRIDE`` does NOT bypass this —
+    it lifts the budget cap, not the provider policy.
+    """
+    if not (model or "").lower().startswith("gemini"):
+        return
+    if os.environ.get(_GEMINI_ALLOW_ENV) == "1":
+        return
+    raise GeminiPolicyError(
+        f"gemini model {model!r} refused: Gemini is critique-only by operator "
+        f"policy (2026-07-14). The /critique engine sets {_GEMINI_ALLOW_ENV}=1 "
+        f"for its dispatches; export it yourself only for a deliberately-intended "
+        f"one-off. Otherwise use the default routing (GPT-5.6 / subscription lanes).",
+        model=model,
+    )
 
 
 def is_metered_transport(transport: str | None) -> bool:
@@ -115,6 +139,10 @@ def enforce_daily_cap(
     Call this ONLY on the metered path — the caller has already established the
     transport is billed. Subscription/CLI dispatch must not reach here.
     """
+    # Provider policy first — not bypassed by the spend override (it lifts the
+    # budget cap, not the critique-only restriction on Gemini).
+    enforce_gemini_policy(model)
+
     if os.environ.get(_OVERRIDE_ENV) == "1":
         print(
             f"[llmx:SPEND] override active ({_OVERRIDE_ENV}=1) — metered-spend cap "
