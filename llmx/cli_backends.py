@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional, TypeAlias
 
 from .logger import logger
+from .model_ids import CURSOR_GROK45_MODELS
 from .providers import (
     ApiKeyError,
     LlmxError,
@@ -173,11 +174,10 @@ LITE_ALLOWED_MODELS = {
     # 2026-07-05: Fable 5 ships on claude-cli subscription (same OAuth headless
     # -p transport as opus) — operator-directed for arc-agi H1/H2 dispatch lanes.
     "claude-fable-5",
-    # 2026-07-09: Cursor subscription pool — composer (Cursor-exclusive) + Grok 4.5
-    # (SpaceXAI/Cursor joint; effort baked into slug). Bare `grok-4.5` also matches
-    # via startswith(base+"-") for grok-4.5-xhigh etc.
+    # 2026-07-14: Cursor subscription pool — composer plus the exact live Grok
+    # registry slugs. Bare `grok-4.5` is the metered xAI API model and is excluded.
     "composer-2.5",
-    "grok-4.5",
+    *CURSOR_GROK45_MODELS,
 }
 
 
@@ -188,6 +188,8 @@ def lite_model_allowed(model: Optional[str]) -> bool:
     """
     if not model:
         return False
+    if model.startswith("cursor-grok-4.5-"):
+        return model in CURSOR_GROK45_MODELS
     for allowed in LITE_ALLOWED_MODELS:
         base = allowed.removesuffix("-preview")
         if model == allowed or model == base or model.startswith(base + "-"):

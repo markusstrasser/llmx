@@ -18,7 +18,7 @@ from .cli_backends import (
     preferred_cli_provider,
     subscription_route,
 )
-from .providers import get_model_name, get_model_restriction, infer_provider_from_model, _auto_upgrade_model
+from .providers import get_model_name, infer_provider_from_model, _auto_upgrade_model
 
 SCHEMA_VERSION = "llmx-routing.v1"
 
@@ -257,6 +257,13 @@ def build_dispatch_plan(
         planned_model = get_model_name(final_provider, model, use_old)
         planned_transport = f"{final_provider}-api"
         cli_fallback_reason = None
+
+    if resolved_auth == "subscription" and planned_transport.endswith("-api"):
+        raise ValueError(
+            "auth=subscription cannot resolve to metered API transport "
+            f"{planned_transport!r} for model {planned_model!r}; choose an exact "
+            "subscription-backed model slug or pass auth=api"
+        )
 
     effort_applied, backend_warn = map_effort_for_backend(
         effort_token,

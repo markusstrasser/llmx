@@ -13,6 +13,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .model_ids import CURSOR_GROK45_MODELS
+
 DEFAULT_LOG = Path(os.environ.get("LLMX_USAGE_LOG", str(Path.home() / ".claude" / "llmx-usage.jsonl")))
 
 # Per-MTok (input, output). Output rate also applies to reasoning tokens. Approximate —
@@ -35,14 +37,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
     "claude-fable-5": (10.0, 50.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    # SpaceXAI Grok 4.5 (docs.x.ai 2026-07-08): base $2/$6; Cursor fast variant $4/$18
+    # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
     "grok-4.5": (2.0, 6.0),
-    "grok-4.5-medium": (2.0, 6.0),
-    "grok-4.5-high": (2.0, 6.0),
-    "grok-4.5-xhigh": (2.0, 6.0),
-    "grok-4.5-fast-medium": (4.0, 18.0),
-    "grok-4.5-fast-high": (4.0, 18.0),
-    "grok-4.5-fast-xhigh": (4.0, 18.0),
     # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
     "qwen/qwen3.6-27b": (0.285, 2.40),
     # dense-student screen candidates (arc-agi research/2026-07-10-dense-student-candidates.md,
@@ -51,6 +47,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "qwen/qwen3-32b": (0.08, 0.28),
     "mistralai/mistral-small-3.2-24b-instruct": (0.075, 0.20),
 }
+for cursor_model in CURSOR_GROK45_MODELS:
+    PRICING[cursor_model] = (4.0, 18.0) if cursor_model.endswith("-fast") else (2.0, 6.0)
 
 # Context-window limit (max input tokens) per model. Static capability, not from the
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
@@ -69,10 +67,9 @@ CONTEXT_WINDOW: dict[str, int] = {
     "mistralai/mistral-small-3.2-24b-instruct": 128_000,
     # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k
     "grok-4.5": 500_000,
-    "grok-4.5-medium": 500_000, "grok-4.5-high": 500_000, "grok-4.5-xhigh": 500_000,
-    "grok-4.5-fast-medium": 500_000, "grok-4.5-fast-high": 500_000,
-    "grok-4.5-fast-xhigh": 500_000,
 }
+for cursor_model in CURSOR_GROK45_MODELS:
+    CONTEXT_WINDOW[cursor_model] = 500_000
 
 
 def est_cost(model: str, prompt: int, out: int) -> float | None:

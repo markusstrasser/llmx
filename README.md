@@ -237,7 +237,7 @@ def expensive(code):
 | `openai` | GPT-5.6 Sol | API by default; `--subscription` → `codex-cli` |
 | `anthropic` | Claude Opus 4.8 | **claude-cli subscription by default**; keys stripped |
 | `anthropic-direct` | Claude Opus 4.8 | Metered Anthropic API (explicit opt-in) |
-| `xai` | Grok 4.5 | xAI API; Cursor effort slugs also routed |
+| `xai` | Grok 4.5 | Metered xAI API; bare `grok-4.5` is never subscription auth |
 | `cursor` / `cursor-cli` | Composer / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K2.5 | Moonshot |
 | `cerebras` | Qwen 3 Coder 480B | Fast coding |
@@ -267,6 +267,9 @@ llmx chat --subscription -m claude-opus-4-8 …
 **Other**
 
 - GPT-5.6 suite: `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`; effort includes `max`.
+- Grok 4.5 via Cursor subscription: use an exact live slug such as
+  `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
+  variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.
 - Thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5, …) fix temperature at 1.0.
 - `-s` / `system=` works on CLI transports (folded into the prompt).
 - Multi-`-f` / `context_paths=` concatenate with `=== File: path ===` boundaries.

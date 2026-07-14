@@ -22,7 +22,9 @@ class TestEffortNormalize(unittest.TestCase):
             normalize_effort_input("turbo")
 
     def test_claude_max_maps(self):
-        applied, _ = map_effort_for_backend("max", transport="claude-cli", provider="anthropic")
+        applied, _ = map_effort_for_backend(
+            "max", transport="claude-cli", provider="anthropic"
+        )
         self.assertEqual(applied, "max")
 
     def test_api_max_maps_xhigh_pre_56(self):
@@ -67,6 +69,71 @@ class TestDefaultTimeout(unittest.TestCase):
 
 
 class TestLlmLiteRouting(unittest.TestCase):
+    def test_exact_cursor_grok_slug_is_subscription_cursor(self):
+        from unittest.mock import patch
+
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        with (
+            patch("llmx.cli_backends.binary_available", return_value=True),
+            patch(
+                "llmx.cli_backends.shutil.which", return_value="/usr/bin/cursor-agent"
+            ),
+        ):
+            plan = build_dispatch_plan(
+                provider=None,
+                model="cursor-grok-4.5-high",
+                reasoning_effort=None,
+                timeout=300,
+                lite=None,
+                mode=None,
+                auth=None,
+                subscription=False,
+                api_only=None,
+                use_old=False,
+            )
+
+        self.assertEqual(plan.provider, "cursor")
+        self.assertEqual(plan.auth, "subscription")
+        self.assertEqual(plan.transport, "cursor-cli")
+
+    def test_bare_grok45_subscription_cannot_claim_xai_api(self):
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        with self.assertRaisesRegex(ValueError, "subscription.*xai-api"):
+            build_dispatch_plan(
+                provider=None,
+                model="grok-4.5",
+                reasoning_effort="high",
+                timeout=300,
+                lite=None,
+                mode=None,
+                auth=None,
+                subscription=True,
+                api_only=None,
+                use_old=False,
+            )
+
+    def test_bare_grok45_api_route_remains_xai(self):
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        plan = build_dispatch_plan(
+            provider=None,
+            model="grok-4.5",
+            reasoning_effort="high",
+            timeout=300,
+            lite=None,
+            mode=None,
+            auth="api",
+            subscription=False,
+            api_only=None,
+            use_old=False,
+        )
+
+        self.assertEqual(plan.provider, "xai")
+        self.assertEqual(plan.auth, "api")
+        self.assertEqual(plan.transport, "xai-api")
+
     def test_lite_enables_claude_cli(self):
         from llmx.api import LLM
 

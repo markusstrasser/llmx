@@ -2,7 +2,6 @@
 
 import difflib
 import os
-import re
 import signal
 import sys
 import threading
@@ -17,6 +16,7 @@ from openai import OpenAI
 from rich.console import Console
 
 from .logger import logger
+from .model_ids import CURSOR_GROK45_MODELS
 
 if TYPE_CHECKING:
     from .cli_backends import CliBackendFailure
@@ -312,7 +312,7 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["high", "xhigh"],
     },
     # SpaceXAI Grok 4.5 (2026-07-08): API docs — reasoning low/medium/high (default high).
-    # Cursor effort-suffixed slugs (grok-4.5-xhigh etc.) also match via substring.
+    # Cursor slugs bake effort into their exact model ids and also match this restriction.
     "grok-4.5": {
         "temperature": 1.0,
         "fixed": False,
@@ -542,12 +542,7 @@ _KNOWN_MODELS = {
     "cursor": [
         "composer-2.5",
         "composer-2.5-fast",
-        "grok-4.5-medium",
-        "grok-4.5-high",
-        "grok-4.5-xhigh",
-        "grok-4.5-fast-medium",
-        "grok-4.5-fast-high",
-        "grok-4.5-fast-xhigh",
+        *CURSOR_GROK45_MODELS,
     ],
     "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
     "deepseek": ["deepseek-chat"],
@@ -600,13 +595,6 @@ def _warn_unknown_model(model: str, provider: str):
             )
 
 
-# Cursor-native Grok 4.5 slugs bake effort into the model id (verified 2026-07-09 via
-# `cursor-agent models`). Bare API id `grok-4.5` stays on xAI; these suffixes are Cursor-only.
-_CURSOR_GROK45_SLUG = re.compile(
-    r"^grok-4\.5(-fast)?-(medium|high|xhigh)$", re.IGNORECASE
-)
-
-
 def infer_provider_from_model(model: str) -> Optional[str]:
     """Infer provider from model name"""
     model_lower = model.lower()
@@ -615,11 +603,12 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
     # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Cursor-native grok-4.5-{effort} slugs are Cursor-exclusive.
+    # Exact Cursor-native Grok 4.5 slugs are Cursor-exclusive. Bare `grok-4.5`
+    # remains the xAI API model; do not infer it as a subscription route.
     if (
         model.startswith("cursor/")
         or model_lower.startswith("composer")
-        or _CURSOR_GROK45_SLUG.match(model_lower)
+        or model_lower in CURSOR_GROK45_MODELS
     ):
         return "cursor"
 
