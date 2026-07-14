@@ -38,6 +38,11 @@ _METADATA_KEY = "llmx_key"
 
 def _get_api_key() -> str:
     """Resolve Gemini API key via env vars + macOS Keychain."""
+    # The Batch API bypasses the chat funnel, so the critique-only policy gate
+    # (spend_guard.enforce_gemini_policy) must fire here too — otherwise batch
+    # would silently resolve the scoped key and bill Gemini around the policy.
+    from .spend_guard import enforce_gemini_policy
+    enforce_gemini_policy("gemini-batch")
     from .providers import check_api_key as _provider_check, _get_api_key as _provider_get
     _provider_check("google")  # raises RuntimeError with hint if missing
     key = _provider_get("google")
