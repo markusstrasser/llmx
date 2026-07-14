@@ -73,9 +73,15 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
         self.assertIn("--allowedTools", command)
         self.assertIn("mcp__research", command)
         self.assertNotIn("--permission-mode", command)
+        isolated_cwd = Path(invocation["cwd"])
         self.assertEqual(
-            Path(invocation["cwd"]),
+            isolated_cwd.parent,
             Path.home() / ".cache" / "llmx" / "lite" / "research",
+        )
+        self.assertEqual(len(isolated_cwd.name), 12)
+        self.assertEqual(
+            (isolated_cwd / ".llmx-caller-cwd").read_text().strip(),
+            str(Path.cwd().resolve()),
         )
 
 
