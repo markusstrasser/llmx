@@ -1,7 +1,9 @@
 """Tests for subscription-safe CLI→API fallback."""
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from click.testing import CliRunner
@@ -39,6 +41,21 @@ MONTHLY_SPEND_FAILURE = CliBackendFailure(
     kind=QuotaError,
     status=429,
     detail=MONTHLY_SPEND_DETAIL,
+)
+TRUNCATED_MULTIBLOCK_JSON = json.dumps(
+    [
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg-final",
+                "content": [
+                    {"type": "text", "text": "PREFIX"},
+                    {"type": "text", "text": "TAIL"},
+                ],
+            },
+        },
+        {"type": "result", "is_error": False, "result": "TAIL"},
+    ]
 )
 
 
@@ -232,6 +249,43 @@ class TestCliExitCode(unittest.TestCase):
         self.assertIn("type=quota_exhausted", result.output)
         self.assertIn("status=429", result.output)
         self.assertIn(MONTHLY_SPEND_DETAIL, result.output)
+
+    @patch("llmx.cli_backends.subprocess.Popen")
+    def test_multiblock_integrity_failure_leaves_output_empty(self, popen):
+        process = popen.return_value
+        process.pid = 123
+        process.returncode = 0
+        process.communicate.return_value = (TRUNCATED_MULTIBLOCK_JSON, "")
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(
+                "llmx.cli_backends.shutil.which",
+                return_value="/usr/bin/claude",
+            ),
+        ):
+            output_path = Path(tmp) / "response.md"
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "chat",
+                    "--subscription",
+                    "--provider",
+                    "anthropic",
+                    "--model",
+                    "claude-opus-4-8",
+                    "--output",
+                    str(output_path),
+                    "hi",
+                ],
+            )
+
+            self.assertEqual(result.exit_code, 1, result.output)
+            self.assertIn("omitted assistant text blocks", result.output)
+            self.assertNotIn("PREFIX", result.output)
+            self.assertNotIn("TAIL", result.output)
+            self.assertTrue(output_path.exists())
+            self.assertEqual(output_path.read_text(), "")
 
 
 class TestProviderSubscriptionFallback(unittest.TestCase):

@@ -653,12 +653,80 @@ def _claude_payload_reports_error(stdout: str) -> bool:
     )
 
 
+def _claude_final_assistant_text(
+    events: list,
+) -> tuple[Optional[str], Optional[str]]:
+    """Reconstruct the final Claude message from verbose assistant events.
+
+    Claude Code 2.1.210's non-verbose ``result`` projection keeps only the
+    final content block.  Verbose JSON retains the assistant messages, so the
+    transport can independently reconstruct the response and refuse a lossy
+    projection.  A message can span multiple events; preserve both event and
+    content-block order for the final message id.
+    """
+    assistant_messages: list[tuple[int, str, dict]] = []
+    for event_index, event in enumerate(events):
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return None, (
+                "Claude CLI verbose assistant event "
+                f"{event_index} contained no message object"
+            )
+        message_id = message.get("id")
+        if not isinstance(message_id, str) or not message_id:
+            return None, (
+                "Claude CLI verbose assistant event "
+                f"{event_index} contained no message id"
+            )
+        assistant_messages.append((event_index, message_id, message))
+
+    if not assistant_messages:
+        return None, "Claude CLI verbose JSON contained no assistant event"
+
+    final_message_id = assistant_messages[-1][1]
+    text_parts: list[str] = []
+    for event_index, message_id, message in assistant_messages:
+        if message_id != final_message_id:
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            return None, (
+                "Claude CLI verbose assistant event "
+                f"{event_index} contained no content block list"
+            )
+        for block_index, block in enumerate(content):
+            if not isinstance(block, dict):
+                return None, (
+                    "Claude CLI verbose assistant event "
+                    f"{event_index} contained malformed content block {block_index}"
+                )
+            if block.get("type") != "text":
+                continue
+            block_text = block.get("text")
+            if not isinstance(block_text, str):
+                return None, (
+                    "Claude CLI verbose assistant event "
+                    f"{event_index} text block {block_index} contained no text"
+                )
+            text_parts.append(block_text)
+
+    if not text_parts:
+        return None, (
+            "Claude CLI final verbose assistant message "
+            f"{final_message_id!r} contained no text blocks"
+        )
+    return "".join(text_parts), None
+
+
 def _parse_claude_json(
     stdout: str,
 ) -> tuple[CliBackendResult, Optional[dict]]:
-    """Unwrap `claude -p --output-format json` into text or a typed failure.
+    """Unwrap verbose Claude JSON into text or a typed integrity failure.
 
-    text = the result event's `result` (the model's answer, schema-string or prose).
+    text = the result event's `result`, accepted only when it exactly matches
+    the final assistant message reconstructed from verbose content blocks.
     usage = real tokens + API-equivalent total_cost_usd (present even on subscription).
     Structured errors preserve their kind, API status, and exact result detail.
     """
@@ -684,6 +752,7 @@ def _parse_claude_json(
             ),
             None,
         )
+    assistant_text, assistant_error = _claude_final_assistant_text(events)
     for event in events:
         if not isinstance(event, dict) or event.get("type") != "result":
             continue
@@ -698,6 +767,35 @@ def _parse_claude_json(
                     kind=LlmxError,
                     status=0,
                     detail="Claude CLI result event contained no response text",
+                ),
+                None,
+            )
+        if assistant_error is not None:
+            return (
+                CliBackendFailure(
+                    kind=LlmxError,
+                    status=0,
+                    detail=assistant_error,
+                ),
+                None,
+            )
+        assert assistant_text is not None
+        if result != assistant_text:
+            omitted_chars = max(len(assistant_text) - len(result), 0)
+            if omitted_chars and assistant_text.endswith(result):
+                mismatch = "omitted assistant text blocks"
+            else:
+                mismatch = "disagreed with reconstructed assistant text"
+            return (
+                CliBackendFailure(
+                    kind=LlmxError,
+                    status=0,
+                    detail=(
+                        f"Claude CLI result {mismatch}: "
+                        f"reconstructed_chars={len(assistant_text)} "
+                        f"result_chars={len(result)} "
+                        f"omitted_chars={omitted_chars}; refusing response"
+                    ),
                 ),
                 None,
             )
@@ -858,6 +956,10 @@ def cli_chat(
                 # subscription-usage blind spot (was 100% api-transport in the log).
                 "--output-format",
                 "json",
+                # Claude Code's non-verbose result projection can retain only
+                # the last text block. Verbose JSON includes assistant events,
+                # which _parse_claude_json reconstructs and checks exactly.
+                "--verbose",
                 "--disable-slash-commands",
             ]
             if mode == "agent" and not lite:

@@ -9,6 +9,21 @@ from unittest.mock import patch
 from llmx.cli_backends import cli_chat
 
 
+def _claude_success(text: str = "OK") -> str:
+    return json.dumps(
+        [
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-final",
+                    "content": [{"type": "text", "text": text}],
+                },
+            },
+            {"type": "result", "is_error": False, "result": text},
+        ]
+    )
+
+
 def _claude_invocation(popen):
     for call in popen.call_args_list:
         if call.args and call.args[0] and call.args[0][0] == "claude":
@@ -23,7 +38,7 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
         process.pid = 123
         process.returncode = 0
         process.communicate.return_value = (
-            json.dumps({"type": "result", "is_error": False, "result": "OK"}),
+            _claude_success(),
             "",
         )
 
@@ -45,6 +60,9 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
         self.assertIn("bypassPermissions", command)
         self.assertNotIn("--allowedTools", command)
         self.assertNotIn("--mcp-config", command)
+        self.assertIn("--verbose", command)
+        output_format_index = command.index("--output-format")
+        self.assertEqual(command[output_format_index + 1], "json")
         self.assertIsNone(invocation["cwd"])
         self.assertNotIn("ANTHROPIC_API_KEY", invocation["env"])
         self.assertNotIn("CLAUDE_API_KEY", invocation["env"])
@@ -55,7 +73,7 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
         process.pid = 123
         process.returncode = 0
         process.communicate.return_value = (
-            json.dumps({"type": "result", "is_error": False, "result": "OK"}),
+            _claude_success(),
             "",
         )
 

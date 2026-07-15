@@ -4,10 +4,41 @@ import unittest
 from pathlib import Path
 
 from llmx.cli_backends import (
+    CliBackendFailure,
     _latest_codex_rollout_usage,
     _parse_claude_json,
 )
-from llmx.providers import _normalize_usage
+from llmx.providers import LlmxError, _normalize_usage
+
+
+def _claude_verbose_stdout(
+    result: str,
+    *,
+    text_blocks: list[str] | None = None,
+    usage: dict | None = None,
+    model_usage: dict | None = None,
+) -> str:
+    return json.dumps(
+        [
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-final",
+                    "content": [
+                        {"type": "text", "text": text}
+                        for text in (text_blocks if text_blocks is not None else [result])
+                    ],
+                },
+            },
+            {
+                "type": "result",
+                "is_error": False,
+                "result": result,
+                "usage": usage or {},
+                "modelUsage": model_usage or {},
+            },
+        ]
+    )
 
 
 class TestCodexRolloutUsage(unittest.TestCase):
@@ -68,18 +99,14 @@ class TestCodexRolloutUsage(unittest.TestCase):
 
 class TestClaudeCliUsage(unittest.TestCase):
     def test_parse_claude_json_keeps_absent_reasoning_null(self):
-        stdout = json.dumps(
-            {
-                "type": "result",
-                "is_error": False,
-                "result": "ok",
-                "usage": {
-                    "input_tokens": 10,
-                    "output_tokens": 2,
-                    "cache_read_input_tokens": 4,
-                },
-                "modelUsage": {"claude-fable-5[1m]": {}},
-            }
+        stdout = _claude_verbose_stdout(
+            "ok",
+            usage={
+                "input_tokens": 10,
+                "output_tokens": 2,
+                "cache_read_input_tokens": 4,
+            },
+            model_usage={"claude-fable-5[1m]": {}},
         )
 
         result, usage = _parse_claude_json(stdout)
@@ -89,17 +116,13 @@ class TestClaudeCliUsage(unittest.TestCase):
         self.assertIsNone(usage["reasoning_tokens"])
 
     def test_parse_claude_json_reads_reasoning_when_exposed(self):
-        stdout = json.dumps(
-            {
-                "type": "result",
-                "is_error": False,
-                "result": "ok",
-                "usage": {
-                    "input_tokens": 10,
-                    "output_tokens": 7,
-                    "output_tokens_details": {"reasoning_tokens": 5},
-                },
-            }
+        stdout = _claude_verbose_stdout(
+            "ok",
+            usage={
+                "input_tokens": 10,
+                "output_tokens": 7,
+                "output_tokens_details": {"reasoning_tokens": 5},
+            },
         )
 
         _, usage = _parse_claude_json(stdout)
@@ -107,22 +130,72 @@ class TestClaudeCliUsage(unittest.TestCase):
         self.assertEqual(usage["reasoning_tokens"], 5)
 
     def test_parse_claude_json_preserves_reported_zero_reasoning(self):
-        stdout = json.dumps(
-            {
-                "type": "result",
-                "is_error": False,
-                "result": "ok",
-                "usage": {
-                    "input_tokens": 10,
-                    "output_tokens": 2,
-                    "reasoning_tokens": 0,
-                },
-            }
+        stdout = _claude_verbose_stdout(
+            "ok",
+            usage={
+                "input_tokens": 10,
+                "output_tokens": 2,
+                "reasoning_tokens": 0,
+            },
         )
 
         _, usage = _parse_claude_json(stdout)
 
         self.assertEqual(usage["reasoning_tokens"], 0)
+
+    def test_parse_claude_json_rejects_last_block_only_projection(self):
+        stdout = json.dumps(
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg-final",
+                        "content": [{"type": "text", "text": "PREFIX"}],
+                    },
+                },
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg-final",
+                        "content": [{"type": "text", "text": "TAIL"}],
+                    },
+                },
+                {
+                    "type": "result",
+                    "is_error": False,
+                    "result": "TAIL",
+                },
+            ]
+        )
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertIsInstance(result, CliBackendFailure)
+        self.assertEqual(result.kind, LlmxError)
+        self.assertIn("omitted assistant text blocks", result.detail)
+        self.assertIn("reconstructed_chars=10", result.detail)
+        self.assertIn("result_chars=4", result.detail)
+        self.assertIn("omitted_chars=6", result.detail)
+        self.assertIsNone(usage)
+
+    def test_parse_claude_json_accepts_complete_multiblock_projection(self):
+        stdout = _claude_verbose_stdout(
+            "PREFIXTAIL",
+            text_blocks=["PREFIX", "TAIL"],
+        )
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertEqual(result, "PREFIXTAIL")
+        self.assertIsInstance(usage, dict)
+
+    def test_parse_claude_json_accepts_complete_single_block_projection(self):
+        stdout = _claude_verbose_stdout("complete response")
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertEqual(result, "complete response")
+        self.assertIsInstance(usage, dict)
 
 
 class TestOpenRouterUsage(unittest.TestCase):
