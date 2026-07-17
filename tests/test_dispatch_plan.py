@@ -22,9 +22,7 @@ class TestEffortNormalize(unittest.TestCase):
             normalize_effort_input("turbo")
 
     def test_claude_max_maps(self):
-        applied, _ = map_effort_for_backend(
-            "max", transport="claude-cli", provider="anthropic"
-        )
+        applied, _ = map_effort_for_backend("max", transport="claude-cli", provider="anthropic")
         self.assertEqual(applied, "max")
 
     def test_api_max_maps_xhigh_pre_56(self):
@@ -76,9 +74,7 @@ class TestLlmLiteRouting(unittest.TestCase):
 
         with (
             patch("llmx.cli_backends.binary_available", return_value=True),
-            patch(
-                "llmx.cli_backends.shutil.which", return_value="/usr/bin/cursor-agent"
-            ),
+            patch("llmx.cli_backends.shutil.which", return_value="/usr/bin/cursor-agent"),
         ):
             plan = build_dispatch_plan(
                 provider=None,
@@ -97,14 +93,54 @@ class TestLlmLiteRouting(unittest.TestCase):
         self.assertEqual(plan.auth, "subscription")
         self.assertEqual(plan.transport, "cursor-cli")
 
-    def test_bare_grok45_subscription_cannot_claim_xai_api(self):
+    def test_bare_grok45_subscription_resolves_to_cursor_default_effort(self):
+        # Was test_bare_grok45_subscription_cannot_claim_xai_api (f156e1f): bare
+        # grok-4.5 + subscription used to hard-fail because Cursor has no bare
+        # "grok-4.5" slug. Fixed 2026-07-17: resolves to the "high" default-effort
+        # slug (xAI's own documented default — see MODEL_RESTRICTIONS["grok-4.5"])
+        # instead of dead-ending on the metered xai-api transport. The general
+        # "subscription never silently claims a metered API transport" invariant
+        # is covered separately below with a provider that has no CLI/subscription
+        # route at all.
+        from unittest.mock import patch
+
         from llmx.dispatch_plan import build_dispatch_plan
 
-        with self.assertRaisesRegex(ValueError, "subscription.*xai-api"):
-            build_dispatch_plan(
+        with (
+            patch("llmx.cli_backends.binary_available", return_value=True),
+            patch("llmx.cli_backends.shutil.which", return_value="/usr/bin/cursor-agent"),
+        ):
+            plan = build_dispatch_plan(
                 provider=None,
                 model="grok-4.5",
                 reasoning_effort="high",
+                timeout=300,
+                lite=None,
+                mode=None,
+                auth=None,
+                subscription=True,
+                api_only=None,
+                use_old=False,
+            )
+
+        self.assertEqual(plan.provider, "cursor")
+        self.assertEqual(plan.model, "cursor-grok-4.5-high")
+        self.assertEqual(plan.auth, "subscription")
+        self.assertEqual(plan.transport, "cursor-cli")
+        self.assertTrue(any("cursor-grok-4.5-high" in w for w in plan.warnings))
+
+    def test_subscription_still_cannot_claim_metered_api_for_cli_less_provider(self):
+        # The invariant test_bare_grok45_subscription_cannot_claim_xai_api used to
+        # cover (auth=subscription must never silently resolve to a metered API
+        # transport) — kept alive here with a provider that genuinely has no CLI
+        # or Cursor subscription route, unlike grok-4.5 now.
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        with self.assertRaisesRegex(ValueError, "subscription.*deepseek-api"):
+            build_dispatch_plan(
+                provider=None,
+                model="deepseek-chat",
+                reasoning_effort=None,
                 timeout=300,
                 lite=None,
                 mode=None,

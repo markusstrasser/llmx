@@ -16,7 +16,7 @@ from openai import OpenAI
 from rich.console import Console
 
 from .logger import logger
-from .model_ids import CURSOR_GROK45_MODELS
+from .model_ids import CURSOR_GROK45_MODELS, resolve_grok_subscription_slug
 
 if TYPE_CHECKING:
     from .cli_backends import CliBackendFailure
@@ -1492,6 +1492,21 @@ def chat(
             resolve_cli_api_fallback,
             subscription_route,
         )
+
+        # Mirrors dispatch_plan.build_dispatch_plan's bare-grok-4.5 alias (see
+        # model_ids.resolve_grok_subscription_slug). chat() re-derives its own
+        # cli_provider/cli_model from the raw `model` string rather than trusting
+        # a caller-supplied dispatch plan, so this must be re-applied here too —
+        # otherwise a direct chat(provider="xai", model="grok-4.5", auth="subscription")
+        # call (or the CLI path, which passes the raw --model string through) would
+        # dry-run clean but send the unknown literal "grok-4.5" to cursor-agent for
+        # real. provider may already be "cursor" here (cli.py passes
+        # dispatch_plan.provider but the ORIGINAL --model string) — cover both.
+        if auth == "subscription" and provider in {"xai", "cursor"}:
+            grok_slug = resolve_grok_subscription_slug(model)
+            if grok_slug:
+                provider = "cursor"
+                model = grok_slug
 
         cli_provider = preferred_cli_provider(
             provider,

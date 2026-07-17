@@ -19,6 +19,7 @@ from .cli_backends import (
     subscription_route,
 )
 from .providers import get_model_name, infer_provider_from_model, _auto_upgrade_model
+from .model_ids import resolve_grok_subscription_slug
 
 SCHEMA_VERSION = "llmx-routing.v1"
 
@@ -27,9 +28,7 @@ EFFORT_ALIASES = {
     "max": "max",  # resolved per-backend below
 }
 
-CANONICAL_EFFORTS = frozenset(
-    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
-)
+CANONICAL_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 
 
 def normalize_effort_input(value: Optional[str]) -> tuple[Optional[str], list[str]]:
@@ -39,8 +38,7 @@ def normalize_effort_input(value: Optional[str]) -> tuple[Optional[str], list[st
     token = value.strip().lower()
     if token not in CANONICAL_EFFORTS:
         raise ValueError(
-            f"Invalid effort {value!r}. "
-            f"Use one of: {', '.join(sorted(CANONICAL_EFFORTS))}"
+            f"Invalid effort {value!r}. Use one of: {', '.join(sorted(CANONICAL_EFFORTS))}"
         )
     warnings: list[str] = []
     if token == "max":
@@ -225,6 +223,20 @@ def build_dispatch_plan(
     )
     warnings.extend(mode_warns)
 
+    # Bare "grok-4.5" has no direct Cursor slug — fill the gap left by f156e1f
+    # (which intentionally requires exact CURSOR_GROK45_MODELS ids) by routing
+    # subscription auth to the default-effort Cursor slug instead of dead-ending
+    # on the metered xai-api transport. See model_ids.resolve_grok_subscription_slug.
+    if resolved_auth == "subscription" and final_provider == "xai":
+        grok_slug = resolve_grok_subscription_slug(model)
+        if grok_slug:
+            warnings.append(
+                f"model {model!r} has no bare Cursor slug — resolved to "
+                f"{grok_slug!r} (xAI's default effort) for subscription auth"
+            )
+            final_provider = "cursor"
+            model = grok_slug
+
     cli_provider = preferred_cli_provider(
         final_provider,
         lite=effective_lite,
@@ -246,9 +258,7 @@ def build_dispatch_plan(
             effort_token,
             max_tokens,
         )
-        if cli_fallback_reason and not subscription_route(
-            auth=resolved_auth, lite=effective_lite
-        ):
+        if cli_fallback_reason and not subscription_route(auth=resolved_auth, lite=effective_lite):
             api_fb = CLI_PROVIDERS[cli_provider]["api_fallback"]
             planned_transport = f"{api_fb}-api" if api_fb else cli_provider
         else:
