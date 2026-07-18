@@ -1112,10 +1112,64 @@ def cli_chat(
 
         timer = _threading.Timer(timeout, _kill_on_timeout)
         timer.start()
-        try:
-            stdout, stderr = proc.communicate(input=stdin_input)
-        finally:
-            timer.cancel()
+
+        # proc.communicate() blocks on read() until it sees EOF on stdout/stderr.
+        # _kill_on_timeout's killpg() only reaches processes sharing proc's own
+        # process group. A codex-cli descendant that re-sessions (setsid) before
+        # inheriting the pipe fds escapes that kill: proc itself dies, but the
+        # escaped grandchild still holds the pipe's write end open, so
+        # communicate() never sees EOF and hangs indefinitely past `timeout` with
+        # no further signal (the grandchild-pipe wedge — row
+        # llmx-codex-timeout-not-enforced). Run communicate() on a helper thread,
+        # bound the JOIN explicitly, and if it's still blocked once the kill
+        # should have landed, force-close our end of the pipes: a closed fd makes
+        # a blocked read() error out immediately regardless of any surviving
+        # writer elsewhere.
+        _COMMUNICATE_GRACE_S = 20
+        _comm_result: list = []
+        _comm_error: list = []
+
+        def _do_communicate():
+            try:
+                _comm_result.append(proc.communicate(input=stdin_input))
+            except Exception as exc:  # pragma: no cover - defensive
+                _comm_error.append(exc)
+
+        comm_thread = _threading.Thread(target=_do_communicate, daemon=True)
+        comm_thread.start()
+        comm_thread.join(timeout + _COMMUNICATE_GRACE_S)
+
+        if comm_thread.is_alive():
+            timed_out = True
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if pipe is not None:
+                        pipe.close()
+                except OSError:
+                    pass
+            try:
+                _os.killpg(proc.pid, _signal.SIGKILL)
+            except OSError:
+                proc.kill()
+            comm_thread.join(_COMMUNICATE_GRACE_S)
+
+        timer.cancel()
+
+        if comm_thread.is_alive() or (not _comm_result and not _comm_error):
+            # Force-closing the pipes should always unblock a read(); this is the
+            # last-resort backstop so we NEVER return unbounded, even if some
+            # platform's pipe semantics surprise us.
+            timed_out = True
+            stdout, stderr = "", (
+                "llmx: codex-cli subprocess wedged past timeout+grace even after "
+                "killpg and force-closing pipes (grandchild-pipe wedge, unrecovered)"
+            )
+        elif _comm_error:
+            stdout, stderr = "", (
+                f"llmx: communicate() raised after force-close: {_comm_error[0]!r}"
+            )
+        else:
+            stdout, stderr = _comm_result[0]
 
         elapsed = time.time() - start
 
