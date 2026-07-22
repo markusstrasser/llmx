@@ -303,6 +303,24 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["low", "medium", "high"],
     },
+    # Gemini 3.6 Flash / 3.5 Flash-Lite (2026-07-21). BOTH need explicit keys, not for
+    # completeness but for correctness: get_model_restriction() does a longest-key-first
+    # SUBSTRING match, so without these `gemini-3.6-flash` matched nothing (→ no
+    # temperature=1.0 pin, the exact looping/degraded-reasoning footgun the 3.x comment
+    # above warns about) and `gemini-3.5-flash-lite` silently inherited 3.5-flash's
+    # narrower effort ladder. The -lite key is longer than "gemini-3.5-flash", so it wins.
+    "gemini-3.6-flash": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+    },
+    "gemini-3.5-flash-lite": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+    },
     "gemini-3.1-flash-lite": {
         "temperature": 1.0,
         "fixed": True,
@@ -526,8 +544,11 @@ _KNOWN_MODELS = {
     "google": [
         "gemini-3.1-pro-preview",
         "gemini-3-pro-preview",
+        "gemini-3.6-flash",
         "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
         "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite",
         "gemini-3.1-flash-lite-preview",
     ],
     "openai": [

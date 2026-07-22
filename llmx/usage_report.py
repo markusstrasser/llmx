@@ -20,10 +20,20 @@ DEFAULT_LOG = Path(os.environ.get("LLMX_USAGE_LOG", str(Path.home() / ".claude" 
 # Per-MTok (input, output). Output rate also applies to reasoning tokens. Approximate —
 # verify before quoting. Edit as pricing changes (this is the single source).
 PRICING: dict[str, tuple[float, float]] = {
-    "gemini-3-flash-preview": (0.075, 0.30),
-    "gemini-3-flash": (0.075, 0.30),
-    "gemini-3.1-flash-lite-preview": (0.05, 0.20),
+    # Gemini rates re-verified against ai.google.dev/gemini-api/docs/pricing 2026-07-22
+    # (paid tier, standard, text). The 3-flash and 3.1-flash-lite entries below were
+    # UNDERSTATED 6.7-10x and 5-7.5x respectively — a cost estimator that lowballs the
+    # provider behind June's ~EUR700 Gemini bill is the wrong direction to be wrong in.
+    # Audio input is priced higher for the 3.x flash tiers; text rate registered.
+    "gemini-3-flash-preview": (0.50, 3.00),
+    "gemini-3-flash": (0.50, 3.00),
+    "gemini-3.1-flash-lite-preview": (0.25, 1.50),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-3.5-flash": (1.50, 9.0),
+    # 2026-07-21 launch: 3.6 Flash supersedes 3.5 Flash at a LOWER output rate
+    # ($7.50 vs $9.00) with ~17% fewer output tokens claimed.
+    "gemini-3.6-flash": (1.50, 7.50),
+    "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-pro-preview": (1.25, 10.0),
     # GPT-5.6 suite (developers.openai.com/api/docs/pricing, GA 2026-07-09)
     # Standard short-context: Sol $5/$30, Terra $2.50/$15, Luna $1/$6.
@@ -54,7 +64,9 @@ for cursor_model in CURSOR_GROK45_MODELS:
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
 CONTEXT_WINDOW: dict[str, int] = {
     "gemini-3-flash-preview": 1_000_000, "gemini-3-flash": 1_000_000,
-    "gemini-3.1-flash-lite-preview": 1_000_000, "gemini-3.5-flash": 1_000_000,
+    "gemini-3.1-flash-lite-preview": 1_000_000, "gemini-3.1-flash-lite": 1_000_000,
+    "gemini-3.5-flash": 1_000_000, "gemini-3.6-flash": 1_000_000,
+    "gemini-3.5-flash-lite": 1_000_000,
     "gemini-3.1-pro-preview": 1_000_000,
     "gpt-5.6-sol": 1_050_000, "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000, "gpt-5.6-luna": 1_050_000,
