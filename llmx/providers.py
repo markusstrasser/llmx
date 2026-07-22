@@ -1127,8 +1127,14 @@ def _google_chat(
     reasoning_effort,
     usage_out: Optional[dict] = None,
     service_tier: Optional[str] = None,
+    media: Optional[list] = None,
 ):
     """Google Gemini via google-genai SDK. Returns response text.
+
+    `media` (image/video paths) is attached as native Parts alongside the prompt.
+    Built here rather than by the caller so it happens AFTER the spend guard and
+    the Gemini policy gate have run and promoted the scoped key — and so large
+    files can use the Files API on the client this function already owns.
 
     If usage_out is provided, it's populated in-place with the normalized
     token dict from _normalize_usage(). Out-param keeps the public string
@@ -1174,6 +1180,12 @@ def _google_chat(
     if search:
         config.tools = [types.Tool(google_search=types.GoogleSearch())]
 
+    contents = prompt
+    if media:
+        from .vision import build_google_contents
+
+        contents = build_google_contents(media, prompt, client)
+
     result_text = ""
     finish_reason = None
     response = None
@@ -1182,7 +1194,7 @@ def _google_chat(
     try:
         if stream:
             for chunk in client.models.generate_content_stream(
-                model=model, contents=prompt, config=config
+                model=model, contents=contents, config=config
             ):
                 if chunk.text:
                     sys.stdout.write(chunk.text)
@@ -1192,7 +1204,7 @@ def _google_chat(
             sys.stdout.write("\n")
         else:
             response = client.models.generate_content(
-                model=model, contents=prompt, config=config
+                model=model, contents=contents, config=config
             )
             # Guard empty candidates from safety filter
             if not response.candidates:
@@ -1257,11 +1269,16 @@ def _openai_chat(
     schema,
     reasoning_effort,
     usage_out: Optional[dict] = None,
+    media: Optional[list] = None,
 ):
     """OpenAI-compatible API via openai SDK. Returns response text.
 
     If usage_out is provided, it's populated in-place with the normalized
     token dict from _normalize_usage().
+
+    `media` (image paths) is attached as base64 data-URI image parts. Video is
+    rejected loudly — this endpoint shape has no video content type, and silently
+    dropping a video the caller attached would fabricate an image-only answer.
     """
     import time as _time
     from .usage_log import log_usage
@@ -1279,10 +1296,16 @@ def _openai_chat(
         timeout=float(timeout) if timeout else 300.0,
     )
 
+    user_content = prompt
+    if media:
+        from .vision import build_openai_content
+
+        user_content = build_openai_content(media, prompt)
+
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": user_content})
 
     kwargs = {"model": model, "messages": messages}
     # claude-opus-4-8 (and other Anthropic reasoning models) deprecate `temperature`
@@ -1472,8 +1495,14 @@ def chat(
     mode: str = "chat",
     service_tier: Optional[str] = None,
     auth: Optional[str] = None,
+    media: Optional[list] = None,
 ) -> Optional[str]:
     """Execute chat with single provider.  Returns response text (or None).
+
+    `media` attaches image/video files to the prompt. It is a parameter of the
+    ONE dispatch path on purpose: routing vision through here (rather than a
+    separate direct-SDK module) is what gives it the spend guard, the Gemini
+    critique-only gate, usage logging, and provider choice.
 
     `lite` ('bare' or 'research') routes via stripped-down CLI profile —
     no MCPs (bare) or research-MCP only (research). Cost-saving mode.
@@ -1534,6 +1563,19 @@ def chat(
             lite=lite,
             subscription=auth == "subscription",
         )
+        if cli_provider and media:
+            # CLI backends take a text prompt on argv/stdin — there is nowhere to
+            # put an image. Refuse rather than dispatch text-only: a model asked
+            # "what does this figure show" with the figure silently dropped will
+            # happily invent an answer, which is worse than an error.
+            raise ModelError(
+                f"--file media cannot be sent through the {cli_provider} CLI transport. "
+                f"Use an API lane instead (e.g. -p google / -p openai, or "
+                f"-p anthropic-direct for Claude).",
+                provider=cli_provider,
+                model=model or "default",
+            )
+
         if cli_provider:
             logical_provider = (
                 provider
@@ -1715,6 +1757,7 @@ def chat(
                         schema=schema,
                         reasoning_effort=reasoning_effort,
                         service_tier=service_tier,
+                        media=media,
                     )
                 else:
                     if search:
@@ -1730,6 +1773,7 @@ def chat(
                         max_tokens=max_tokens,
                         schema=schema,
                         reasoning_effort=reasoning_effort,
+                        media=media,
                     )
             except Exception as e:
                 _sdk_error[0] = e
@@ -1929,8 +1973,14 @@ def compare(
     user_specified_temp: bool = False,
     timeout: int = 300,
     search: bool = False,
+    media: Optional[list] = None,
 ) -> None:
-    """Compare responses from multiple providers"""
+    """Compare responses from multiple providers.
+
+    `media` is threaded here too so one figure can be put to several models at
+    once — the cross-family vision comparison the old Gemini-only vision module
+    made impossible.
+    """
     import concurrent.futures
     import io
 
@@ -1971,6 +2021,7 @@ def compare(
                         schema=None,
                         reasoning_effort=effective_effort,
                         service_tier=None,
+                        media=media,
                     )
                 finally:
                     sys.stdout = old_stdout
@@ -1992,6 +2043,7 @@ def compare(
                         max_tokens=None,
                         schema=None,
                         reasoning_effort=effective_effort,
+                        media=media,
                     )
                 finally:
                     sys.stdout = old_stdout

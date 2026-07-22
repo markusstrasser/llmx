@@ -250,19 +250,27 @@ def svg_cmd(prompt, output, model, debug):
 @click.option("-p", "--prompt", default="Describe what you see in detail.", help="Analysis prompt")
 @click.option(
     "-m", "--model",
-    type=click.Choice(["flash", "pro"]),
-    default="flash",
-    help="Model: 'flash' (fast, default) or 'pro' (better quality)"
+    default=None,
+    help="Any vision-capable model id (default: gemini-3-flash-preview). "
+         "e.g. gemini-3.6-flash, gpt-5.6-sol, gpt-5.6-luna",
 )
+@click.option("--provider", default=None, help="Override the provider inferred from --model")
+@click.option("-e", "--effort", "reasoning_effort", default=None, help="Reasoning effort")
 @click.option("--sample", type=int, help="Sample N frames evenly (for many images)")
 @click.option("--json", "json_output", is_flag=True, help="Request JSON output")
 @click.option("-o", "--output", type=click.Path(), help="Write result to FILE instead of stdout")
 @click.option("--debug", is_flag=True, help="Debug logging")
-def vision_cmd(files, prompt, model, sample, json_output, output, debug):
-    """Analyze images or videos with Gemini vision.
+def vision_cmd(files, prompt, model, provider, reasoning_effort, sample, json_output, output, debug):
+    """Analyze images or videos with any vision-capable model.
+
+    Routes through the normal llmx dispatch path, so it is spend-guarded,
+    policy-gated and usage-logged like `llmx chat`. NOTE: `-p` here is the
+    PROMPT (not --provider, as in `llmx chat`); use --provider to override.
 
     Examples:
         llmx vision screenshot.png -p "What UI issues do you see?"
+        llmx vision figure.png -m gpt-5.6-sol -p "Read the axis labels"
+        llmx vision figure.png -m gemini-3.6-flash -e low -p "Extract the table"
         llmx vision frame*.png -p "Summarize gameplay" --sample 5
         llmx vision gameplay.mp4 -p "List all UI elements visible"
         llmx vision img1.png img2.png -p "Compare these two images"
@@ -290,13 +298,20 @@ def vision_cmd(files, prompt, model, sample, json_output, output, debug):
     logger.info(f"Analyzing {len(file_list)} file(s)")
 
     try:
-        from .vision import analyze_media, analyze_frames
+        from .vision import DEFAULT_VISION_MODEL, analyze_media, analyze_frames
+
+        resolved_model = model or DEFAULT_VISION_MODEL
+        opts = {
+            "provider": provider,
+            "reasoning_effort": reasoning_effort,
+            "json_output": json_output,
+        }
 
         # Use analyze_frames if multiple images and sample requested
         if sample and len(file_list) > 1:
-            result = analyze_frames(file_list, prompt, model, sample)
+            result = analyze_frames(file_list, prompt, resolved_model, sample, **opts)
         else:
-            result = analyze_media(file_list, prompt, model, json_output)
+            result = analyze_media(file_list, prompt, resolved_model, **opts)
 
         if output:
             from pathlib import Path
