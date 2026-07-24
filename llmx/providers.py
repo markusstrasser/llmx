@@ -41,9 +41,7 @@ EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
 EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
-EXIT_SPEND_CAP = (
-    7  # daily metered-spend cap reached, or unpriced model — policy refusal
-)
+EXIT_SPEND_CAP = 7  # daily metered-spend cap reached, or unpriced model — policy refusal
 
 
 class LlmxError(RuntimeError):
@@ -358,7 +356,28 @@ MODEL_RESTRICTIONS = {
         "fixed": True,
         "reasoning_effort": False,
     },  # No reasoning_effort support
-    # Legacy K2 variants
+    # Kimi K3 (2026-07-16): 2.8T-param open model, KDA + AttnRes, native vision,
+    # 1M context. Launch is max-thinking-only server-side (low/high effort modes
+    # announced, not yet exposed) — reasoning_effort False so llmx never sends an
+    # effort param the API may reject; K3 runs max by default. Eval harness used
+    # temperature 1.0, same fixed-temp convention as the K2 family.
+    # Caveats from the release: sensitive to thinking-history loss (use a verified
+    # harness, don't switch mid-session); excessive proactiveness on ambiguity.
+    "kimi-k3": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": False,
+    },
+    # K2.6 / K2.7-code siblings (live on the API 2026-07-16, thinking-capable)
+    "kimi-k2.6": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},
+    "kimi-k2.7-code": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},
+    "kimi-k2.7-code-highspeed": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": False,
+    },
+    # Legacy K2 variants (kimi-k2-thinking removed from the API 2026-07 — kept
+    # only so stale pins fail with a recognizable name)
     "kimi-k2-thinking": {"temperature": 1.0, "fixed": True, "reasoning_effort": False},
 }
 
@@ -384,8 +403,8 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "anthropic": {
-        "model": "claude-opus-4-8",
-        "legacy_model": "claude-sonnet-4-6",
+        "model": "claude-opus-5",
+        "legacy_model": "claude-opus-4-8",
         # Default transport is claude-cli subscription (OAuth). API fallback uses
         # OpenRouter only when CLI unavailable or api_only=True.
         "env_var": "OPENROUTER_API_KEY",
@@ -396,7 +415,7 @@ PROVIDER_CONFIGS = {
     # Opt-in with `-p anthropic-direct` — never the default. claude-cli drops
     # ANTHROPIC_API_KEY for its OAuth path, so subscription transport is unaffected.
     "anthropic-direct": {
-        "model": "claude-opus-4-8",
+        "model": "claude-opus-5",
         "env_var": "ANTHROPIC_API_KEY",
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
@@ -423,9 +442,9 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "kimi": {
-        "model": "kimi-k2.5",
-        "old_model": "kimi-k2-thinking",
-        "legacy_model": "kimi-k2-0711-preview",
+        "model": "kimi-k3",  # default since 2026-07-16 (K3 release)
+        "old_model": "kimi-k2.5",
+        "legacy_model": "kimi-k2.6",
         "env_var": "MOONSHOT_API_KEY or KIMI_API_KEY",
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
@@ -494,7 +513,9 @@ OPENAI_COMPAT_URLS = {
     "deepseek": "https://api.deepseek.com",
     "openrouter": "https://openrouter.ai/api/v1",
     "cerebras": "https://api.cerebras.ai/v1",
-    "kimi": "https://api.moonshot.cn/v1",
+    # International endpoint — measured 2026-07-16: MOONSHOT_API_KEY 401s on
+    # api.moonshot.cn (China platform), 200s on api.moonshot.ai.
+    "kimi": "https://api.moonshot.ai/v1",
     "minimax": "https://api.minimax.io/v1",  # international endpoint; M3 emits <think> blocks inline
     "anthropic": "https://openrouter.ai/api/v1",  # Anthropic via OpenRouter
     "anthropic-direct": "https://api.anthropic.com/v1/",  # direct Anthropic OpenAI-compat
@@ -579,11 +600,25 @@ _KNOWN_MODELS = {
         "composer-2.5-fast",
         *CURSOR_GROK45_MODELS,
     ],
-    "kimi": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-0711-preview"],
+    "kimi": [
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "kimi-k2.7-code-highspeed",
+        "kimi-k2.6",
+        "kimi-k2.5",
+        "kimi-k2-thinking",
+        "kimi-k2-0711-preview",
+    ],
     "deepseek": ["deepseek-chat"],
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3-coder-480b"],
-    "anthropic-direct": ["claude-opus-4-8"],
+    "anthropic-direct": [
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-fable-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ],
     "zai": ["z-ai/glm-5.2", "z-ai/glm-5.2[1m]", "z-ai/glm-5.1", "z-ai/glm-5"],
 }
 
@@ -606,8 +641,10 @@ _MODEL_UPGRADES = {
     "gpt-4-turbo": "gpt-5.6-sol",
     # GPT-5.6 suite (2026-07-09): bare alias → Sol. GPT-5.5 fully removed — do not upgrade.
     "gpt-5.6": "gpt-5.6-sol",
-    "claude-3.5-sonnet": "claude-sonnet-4-6",
-    "claude-3-opus": "claude-opus-4-8",
+    "claude-3.5-sonnet": "claude-sonnet-5",
+    "claude-3-opus": "claude-opus-5",
+    # Do NOT auto-upgrade claude-opus-4-8 → 5: Anthropic documents 4.8 as the
+    # cyber-classifier fallback target for Opus 5 / Fable 5 (keep pin explicit).
 }
 
 
@@ -625,9 +662,7 @@ def _warn_unknown_model(model: str, provider: str):
     if known and model not in known:
         close = difflib.get_close_matches(model, known, n=1, cutoff=0.6)
         if close:
-            logger.warn(
-                f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?"
-            )
+            logger.warn(f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?")
 
 
 def infer_provider_from_model(model: str) -> Optional[str]:
@@ -690,9 +725,7 @@ def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
     )
 
 
-def get_model_name(
-    provider: str, model: Optional[str] = None, use_old: bool = False
-) -> str:
+def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = False) -> str:
     """Get model name for provider — no prefixes needed (native SDKs)"""
     if model:
         # Strip any leftover LiteLLM prefixes
@@ -1022,9 +1055,7 @@ def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
         if key == "additionalProperties" and provider in ("openai", "google"):
             continue  # re-derived below for openai; dropped for google
         if key in _SCHEMA_SUBSCHEMA_MAPS and isinstance(val, dict):
-            out[key] = {
-                k: _normalize_schema_for_provider(v, provider) for k, v in val.items()
-            }
+            out[key] = {k: _normalize_schema_for_provider(v, provider) for k, v in val.items()}
         elif key in _SCHEMA_SUBSCHEMA_LISTS and isinstance(val, list):
             out[key] = [_normalize_schema_for_provider(v, provider) for v in val]
         elif key == "items":
@@ -1100,9 +1131,7 @@ def _normalize_usage(provider: str, raw) -> dict:
         prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
         completion = _usage_get(raw, "completion_tokens", "output_tokens")
         reasoning = _usage_reasoning_tokens(raw)
-        prompt_details = _usage_get(
-            raw, "prompt_tokens_details", "input_tokens_details"
-        )
+        prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
         cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
@@ -1150,9 +1179,7 @@ def _google_chat(
     from .usage_log import log_usage
 
     client = genai.Client(
-        http_options=types.HttpOptions(
-            timeout=max(timeout * 1000, 10_000) if timeout else 300_000
-        )
+        http_options=types.HttpOptions(timeout=max(timeout * 1000, 10_000) if timeout else 300_000)
     )
     config = types.GenerateContentConfig(temperature=temperature)
 
@@ -1218,9 +1245,7 @@ def _google_chat(
             finish_reason = str(response.candidates[0].finish_reason)
             print(result_text)
     finally:
-        usage = (
-            getattr(response, "usage_metadata", None) if response is not None else None
-        )
+        usage = getattr(response, "usage_metadata", None) if response is not None else None
         log_usage(
             provider="google",
             model=model,
@@ -1235,9 +1260,7 @@ def _google_chat(
 
     # Truncation detection
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
-        logger.warn(
-            f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)"
-        )
+        logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
 
     if usage_out is not None:
         usage_out.update(_normalize_usage("google", usage))
@@ -1435,9 +1458,7 @@ class SearchUnavailableError(Exception):
     pass
 
 
-def _build_search_kwargs(
-    provider: str, model_name: str, *, strict: bool = False
-) -> dict:
+def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False) -> dict:
     """Build provider-specific kwargs for web search grounding.
     Only meaningful for legacy callers — search is handled natively in _google_chat.
 
@@ -1602,9 +1623,7 @@ def chat(
                     lite=lite,
                     reason=fallback_reason,
                 )
-                logger.info(
-                    f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
-                )
+                logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
                 provider = api_provider
                 model = cli_model
             else:
@@ -1623,9 +1642,7 @@ def chat(
                     print(cli_result)
                     return cli_result
                 if not isinstance(cli_result, CliBackendFailure):
-                    raise TypeError(
-                        f"Unexpected CLI result type: {type(cli_result).__name__}"
-                    )
+                    raise TypeError(f"Unexpected CLI result type: {type(cli_result).__name__}")
                 if (
                     subscription_route(auth=auth, lite=lite)
                     or CLI_PROVIDERS[cli_provider]["api_fallback"] is None
@@ -1718,9 +1735,7 @@ def chat(
             default_effort = restriction.get("default_effort")
             if default_effort:
                 reasoning_effort = default_effort
-                logger.info(
-                    f"Defaulting to --reasoning-effort {default_effort} for {model_name}"
-                )
+                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
 
         logger.debug(
             "Starting chat",
@@ -1861,11 +1876,7 @@ def chat(
         # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
         # Parse the error body to distinguish them.
         err_body = getattr(e, "body", {}) or {}
-        err_code = (
-            err_body.get("error", {}).get("code", "")
-            if isinstance(err_body, dict)
-            else ""
-        )
+        err_code = err_body.get("error", {}).get("code", "") if isinstance(err_body, dict) else ""
         if err_code == "insufficient_quota":
             raise QuotaError(
                 f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",

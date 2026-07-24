@@ -33,31 +33,31 @@ uv tool install --editable /path/to/llmx
 ```bash
 # Model auto-infers provider
 llmx -m gpt-5.6-sol "Explain Python"
-llmx -m claude-opus-4-8 "Write code"          # → claude-cli subscription
-llmx -m kimi-k2.5 "Complex task"
+llmx -m claude-opus-5 "Write code"          # → claude-cli subscription
+llmx -m kimi-k3 "Complex task"
 llmx -m cerebras/qwen-3-coder-480b "Fast coding"
 
 # Pipe / files as context (repeatable -f concatenates with === File: path ===)
-cat code.py | llmx -m claude-opus-4-8 "Review this"
+cat code.py | llmx -m claude-opus-5 "Review this"
 llmx chat -f a.md -f b.md -m gpt-5.6-sol "Synthesize"
 
 # Subscription routes (OAuth / pool — preferred for Claude + GPT batch work)
 llmx chat --subscription -m gpt-5.6-sol "Quick task"
-llmx chat --subscription -m claude-opus-4-8 "Review this"
+llmx chat --subscription -m claude-opus-5 "Review this"
 
 # Workspace agent: caller cwd + project rules + native CLI tools
-llmx chat --subscription --mode agent -m claude-opus-4-8 -e max \
+llmx chat --subscription --mode agent -m claude-opus-5 -e max \
   --timeout 3600 -o out.md \
   "Inspect this repository read-only; cite file:line evidence."
 
 # Probe resolved transport before spend
-llmx chat --dry-run --subscription -m claude-opus-4-8 -e max "ping"
+llmx chat --dry-run --subscription -m claude-opus-5 -e max "ping"
 llmx info --write-mirror          # → ~/.claude/cache/llmx-routing.json
 llmx probe --provider anthropic   # one bounded live subscription call
 
 # Auth surface: --auth api|subscription  (--subscription aliases --auth subscription)
 llmx chat --auth api -p openai -m gpt-5.6-luna "cheap extract"
-llmx -p anthropic-direct -m claude-opus-4-8 "metered Claude API (opt-in)"
+llmx -p anthropic-direct -m claude-opus-5 "metered Claude API (opt-in)"
 
 # Effort / timeout / output
 llmx -m gpt-5.6-sol -e max --timeout 3600 -o out.md "Hard task"
@@ -129,7 +129,7 @@ else:
     #          dispatch_error|spend_cap
 
 # Resolve transport without calling a model
-plan = dispatch("ping", model="claude-opus-4-8", subscription=True, dry_run=True)
+plan = dispatch("ping", model="claude-opus-5", subscription=True, dry_run=True)
 assert plan.status == "dry_run"
 print(plan.dry_run_plan)   # provider, transport, auth, effort_applied, warnings, …
 print(plan.warnings)
@@ -235,11 +235,11 @@ def expensive(code):
 |----------|---------------|-------|
 | `google` | Gemini 3.x | Paid API (free Gemini CLI retired 2026-05-31) |
 | `openai` | GPT-5.6 Sol | API by default; `--subscription` → `codex-cli` |
-| `anthropic` | Claude Opus 4.8 | **claude-cli subscription by default**; keys stripped |
-| `anthropic-direct` | Claude Opus 4.8 | Metered Anthropic API (explicit opt-in) |
+| `anthropic` | Claude Opus 5 | **claude-cli subscription by default**; keys stripped |
+| `anthropic-direct` | Claude Opus 5 | Metered Anthropic API (explicit opt-in) |
 | `xai` | Grok 4.5 | Metered xAI API; bare `grok-4.5` is never subscription auth |
 | `cursor` / `cursor-cli` | Composer / pool models | Subscription / Cursor pool |
-| `kimi` | Kimi K2.5 | Moonshot |
+| `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
 | `cerebras` | Qwen 3 Coder 480B | Fast coding |
 | `deepseek` | DeepSeek Chat | |
 | `openrouter` | 400+ models | |
@@ -249,7 +249,7 @@ def expensive(code):
 (`-p anthropic-direct` or `auth="api"`). Default:
 
 ```bash
-llmx chat --subscription -m claude-opus-4-8 …
+llmx chat --subscription -m claude-opus-5 …
 ```
 
 **Modes**
@@ -270,7 +270,11 @@ llmx chat --subscription -m claude-opus-4-8 …
 - Grok 4.5 via Cursor subscription: use an exact live slug such as
   `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
   variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.
-- Thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5, …) fix temperature at 1.0.
+- Thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5/K3, …) fix temperature at 1.0.
+- Kimi K3 (2026-07-16): 2.8T open model, 1M context, $3/$15 per MTok cache-miss
+  ($0.30 cache-hit input). Launch thinking is max-only server-side — no effort knob
+  yet; llmx won't send one. Keep the full thinking history in the harness and don't
+  switch K3 into another model's session.
 - `-s` / `system=` works on CLI transports (folded into the prompt).
 - Multi-`-f` / `context_paths=` concatenate with `=== File: path ===` boundaries.
 - Usage log: every call → `~/.claude/llmx-usage.jsonl`; roll up with `llmx usage`.
@@ -303,7 +307,7 @@ done
 | OpenAI | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 | Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) — needed only for `anthropic-direct` |
 | xAI | `XAI_API_KEY` | [console.x.ai](https://console.x.ai/) |
-| Kimi | `MOONSHOT_API_KEY` | [platform.moonshot.cn/console/api-keys](https://platform.moonshot.cn/console/api-keys) |
+| Kimi | `MOONSHOT_API_KEY` | [platform.moonshot.ai](https://platform.moonshot.ai/) — international key (`.cn` console keys 401 on this route) |
 | Cerebras | `CEREBRAS_API_KEY` | [cloud.cerebras.ai](https://cloud.cerebras.ai/) |
 | OpenRouter | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
 

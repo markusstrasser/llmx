@@ -44,11 +44,17 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-5.6-luna": (1.0, 6.0),
     "gpt-5.3-chat-latest": (1.75, 14.0),
     "gpt-5.3-codex": (1.25, 10.0),
-    "claude-opus-4-8": (5.0, 25.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),  # cyber fallback + legacy pin
     "claude-fable-5": (10.0, 50.0),
+    "claude-sonnet-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
     "grok-4.5": (2.0, 6.0),
+    # Kimi K3 (kimi.com research announcement 2026-07-16): $3.00/MTok cache-miss
+    # input, $15.00/MTok output; cache-hit input $0.30/MTok (>90% hit rate claimed
+    # in coding workloads — priced here at the conservative cache-miss rate).
+    "kimi-k3": (3.0, 15.0),
     # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
     "qwen/qwen3.6-27b": (0.285, 2.40),
     # dense-student screen candidates (arc-agi research/2026-07-10-dense-student-candidates.md,
@@ -71,7 +77,8 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.6-sol": 1_050_000, "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000, "gpt-5.6-luna": 1_050_000,
     "gpt-5.3-chat-latest": 400_000, "gpt-5.3-codex": 400_000,
-    "claude-opus-4-8": 1_000_000, "claude-fable-5": 1_000_000, "claude-sonnet-4-6": 1_000_000,
+    "claude-opus-5": 1_000_000, "claude-opus-4-8": 1_000_000,
+    "claude-fable-5": 1_000_000, "claude-sonnet-5": 1_000_000, "claude-sonnet-4-6": 1_000_000,
     # dense-student screen candidates (2026-07-10): gemma4 256K, qwen3-32b 32K native
     # (131K YaRN — native registered), mistral-small-3.2 128K
     "google/gemma-4-31b-it": 256_000,
@@ -79,6 +86,8 @@ CONTEXT_WINDOW: dict[str, int] = {
     "mistralai/mistral-small-3.2-24b-instruct": 128_000,
     # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k
     "grok-4.5": 500_000,
+    # Kimi K3 (2026-07-16): 1M-token context window
+    "kimi-k3": 1_048_576,
 }
 for cursor_model in CURSOR_GROK45_MODELS:
     CONTEXT_WINDOW[cursor_model] = 500_000

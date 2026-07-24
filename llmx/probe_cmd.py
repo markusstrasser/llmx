@@ -11,7 +11,7 @@ from .probe import DEFAULT_CACHE_TTL_SECONDS, run_subscription_probe
 
 @click.command("probe")
 @click.option("--provider", default="anthropic", show_default=True)
-@click.option("--model", default="claude-opus-4-8", show_default=True)
+@click.option("--model", default="claude-opus-5", show_default=True)
 @click.option("--timeout", type=click.IntRange(1, 600), default=120, show_default=True)
 @click.option(
     "--cache-ttl",

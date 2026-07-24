@@ -170,6 +170,8 @@ LITE_ALLOWED_MODELS = {
     "gpt-5.6-luna",
     "gpt-5.6",  # alias → sol (startswith match covers suite)
     "gemini-3-flash-preview",
+    "claude-opus-5",
+    # Keep 4.8: Anthropic cyber-classifier fallback target for Opus 5 / Fable 5.
     "claude-opus-4-8",
     # 2026-07-05: Fable 5 ships on claude-cli subscription (same OAuth headless
     # -p transport as opus) — operator-directed for arc-agi H1/H2 dispatch lanes.
