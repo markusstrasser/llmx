@@ -63,6 +63,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "google/gemma-4-31b-it": (0.12, 0.35),
     "qwen/qwen3-32b": (0.08, 0.28),
     "mistralai/mistral-small-3.2-24b-instruct": (0.075, 0.20),
+    # DeepSeek V4 Flash (released 2026-07-31; verified live 2026-08-01 via
+    # openrouter /api/v1/models pricing.prompt/completion — both ids same price)
+    "deepseek/deepseek-v4-flash-0731": (0.14, 0.28),
+    "deepseek/deepseek-v4-flash": (0.14, 0.28),
 }
 for cursor_model in CURSOR_GROK45_MODELS:
     PRICING[cursor_model] = (4.0, 18.0) if cursor_model.endswith("-fast") else (2.0, 6.0)
