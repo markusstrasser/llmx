@@ -58,6 +58,12 @@ PRICING: dict[str, tuple[float, float]] = {
     "kimi-k3": (3.0, 15.0),
     # openrouter (verified live 2026-07-07: /api/v1/models pricing.prompt/completion)
     "qwen/qwen3.6-27b": (0.285, 2.40),
+    # Qwen3.8 family (released 2026-08-14; verified live 2026-08-17 via
+    # /api/v1/models pricing.prompt/completion; 27b endpoints: Chutes fp8 /
+    # Io Net fp8 / AkashML bf16)
+    "qwen/qwen3.8-27b": (0.45, 3.20),
+    "qwen/qwen3.8-2.4t-a95b": (2.0, 6.0),
+    "qwen/qwen3.8-max": (2.0, 6.0),
     # dense-student screen candidates (arc-agi research/2026-07-10-dense-student-candidates.md,
     # web-verified 2026-07-10; per-M USD prompt/completion)
     "google/gemma-4-31b-it": (0.12, 0.35),
