@@ -448,7 +448,11 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     "-e", "--reasoning-effort", "--effort",
     type=str,
     default=None,
-    help="Thinking effort: none|minimal|low|medium|high|xhigh|max (max maps per backend).",
+    help=(
+        "Thinking effort: none|minimal|low|medium|high|xhigh|max (maps per backend; "
+        "'none' disables reasoning outright on openrouter, elsewhere it maps to the "
+        "lowest tier the backend offers)."
+    ),
 )
 @click.option(
     "--stream/--no-stream",

@@ -62,6 +62,16 @@ def map_effort_for_backend(
     # GPT-5.6 suite natively supports effort=max (beyond xhigh). Older GPT-5.x
     # and non-OpenAI API transports still map max → xhigh.
     gpt56 = "gpt-5.6" in model_l
+    # OpenRouter's effort ceiling is "high" — it has no xhigh/max tier — and the
+    # effort travels as its native `reasoning` body object, not as a top-level
+    # reasoning_effort string (providers.openrouter_reasoning_body). Mapping here
+    # keeps effort_applied, and therefore the stderr dispatch line, equal to what
+    # the wire actually carries. Must precede the generic -api branch below, which
+    # "openrouter-api" also matches.
+    if transport == "openrouter-api" or provider == "openrouter":
+        if e in {"xhigh", "max"}:
+            return "high", [f"effort {e} mapped to high for openrouter (its ceiling)"]
+        return e, warnings
     if transport.endswith("-api") or provider in {"openai", "google", "anthropic-direct"}:
         if e == "max" and not gpt56:
             return "xhigh", ["effort max mapped to xhigh for API transport"]

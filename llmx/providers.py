@@ -1,6 +1,7 @@
 """Provider management using native SDKs (google-genai, openai)"""
 
 import difflib
+import json
 import os
 import signal
 import sys
@@ -1279,6 +1280,46 @@ _REASONING_HEADROOM = {
     "max": 96_000,  # GPT-5.6+ beyond-xhigh effort
 }
 
+# OpenRouter takes reasoning controls as a top-level `reasoning` OBJECT, not the
+# OpenAI-style top-level `reasoning_effort` string, and its effort ceiling is
+# "high" (no xhigh/max tier). `chat_template_kwargs` — the handle that works when
+# talking to vLLM directly — is a NO-OP on this route: the two routes take
+# different handles. Verified live 2026-08-17 against qwen/qwen3.8-27b:
+# {"effort": "low"} → 24 reasoning tokens vs 44 with no field, and
+# {"enabled": False} → 0 reasoning tokens with clean content.
+_OPENROUTER_REASONING = {
+    "none": {"enabled": False},
+    "minimal": {"effort": "minimal"},
+    "low": {"effort": "low"},
+    "medium": {"effort": "medium"},
+    "high": {"effort": "high"},
+    "xhigh": {"effort": "high"},  # OpenRouter's ceiling is high
+    "max": {"effort": "high"},
+}
+
+
+def openrouter_reasoning_body(reasoning_effort: Optional[str]) -> Optional[dict]:
+    """Map a canonical effort token to OpenRouter's `reasoning` body value.
+
+    Returns None when no effort was requested, so the request carries no
+    reasoning field at all and the model runs at the provider default.
+
+    Raises ValueError on an unrecognized token. Dropping an effort the caller
+    asked for is the failure this function exists to prevent: on a thinking-heavy
+    model, a dropped effort means default-maximum reasoning, which can burn the
+    entire completion budget before any visible text is emitted.
+    """
+    if not reasoning_effort:
+        return None
+    token = reasoning_effort.strip().lower()
+    body = _OPENROUTER_REASONING.get(token)
+    if body is None:
+        raise ValueError(
+            f"Unknown reasoning effort {reasoning_effort!r} for openrouter. "
+            f"Use one of: {', '.join(sorted(_OPENROUTER_REASONING))}"
+        )
+    return dict(body)
+
 
 def _openai_chat(
     prompt,
@@ -1353,7 +1394,12 @@ def _openai_chat(
         else:
             kwargs["max_completion_tokens"] = max_tokens
     if reasoning_effort:
-        kwargs["reasoning_effort"] = reasoning_effort
+        if provider == "openrouter":
+            body = openrouter_reasoning_body(reasoning_effort)
+            kwargs.setdefault("extra_body", {})["reasoning"] = body
+            logger.info(f"openrouter reasoning: {json.dumps(body)} (from effort={reasoning_effort})")
+        else:
+            kwargs["reasoning_effort"] = reasoning_effort
     if schema:
         kwargs["response_format"] = {
             "type": "json_schema",
@@ -1710,7 +1756,15 @@ def chat(
             for msg in effort_warns:
                 logger.warn(msg)
             reasoning_effort = mapped
-        if reasoning_effort:
+        # MODEL_RESTRICTIONS cannot enumerate OpenRouter's third-party catalog, so
+        # for that provider the table-miss branch below would SILENTLY null out an
+        # effort the caller asked for — the model then runs at its default MAXIMUM
+        # reasoning. Measured 2026-08-17: three qwen/qwen3.8-27b probes burned
+        # 103,640 completion tokens entirely as reasoning, zero content, because
+        # -e medium/-e low never reached the wire. OpenRouter validates the native
+        # `reasoning` object itself and errors loudly when a model can't take it.
+        table_governs_effort = provider != "openrouter"
+        if reasoning_effort and table_governs_effort:
             if not restriction or not restriction.get("reasoning_effort"):
                 logger.warn(
                     f"Model {model_name} does not support --reasoning-effort parameter (ignoring)",
@@ -1730,8 +1784,17 @@ def chat(
                         f"Use one of the supported values."
                     )
 
-        # Default reasoning_effort for thinking models that support it
-        if restriction and restriction.get("reasoning_effort") and not reasoning_effort:
+        # Default reasoning_effort for thinking models that support it. Skipped for
+        # openrouter: an unset effort there means "send no reasoning field", so the
+        # model keeps the provider default. get_model_restriction matches by
+        # SUBSTRING, so a third-party id like openai/gpt-5.6 would otherwise inherit
+        # an OpenAI table default that says nothing about how OpenRouter serves it.
+        if (
+            table_governs_effort
+            and restriction
+            and restriction.get("reasoning_effort")
+            and not reasoning_effort
+        ):
             default_effort = restriction.get("default_effort")
             if default_effort:
                 reasoning_effort = default_effort

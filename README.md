@@ -270,6 +270,12 @@ llmx chat --subscription -m claude-opus-5 …
 - Grok 4.5 via Cursor subscription: use an exact live slug such as
   `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
   variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.
+- OpenRouter: effort travels as its native `reasoning` body object, so it works on
+  third-party models llmx has no restriction-table entry for. Ceiling is `high`
+  (`xhigh`/`max` map down to it), and `-e none` sends `{"reasoning":{"enabled":false}}`
+  — the only way to turn thinking off on a reasoning-by-default model. No `-e` sends
+  no reasoning field at all. `chat_template_kwargs` is a no-op on this route; it is
+  the handle for talking to vLLM directly.
 - Thinking models (GPT-5.x, Gemini 3.x, Kimi K2.5/K3, …) fix temperature at 1.0.
 - Kimi K3 (2026-07-16): 2.8T open model, 1M context, $3/$15 per MTok cache-miss
   ($0.30 cache-hit input). Launch thinking is max-only server-side — no effort knob
