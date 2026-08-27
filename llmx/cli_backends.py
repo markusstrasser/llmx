@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, TypeAlias
 
 from .logger import logger
-from .model_ids import CURSOR_GROK45_MODELS
+from .model_ids import CURSOR_GROK_MODELS
 from .providers import (
     ApiKeyError,
     LlmxError,
@@ -179,7 +179,7 @@ LITE_ALLOWED_MODELS = {
     # 2026-07-14: Cursor subscription pool — composer plus the exact live Grok
     # registry slugs. Bare `grok-4.5` is the metered xAI API model and is excluded.
     "composer-2.5",
-    *CURSOR_GROK45_MODELS,
+    *CURSOR_GROK_MODELS,
 }
 
 
@@ -190,8 +190,8 @@ def lite_model_allowed(model: Optional[str]) -> bool:
     """
     if not model:
         return False
-    if model.startswith("cursor-grok-4.5-"):
-        return model in CURSOR_GROK45_MODELS
+    if model.startswith("cursor-grok-"):
+        return model in CURSOR_GROK_MODELS
     for allowed in LITE_ALLOWED_MODELS:
         base = allowed.removesuffix("-preview")
         if model == allowed or model == base or model.startswith(base + "-"):
@@ -1162,13 +1162,17 @@ def cli_chat(
             # last-resort backstop so we NEVER return unbounded, even if some
             # platform's pipe semantics surprise us.
             timed_out = True
-            stdout, stderr = "", (
-                "llmx: codex-cli subprocess wedged past timeout+grace even after "
-                "killpg and force-closing pipes (grandchild-pipe wedge, unrecovered)"
+            stdout, stderr = (
+                "",
+                (
+                    "llmx: codex-cli subprocess wedged past timeout+grace even after "
+                    "killpg and force-closing pipes (grandchild-pipe wedge, unrecovered)"
+                ),
             )
         elif _comm_error:
-            stdout, stderr = "", (
-                f"llmx: communicate() raised after force-close: {_comm_error[0]!r}"
+            stdout, stderr = (
+                "",
+                (f"llmx: communicate() raised after force-close: {_comm_error[0]!r}"),
             )
         else:
             stdout, stderr = _comm_result[0]

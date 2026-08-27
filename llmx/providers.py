@@ -17,7 +17,7 @@ from openai import OpenAI
 from rich.console import Console
 
 from .logger import logger
-from .model_ids import CURSOR_GROK45_MODELS, resolve_grok_subscription_slug
+from .model_ids import CURSOR_GROK_MODELS, resolve_grok_subscription_slug
 
 if TYPE_CHECKING:
     from .cli_backends import CliBackendFailure
@@ -42,7 +42,9 @@ EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
 EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
-EXIT_SPEND_CAP = 7  # daily metered-spend cap reached, or unpriced model — policy refusal
+EXIT_SPEND_CAP = (
+    7  # daily metered-spend cap reached, or unpriced model — policy refusal
+)
 
 
 class LlmxError(RuntimeError):
@@ -599,7 +601,7 @@ _KNOWN_MODELS = {
     "cursor": [
         "composer-2.5",
         "composer-2.5-fast",
-        *CURSOR_GROK45_MODELS,
+        *CURSOR_GROK_MODELS,
     ],
     "kimi": [
         "kimi-k3",
@@ -663,7 +665,9 @@ def _warn_unknown_model(model: str, provider: str):
     if known and model not in known:
         close = difflib.get_close_matches(model, known, n=1, cutoff=0.6)
         if close:
-            logger.warn(f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?")
+            logger.warn(
+                f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?"
+            )
 
 
 def infer_provider_from_model(model: str) -> Optional[str]:
@@ -674,12 +678,12 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
     # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Exact Cursor-native Grok 4.5 slugs are Cursor-exclusive. Bare `grok-4.5`
+    # Exact Cursor-native Grok slugs (4.5 and 4.6) are Cursor-exclusive. Bare `grok-4.x`
     # remains the xAI API model; do not infer it as a subscription route.
     if (
         model.startswith("cursor/")
         or model_lower.startswith("composer")
-        or model_lower in CURSOR_GROK45_MODELS
+        or model_lower in CURSOR_GROK_MODELS
     ):
         return "cursor"
 
@@ -726,7 +730,9 @@ def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
     )
 
 
-def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = False) -> str:
+def get_model_name(
+    provider: str, model: Optional[str] = None, use_old: bool = False
+) -> str:
     """Get model name for provider — no prefixes needed (native SDKs)"""
     if model:
         # Strip any leftover LiteLLM prefixes
@@ -1056,7 +1062,9 @@ def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
         if key == "additionalProperties" and provider in ("openai", "google"):
             continue  # re-derived below for openai; dropped for google
         if key in _SCHEMA_SUBSCHEMA_MAPS and isinstance(val, dict):
-            out[key] = {k: _normalize_schema_for_provider(v, provider) for k, v in val.items()}
+            out[key] = {
+                k: _normalize_schema_for_provider(v, provider) for k, v in val.items()
+            }
         elif key in _SCHEMA_SUBSCHEMA_LISTS and isinstance(val, list):
             out[key] = [_normalize_schema_for_provider(v, provider) for v in val]
         elif key == "items":
@@ -1132,7 +1140,9 @@ def _normalize_usage(provider: str, raw) -> dict:
         prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
         completion = _usage_get(raw, "completion_tokens", "output_tokens")
         reasoning = _usage_reasoning_tokens(raw)
-        prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
+        prompt_details = _usage_get(
+            raw, "prompt_tokens_details", "input_tokens_details"
+        )
         cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
@@ -1180,7 +1190,9 @@ def _google_chat(
     from .usage_log import log_usage
 
     client = genai.Client(
-        http_options=types.HttpOptions(timeout=max(timeout * 1000, 10_000) if timeout else 300_000)
+        http_options=types.HttpOptions(
+            timeout=max(timeout * 1000, 10_000) if timeout else 300_000
+        )
     )
     config = types.GenerateContentConfig(temperature=temperature)
 
@@ -1246,7 +1258,9 @@ def _google_chat(
             finish_reason = str(response.candidates[0].finish_reason)
             print(result_text)
     finally:
-        usage = getattr(response, "usage_metadata", None) if response is not None else None
+        usage = (
+            getattr(response, "usage_metadata", None) if response is not None else None
+        )
         log_usage(
             provider="google",
             model=model,
@@ -1261,7 +1275,9 @@ def _google_chat(
 
     # Truncation detection
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
-        logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
+        logger.warn(
+            f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)"
+        )
 
     if usage_out is not None:
         usage_out.update(_normalize_usage("google", usage))
@@ -1397,7 +1413,9 @@ def _openai_chat(
         if provider == "openrouter":
             body = openrouter_reasoning_body(reasoning_effort)
             kwargs.setdefault("extra_body", {})["reasoning"] = body
-            logger.info(f"openrouter reasoning: {json.dumps(body)} (from effort={reasoning_effort})")
+            logger.info(
+                f"openrouter reasoning: {json.dumps(body)} (from effort={reasoning_effort})"
+            )
         else:
             kwargs["reasoning_effort"] = reasoning_effort
     if schema:
@@ -1504,7 +1522,9 @@ class SearchUnavailableError(Exception):
     pass
 
 
-def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False) -> dict:
+def _build_search_kwargs(
+    provider: str, model_name: str, *, strict: bool = False
+) -> dict:
     """Build provider-specific kwargs for web search grounding.
     Only meaningful for legacy callers — search is handled natively in _google_chat.
 
@@ -1669,7 +1689,9 @@ def chat(
                     lite=lite,
                     reason=fallback_reason,
                 )
-                logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
+                logger.info(
+                    f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
+                )
                 provider = api_provider
                 model = cli_model
             else:
@@ -1688,7 +1710,9 @@ def chat(
                     print(cli_result)
                     return cli_result
                 if not isinstance(cli_result, CliBackendFailure):
-                    raise TypeError(f"Unexpected CLI result type: {type(cli_result).__name__}")
+                    raise TypeError(
+                        f"Unexpected CLI result type: {type(cli_result).__name__}"
+                    )
                 if (
                     subscription_route(auth=auth, lite=lite)
                     or CLI_PROVIDERS[cli_provider]["api_fallback"] is None
@@ -1798,7 +1822,9 @@ def chat(
             default_effort = restriction.get("default_effort")
             if default_effort:
                 reasoning_effort = default_effort
-                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
+                logger.info(
+                    f"Defaulting to --reasoning-effort {default_effort} for {model_name}"
+                )
 
         logger.debug(
             "Starting chat",
@@ -1939,7 +1965,11 @@ def chat(
         # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
         # Parse the error body to distinguish them.
         err_body = getattr(e, "body", {}) or {}
-        err_code = err_body.get("error", {}).get("code", "") if isinstance(err_body, dict) else ""
+        err_code = (
+            err_body.get("error", {}).get("code", "")
+            if isinstance(err_body, dict)
+            else ""
+        )
         if err_code == "insufficient_quota":
             raise QuotaError(
                 f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",
