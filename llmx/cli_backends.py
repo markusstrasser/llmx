@@ -176,6 +176,10 @@ LITE_ALLOWED_MODELS = {
     # 2026-07-05: Fable 5 ships on claude-cli subscription (same OAuth headless
     # -p transport as opus) — operator-directed for arc-agi H1/H2 dispatch lanes.
     "claude-fable-5",
+    # 2026-09-01: Fable 5.1 (same transport; interactive default on the Max
+    # account since launch day). Plan-vs-usage-credit billing is per plan/seat —
+    # Claude Code's /model picker says "Requires usage credits" when it applies.
+    "claude-fable-5-1",
     # 2026-07-14: Cursor subscription pool — composer plus the exact live Grok
     # registry slugs. Bare `grok-4.5` is the metered xAI API model and is excluded.
     "composer-2.5",
