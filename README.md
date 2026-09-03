@@ -35,7 +35,7 @@ uv tool install --editable /path/to/llmx
 llmx -m gpt-5.6-sol "Explain Python"
 llmx -m claude-opus-5 "Write code"          # → claude-cli subscription
 llmx -m kimi-k3 "Complex task"
-llmx -m cerebras/qwen-3-coder-480b "Fast coding"
+llmx -m cerebras/qwen-3.8-27b -e none "Fast coding"
 
 # Pipe / files as context (repeatable -f concatenates with === File: path ===)
 cat code.py | llmx -m claude-opus-5 "Review this"
@@ -240,7 +240,7 @@ def expensive(code):
 | `xai` | Grok 4.5 | Metered xAI API; bare `grok-4.5` is never subscription auth |
 | `cursor` / `cursor-cli` | Composer / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
-| `cerebras` | Qwen 3 Coder 480B | Fast coding |
+| `cerebras` | Qwen 3.8 27B | Fast coding and agent loops; set `-e none` for minimum latency |
 | `deepseek` | DeepSeek Chat | |
 | `openrouter` | 400+ models | |
 | `zai` | GLM-5.2 | Via OpenRouter id today |

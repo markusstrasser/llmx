@@ -70,6 +70,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "qwen/qwen3.8-27b": (0.45, 3.20),
     "qwen/qwen3.8-2.4t-a95b": (2.0, 6.0),
     "qwen/qwen3.8-max": (2.0, 6.0),
+    # Cerebras public shared endpoints (inference-docs.cerebras.ai model cards,
+    # verified 2026-09-03). Distinct IDs from the OpenRouter Qwen entries above.
+    "qwen-3.8-27b": (0.99, 1.49),
+    "gpt-oss-120b": (0.35, 0.75),
     # dense-student screen candidates (arc-agi research/2026-07-10-dense-student-candidates.md,
     # web-verified 2026-07-10; per-M USD prompt/completion)
     "google/gemma-4-31b-it": (0.12, 0.35),
@@ -119,6 +123,9 @@ CONTEXT_WINDOW: dict[str, int] = {
     "grok-4.5": 500_000,
     # Kimi K3 (2026-07-16): 1M-token context window
     "kimi-k3": 1_048_576,
+    # Paid-tier public endpoint windows; free trial is 64/65k.
+    "qwen-3.8-27b": 131_072,
+    "gpt-oss-120b": 131_072,
 }
 for cursor_model in CURSOR_GROK_MODELS:
     CONTEXT_WINDOW[cursor_model] = 500_000

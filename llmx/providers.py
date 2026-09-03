@@ -461,7 +461,10 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "cerebras": {
-        "model": "qwen-3-coder-480b",
+        # Public shared-endpoint catalog, verified 2026-09-03 against
+        # inference-docs.cerebras.ai/models/overview. The former
+        # qwen-3-coder-480b default is no longer a public model.
+        "model": "qwen-3.8-27b",
         "env_var": "CEREBRAS_API_KEY",
         "temperature_range": (0.0, 1.5),
         "supports_streaming": True,
@@ -614,7 +617,7 @@ _KNOWN_MODELS = {
     ],
     "deepseek": ["deepseek-chat"],
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
-    "cerebras": ["qwen-3-coder-480b"],
+    "cerebras": ["qwen-3.8-27b", "gpt-oss-120b"],
     "anthropic-direct": [
         "claude-opus-5",
         "claude-opus-4-8",
