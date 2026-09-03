@@ -353,6 +353,18 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high"],
         "default_effort": "high",
     },
+    # Cerebras public shared-endpoint models (verified 2026-09-03). Both use the
+    # OpenAI-compatible top-level `reasoning_effort` parameter. Qwen additionally
+    # accepts `none`, which is the feedback-loop setting: omitting the field keeps
+    # Cerebras's native high-reasoning default instead of disabling reasoning.
+    "qwen-3.8-27b": {
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["none", "low", "medium", "high"],
+    },
+    "gpt-oss-120b": {
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+    },
     # Kimi K2.5 thinking model (Jan 2026)
     "kimi-k2.5": {
         "temperature": 1.0,
