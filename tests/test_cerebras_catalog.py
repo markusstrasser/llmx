@@ -41,6 +41,7 @@ def test_cerebras_public_models_declare_their_reasoning_contracts():
 
 def test_cerebras_qwen_reasoning_none_reaches_the_outgoing_request():
     calls = []
+    client_kwargs = []
 
     def create(**kwargs):
         calls.append(kwargs)
@@ -64,8 +65,13 @@ def test_cerebras_qwen_reasoning_none_reaches_the_outgoing_request():
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
+
+    def make_client(**kwargs):
+        client_kwargs.append(kwargs)
+        return client
+
     with (
-        patch("llmx.providers.OpenAI", return_value=client),
+        patch("llmx.providers.OpenAI", side_effect=make_client),
         patch("llmx.providers._get_api_key", return_value="test-key"),
         patch("llmx.providers.check_api_key", return_value=None),
         patch("llmx.spend_guard.enforce_daily_cap", return_value=None),
@@ -84,4 +90,5 @@ def test_cerebras_qwen_reasoning_none_reaches_the_outgoing_request():
         )
 
     assert len(calls) == 1
+    assert client_kwargs[0]["max_retries"] == 0
     assert calls[0]["reasoning_effort"] == "none"

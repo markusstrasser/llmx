@@ -1390,6 +1390,10 @@ def _openai_chat(
         api_key=api_key,
         base_url=base_url,
         timeout=float(timeout) if timeout else 300.0,
+        # llmx.api owns the one retry policy. Leaving the SDK's default two
+        # retries enabled multiplies LLMX_MAX_RETRIES silently (4 x 3 HTTP
+        # attempts by default) and defeats request/cost fuses in callers.
+        max_retries=0,
     )
 
     user_content = prompt
