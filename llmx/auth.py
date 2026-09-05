@@ -47,12 +47,17 @@ def resolve_auth(
         return _finalize("subscription", "explicit_flag", lite, True, warnings)
 
     if auth is not None:
-        return _finalize(normalize_auth(auth), "explicit", lite, False, warnings)
+        normalized = normalize_auth(auth)
+        if normalized == "api" and prov in ("grok", "grok-cli"):
+            raise ValueError(
+                "grok/grok-cli is subscription-only; use -p xai for metered API auth"
+            )
+        return _finalize(normalized, "explicit", lite, False, warnings)
 
     if prov in ("anthropic-direct",):
         return _finalize("api", "explicit_provider", lite, False, warnings)
 
-    if prov in ("cursor", "cursor-cli", "composer"):
+    if prov in ("cursor", "cursor-cli", "composer", "grok", "grok-cli"):
         return _finalize("subscription", "default_policy", lite, False, warnings)
 
     if prov in ("anthropic", "claude-cli"):

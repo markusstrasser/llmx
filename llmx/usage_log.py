@@ -93,6 +93,9 @@ def log_usage(
     note: Optional[str] = None,
     cache_write_tokens: Optional[int] = None,
     completion_includes_reasoning: Optional[bool] = None,
+    served_model: Optional[str] = None,
+    billing: Optional[str] = None,
+    reported_cost_usd: Optional[float] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -100,7 +103,9 @@ def log_usage(
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "provider": provider,
             "model": model,
+            "served_model": served_model,
             "transport": transport,
+            "billing": billing,
             "reasoning_effort": reasoning_effort,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -108,6 +113,7 @@ def log_usage(
             "cached_tokens": cached_tokens,
             "cache_write_tokens": cache_write_tokens,
             "completion_includes_reasoning": completion_includes_reasoning,
+            "reported_cost_usd": reported_cost_usd,
             "latency_s": round(latency_s, 3),
             "error": error,
             "source": source,

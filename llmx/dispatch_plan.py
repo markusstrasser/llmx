@@ -9,6 +9,7 @@ from typing import Any, Optional
 from .auth import AuthKind, resolve_auth
 from .mode import ModeKind, resolve_mode
 from .cli_backends import (
+    CLI_LOGICAL_PROVIDERS,
     CLI_PROVIDERS,
     LITE_ALLOWED_MODELS,
     binary_available,
@@ -25,7 +26,7 @@ from .providers import (
     _auto_upgrade_model,
     _KNOWN_MODELS,
 )
-from .model_ids import resolve_grok_subscription_slug
+from .model_ids import GROK_BUILD_MODELS, resolve_grok_subscription_slug
 
 SCHEMA_VERSION = "llmx-routing.v1"
 
@@ -35,6 +36,16 @@ EFFORT_ALIASES = {
 }
 
 CANONICAL_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+
+GROK_CLI_EFFORT_MAP = {
+    "none": "low",
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "xhigh",
+}
 
 
 def normalize_effort_input(value: Optional[str]) -> tuple[Optional[str], list[str]]:
@@ -102,6 +113,11 @@ def map_effort_for_backend(
         applied = mapping.get(e, "high")
         if e in {"none", "minimal", "xhigh"}:
             warnings.append(f"effort {e} mapped to {applied} for claude-cli")
+        return applied, warnings
+    if transport == "grok-cli":
+        applied = GROK_CLI_EFFORT_MAP[e]
+        if applied != e:
+            warnings.append(f"effort {e} mapped to {applied} for grok-cli")
         return applied, warnings
     if transport == "codex-cli":
         # Codex preserves native max; older models map max → xhigh.
@@ -266,7 +282,7 @@ def build_dispatch_plan(
     )
     if cli_provider:
         logical_provider = (
-            CLI_PROVIDERS[cli_provider]["api_fallback"]
+            CLI_LOGICAL_PROVIDERS[cli_provider]
             if final_provider in CLI_PROVIDERS
             else final_provider
         )
@@ -305,7 +321,11 @@ def build_dispatch_plan(
     )
     warnings.extend(backend_warn)
 
-    if effective_lite == "bare" and planned_model and not lite_model_allowed(planned_model):
+    if (
+        effective_lite == "bare"
+        and planned_model
+        and not lite_model_allowed(planned_model, transport=planned_transport)
+    ):
         warnings.append(f"model {planned_model!r} not on lite allowlist")
 
     return DispatchPlan(
@@ -338,7 +358,7 @@ def collect_routing_mirror() -> dict[str, Any]:
             "api_fallback": cfg.get("api_fallback"),
         }
     logical_aliases = {}
-    for logical in ("openai", "anthropic", "google", "cursor"):
+    for logical in ("openai", "anthropic", "google", "cursor", "grok"):
         cli = configured_cli_provider(logical, lite="bare")
         logical_aliases[logical] = {
             "lite_bare_cli": cli,
@@ -353,8 +373,10 @@ def collect_routing_mirror() -> dict[str, Any]:
         "mode_surface": "Use --mode chat|agent. chat=one-shot req/res; agent=CLI tools/MCP loop (subscription only). --lite bare|research are deprecated aliases.",
         "logical_subscription_routes": logical_aliases,
         "lite_allowed_models": sorted(LITE_ALLOWED_MODELS),
+        "transport_allowed_models": {"grok-cli": list(GROK_BUILD_MODELS)},
         "known_models": {provider: list(models) for provider, models in _KNOWN_MODELS.items()},
         "effort_aliases": sorted(CANONICAL_EFFORTS),
+        "cli_effort_maps": {"grok-cli": dict(GROK_CLI_EFFORT_MAP)},
         "note": (
             "Transport facts only. Task-class economics and cosigner policy live in "
             "model-guide/SKILL.md — not duplicated here."

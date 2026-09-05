@@ -2,6 +2,11 @@
 
 from typing import Optional
 
+
+# Requested model IDs accepted by the Grok Build subscription transport.
+# The CLI may report a distinct served model (currently grok-4.6-build).
+GROK_BUILD_MODELS = ("grok-4.6",)
+
 CURSOR_GROK45_MODELS: tuple[str, ...] = (
     "cursor-grok-4.5-low",
     "cursor-grok-4.5-low-fast",

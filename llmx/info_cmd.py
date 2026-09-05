@@ -54,5 +54,9 @@ def info_cmd(as_json: bool, write_mirror: bool, mirror_path: str | None):
     for name, st in payload["cli_providers"].items():
         mark = "yes" if st["installed"] else "no"
         click.echo(f"  {name}: binary={st['binary']} installed={mark}")
+        effort_map = payload["cli_effort_maps"].get(name)
+        if effort_map:
+            rendered = ", ".join(f"{src}->{dst}" for src, dst in effort_map.items())
+            click.echo(f"    effort: {rendered}")
     click.echo("  lite models: " + ", ".join(payload["lite_allowed_models"]))
     click.echo("  policy: see model-guide/SKILL.md (not duplicated here)")

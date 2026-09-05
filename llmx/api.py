@@ -23,6 +23,7 @@ from .providers import (
 )
 from .auth import auth_to_llmx_kwargs, resolve_auth
 from .cli_backends import (
+    CLI_LOGICAL_PROVIDERS,
     CLI_PROVIDERS,
     CliBackendFailure,
     cli_chat,
@@ -141,7 +142,7 @@ class LLM:
                 logical_provider = (
                     provider
                     if not self._is_cli
-                    else CLI_PROVIDERS[self._cli_provider]["api_fallback"]
+                    else CLI_LOGICAL_PROVIDERS[self._cli_provider]
                 )
                 self.model = get_model_name(logical_provider)
             elif self._is_cli:

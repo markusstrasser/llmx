@@ -435,7 +435,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     "-p",
     "--provider",
     default=None,
-    help="Provider: openai, anthropic, kimi, cerebras, google, codex-cli",
+    help="Provider: openai, anthropic, kimi, cerebras, google, codex-cli, grok",
 )
 @click.option(
     "-t",
@@ -890,8 +890,13 @@ def chat_cmd(
         click.echo(dispatch_plan.stderr_line(), err=True)
         if dispatch_plan.lite:
             log_payload["lite"] = dispatch_plan.lite
-            if not lite_model_allowed(dispatch_plan.model):
-                allowed = ", ".join(sorted(LITE_ALLOWED_MODELS))
+            if not lite_model_allowed(
+                dispatch_plan.model, transport=dispatch_plan.transport
+            ):
+                allowed_models = set(LITE_ALLOWED_MODELS)
+                if dispatch_plan.transport == "grok-cli":
+                    allowed_models.add("grok-4.6")
+                allowed = ", ".join(sorted(allowed_models))
                 click.echo(
                     f"Error: subscription CLI mode is restricted to frontier models: {allowed}.\n"
                     f"Got model={dispatch_plan.model!r}. Use --auth api for other models.",

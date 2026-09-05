@@ -1,4 +1,4 @@
-"""CLI-backed providers: codex-cli, claude-cli.
+"""CLI-backed providers: codex-cli, claude-cli, cursor-cli, grok-cli.
 
 Shell out to Codex CLI / Claude Code instead of API for subscription pricing.
 Fall back to metered API only on auth=api routes — subscription forbids silent billing.
@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, TypeAlias
 
 from .logger import logger
-from .model_ids import CURSOR_GROK_MODELS
+from .model_ids import CURSOR_GROK_MODELS, GROK_BUILD_MODELS
 from .providers import (
     ApiKeyError,
     LlmxError,
@@ -72,6 +72,10 @@ CLI_PROVIDERS = {
         "binary": "cursor-agent",
         "api_fallback": None,
     },
+    "grok-cli": {
+        "binary": "grok",
+        "api_fallback": None,
+    },
 }
 
 # Prefer subscription CLIs for logical providers when available.
@@ -81,11 +85,21 @@ CLI_PROVIDERS = {
 # subscription (OAuth, API key stripped) unless -p anthropic-direct / api_only.
 # `cursor` always resolves to cursor-cli (subscription-only, no API path), so
 # it lives in the non-lite alias map — reachable in every mode, not just --lite.
-CLI_PROVIDER_ALIASES = {"cursor": "cursor-cli"}
+CLI_PROVIDER_ALIASES = {"cursor": "cursor-cli", "grok": "grok-cli"}
 CLI_PROVIDER_ALIASES_LITE = {
     "openai": "codex-cli",
     "anthropic": "claude-cli",
     "cursor": "cursor-cli",
+    "grok": "grok-cli",
+}
+
+# Logical identity is separate from API fallback policy. Subscription-only CLIs
+# need a default model without acquiring a paid fallback.
+CLI_LOGICAL_PROVIDERS = {
+    "codex-cli": "openai",
+    "claude-cli": "anthropic",
+    "cursor-cli": "cursor",
+    "grok-cli": "grok",
 }
 
 # Lite cwd is split between two locations:
@@ -189,13 +203,17 @@ LITE_ALLOWED_MODELS = {
 }
 
 
-def lite_model_allowed(model: Optional[str]) -> bool:
+def lite_model_allowed(model: Optional[str], *, transport: Optional[str] = None) -> bool:
     """Return True if the resolved model is on the lite allowlist.
 
     Lenient match — `gemini-3.1-pro` and `gemini-3.1-pro-preview` both pass.
     """
     if not model:
         return False
+    # The bare xAI id is admitted only on Grok Build's subscription transport.
+    # Adding it to the shared set would also widen Cursor's exact-slug gate.
+    if model in GROK_BUILD_MODELS:
+        return transport == "grok-cli"
     if model.startswith("cursor-grok-"):
         return model in CURSOR_GROK_MODELS
     for allowed in LITE_ALLOWED_MODELS:
@@ -253,6 +271,11 @@ def preferred_cli_provider(
         return None
     if provider in CLI_PROVIDERS:
         return cli_provider
+    # Keep subscription-only logical providers selected even when their binary
+    # is absent so the caller reports the actual CLI failure. Returning None
+    # here fabricates a nonexistent metered API route.
+    if CLI_PROVIDERS[cli_provider]["api_fallback"] is None:
+        return cli_provider
     return cli_provider if binary_available(cli_provider) else None
 
 
@@ -289,9 +312,8 @@ def needs_api_fallback(
         return "streaming not supported by CLI"
     if max_tokens:
         return "max_tokens not supported by CLI (Gemini defaults to 8K)"
-    # CLIs use their own default reasoning (high/thinking). Don't fall back just
-    # because the caller asked for a specific effort — the CLI will ignore it,
-    # which is fine for the "same model, free tier" use case.
+    # Reasoning effort is never an API-fallback trigger. Grok forwards its
+    # mapped value; other CLIs either map it later or use their native default.
 
     return None
 
@@ -358,6 +380,7 @@ def _lite_cwd(lite: str) -> str:
 
 
 _CURSOR_RUNTIME_DIR = Path(os.path.expanduser("~/.cache/llmx/cursor"))
+_GROK_RUNTIME_DIR = Path(os.path.expanduser("~/.cache/llmx/grok"))
 _LLMX_CACHE_ROOT = Path(os.path.expanduser("~/.cache/llmx"))
 _DISPATCH_ATTRIBUTION = _LLMX_CACHE_ROOT / "dispatch-attribution.jsonl"
 _CALLER_MARKER = ".llmx-caller-cwd"
@@ -430,6 +453,15 @@ def _cursor_cwd() -> str:
         _CURSOR_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         return str(_CURSOR_RUNTIME_DIR)
     return str(_caller_cache_subdir(_CURSOR_RUNTIME_DIR, caller))
+
+
+def _grok_cwd() -> str:
+    """Neutral empty cwd for Grok Build chat, scoped per caller workspace."""
+    caller = Path.cwd()
+    if _is_llmx_cache_path(caller):
+        _GROK_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        return str(_GROK_RUNTIME_DIR)
+    return str(_caller_cache_subdir(_GROK_RUNTIME_DIR, caller))
 
 
 def _codex_rollout_snapshot(root: Path = _CODEX_SESSIONS_DIR) -> dict[Path, int]:
@@ -834,6 +866,64 @@ def _parse_claude_json(
     )
 
 
+def _parse_grok_json(stdout: str) -> tuple[CliBackendResult, Optional[dict]]:
+    """Unwrap Grok Build JSON and preserve its measured subscription usage."""
+    try:
+        event = json.loads(stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail=f"Grok CLI returned invalid JSON: {exc}",
+            ),
+            None,
+        )
+    if not isinstance(event, dict):
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail="Grok CLI JSON was not an object",
+            ),
+            None,
+        )
+    stop_reason = event.get("stopReason")
+    if stop_reason != "end_turn":
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail=f"Grok CLI stopped with stopReason={stop_reason!r}",
+            ),
+            None,
+        )
+    result = event.get("text")
+    if not isinstance(result, str) or not result:
+        return (
+            CliBackendFailure(
+                kind=LlmxError,
+                status=0,
+                detail="Grok CLI JSON contained no response text",
+            ),
+            None,
+        )
+    raw_usage = event.get("usage")
+    if not isinstance(raw_usage, dict):
+        raw_usage = {}
+    model_usage = event.get("modelUsage")
+    served_model = next(iter(model_usage), None) if isinstance(model_usage, dict) else None
+    usage = {
+        "prompt_tokens": raw_usage.get("input_tokens"),
+        "completion_tokens": raw_usage.get("output_tokens"),
+        "reasoning_tokens": raw_usage.get("reasoning_tokens"),
+        "cached_tokens": raw_usage.get("cache_read_input_tokens"),
+        "total_cost_usd": event.get("total_cost_usd"),
+        "served_model": served_model,
+    }
+    return result, usage
+
+
 def cli_chat(
     provider: str,
     prompt: str,
@@ -872,6 +962,7 @@ def cli_chat(
     stdin_input = None
     use_stdin = len(prompt.encode()) > _ARG_MAX_BYTES
     temp_schema_path = None
+    temp_prompt_path = None
     codex_rollouts_before: dict[Path, int] = {}
 
     try:
@@ -1021,6 +1112,42 @@ def cli_chat(
             if model:
                 cmd.extend(["--model", model])
             stdin_input = prompt
+        elif binary == "grok":
+            cmd = ["grok"]
+            if use_stdin:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".txt", delete=False, encoding="utf-8"
+                ) as temp_file:
+                    temp_file.write(prompt)
+                    temp_prompt_path = temp_file.name
+                cmd.extend(["--prompt-file", temp_prompt_path])
+            else:
+                cmd.extend(["-p", prompt])
+            cmd.extend(
+                [
+                    "--output-format",
+                    "json",
+                    "--no-plan",
+                    "--permission-mode",
+                    "bypassPermissions" if mode == "agent" and not lite else "plan",
+                ]
+            )
+            if model:
+                cmd.extend(["-m", model])
+            if reasoning_effort:
+                from .dispatch_plan import resolve_effort
+
+                grok_effort, effort_warnings = resolve_effort(
+                    reasoning_effort,
+                    transport="grok-cli",
+                    provider="grok",
+                    model=model,
+                )
+                for warning in effort_warnings:
+                    logger.warn(warning)
+                if grok_effort:
+                    cmd.extend(["--reasoning-effort", grok_effort])
+                    reasoning_effort = grok_effort
         else:
             return CliBackendFailure(
                 kind=LlmxError,
@@ -1056,6 +1183,14 @@ def cli_chat(
             # only on the prompt, never the caller's workspace context.
             cwd = _cursor_cwd()
             logger.debug(f"[cli] cursor cwd={cwd}")
+        elif binary == "grok":
+            if mode != "agent":
+                cwd = _grok_cwd()
+                logger.debug(f"[cli] grok cwd={cwd}")
+            env = dict(os.environ)
+            env.pop("XAI_API_KEY", None)
+            env.pop("GROK_API_KEY", None)
+            logger.debug("[cli] grok-cli subscription auth (API keys stripped)")
         elif lite or binary == "claude":
             if lite:
                 cwd = _lite_cwd(lite)
@@ -1271,6 +1406,41 @@ def cli_chat(
                     )
                 except Exception as exc:
                     logger.debug(f"[cli] usage log skipped: {exc}")
+        elif binary == "grok":
+            parsed_result, usage = _parse_grok_json(text)
+            if isinstance(parsed_result, CliBackendFailure):
+                logger.info(f"[cli] grok failed: {parsed_result.fallback_reason()}")
+                return parsed_result
+            text = parsed_result
+            if usage:
+                try:
+                    from .usage_log import log_usage
+
+                    note_parts = ["subscription"]
+                    if usage.get("served_model"):
+                        note_parts.append(f"served_model={usage['served_model']}")
+                    if usage.get("total_cost_usd") is not None:
+                        note_parts.append(
+                            f"reported_total_cost_usd={usage['total_cost_usd']}"
+                        )
+                    log_usage(
+                        provider=provider,
+                        model=model or "grok-4.6",
+                        served_model=usage.get("served_model"),
+                        transport="grok-cli",
+                        billing="subscription",
+                        reasoning_effort=reasoning_effort,
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        completion_tokens=usage.get("completion_tokens"),
+                        reasoning_tokens=usage.get("reasoning_tokens"),
+                        cached_tokens=usage.get("cached_tokens"),
+                        latency_s=elapsed,
+                        reported_cost_usd=usage.get("total_cost_usd"),
+                        source="grok-json",
+                        note="; ".join(note_parts),
+                    )
+                except Exception as exc:
+                    logger.debug(f"[cli] usage log skipped: {exc}")
         elif binary == "codex":
             _log_codex_usage()
 
@@ -1295,5 +1465,10 @@ def cli_chat(
         if temp_schema_path:
             try:
                 os.unlink(temp_schema_path)
+            except OSError:
+                pass
+        if temp_prompt_path:
+            try:
+                os.unlink(temp_prompt_path)
             except OSError:
                 pass

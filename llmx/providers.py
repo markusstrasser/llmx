@@ -17,7 +17,11 @@ from openai import OpenAI
 from rich.console import Console
 
 from .logger import logger
-from .model_ids import CURSOR_GROK_MODELS, resolve_grok_subscription_slug
+from .model_ids import (
+    CURSOR_GROK_MODELS,
+    GROK_BUILD_MODELS,
+    resolve_grok_subscription_slug,
+)
 
 if TYPE_CHECKING:
     from .cli_backends import CliBackendFailure
@@ -538,6 +542,23 @@ PROVIDER_CONFIGS = {
         "supports_streaming": False,
         "api_fallback": None,
     },
+    # Grok Build CLI through the operator's SuperGrok subscription. The logical
+    # `grok` name is separate from `xai`: bare grok-* model IDs continue to infer
+    # the metered xAI API unless this provider is explicit.
+    "grok": {
+        "model": "grok-4.6",
+        "env_var": None,
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": False,
+        "api_fallback": None,
+    },
+    "grok-cli": {
+        "model": "grok-4.6",
+        "env_var": None,
+        "temperature_range": (0.0, 1.0),
+        "supports_streaming": False,
+        "api_fallback": None,
+    },
 }
 
 
@@ -580,6 +601,8 @@ _STRIP_PREFIXES = {
     "cerebras": "cerebras/",
     "openrouter": "openrouter/",
     "cursor": "cursor/",
+    "grok": "grok/",
+    "grok-cli": "grok/",
 }
 
 
@@ -629,6 +652,7 @@ _KNOWN_MODELS = {
         "gpt-5-codex",
     ],
     "xai": [
+        "grok-4.6",
         "grok-4.5",
         "grok-4",
         "grok-4-1-fast-reasoning",
@@ -642,6 +666,8 @@ _KNOWN_MODELS = {
         "composer-2.5-fast",
         *CURSOR_GROK_MODELS,
     ],
+    "grok": [*GROK_BUILD_MODELS],
+    "grok-cli": [*GROK_BUILD_MODELS],
     "kimi": [
         "kimi-k3",
         "kimi-k2.7-code",
@@ -713,6 +739,10 @@ def _warn_unknown_model(model: str, provider: str):
 def infer_provider_from_model(model: str) -> Optional[str]:
     """Infer provider from model name"""
     model_lower = model.lower()
+
+    # Explicit Grok Build namespace. Bare grok-* remains the metered xAI API.
+    if model.startswith("grok/"):
+        return "grok"
 
     # Cursor subscription transport — the `cursor/` prefix is an explicit override that MUST
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
@@ -1698,6 +1728,7 @@ def chat(
         # CLI backend handling — intercept before API logic
         from .cli_backends import (
             CliBackendFailure,
+            CLI_LOGICAL_PROVIDERS,
             CLI_PROVIDERS,
             needs_api_fallback,
             cli_chat,
@@ -1743,7 +1774,7 @@ def chat(
             logical_provider = (
                 provider
                 if provider not in CLI_PROVIDERS
-                else CLI_PROVIDERS[cli_provider]["api_fallback"]
+                else CLI_LOGICAL_PROVIDERS[cli_provider]
             )
             # get_model_name normalizes (strips synthetic prefixes like
             # `cursor/`) when a model is given, and supplies the provider
