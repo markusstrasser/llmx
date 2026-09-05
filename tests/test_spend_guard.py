@@ -6,10 +6,12 @@ missing/unreadable ledger fail-open, subscription rows excluded, agent-api count
 and the research (check_model_priced=False) path.
 """
 
+import io
 import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,12 +71,37 @@ class TestSpendGuard(unittest.TestCase):
         self.assertAlmostEqual(spend, 30.0, places=4)
 
     def test_agent_api_counts(self):
-        # agent-api rows are metered; an unpriced model contributes $0 to the sum
-        # (can't be priced) but the transport is still counted as metered.
+        # An unpriced metered row makes the known subtotal incomplete.
         p = self._ledger(_row("agent:deep-research", "agent-api", 100, 100))
         spend, ok = sg.metered_spend_today(p)
-        self.assertTrue(ok)
-        self.assertEqual(spend, 0.0)  # unpriced → $0 historical, but see over-cap test
+        self.assertFalse(ok)
+        self.assertEqual(spend, 0.0)
+
+    def test_interrupted_null_usage_is_incomplete_and_fails_open_loudly(self):
+        row = json.loads(_row("gpt-6-astra", "api", None, None, None))
+        row.update(error="GeneratorExit: ", note="provider usage unreported")
+        path = self._ledger(json.dumps(row))
+        self.assertEqual(sg.metered_spend_today(path), (0.0, False))
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            sg.enforce_daily_cap("gpt-6-astra", log_path=path)
+        self.assertIn("[DEGRADED]", stderr.getvalue())
+        self.assertIn("incomplete", stderr.getvalue())
+
+    def test_null_usage_never_bypasses_known_cap_breach(self):
+        unknown = _row("gpt-6-astra", "api", None, None, None)
+        known = json.loads(_row("gpt-6-astra", "api", 300_000, 10_000))
+        known.update(cached_tokens=0, cache_write_tokens=0)
+        for unknown_first in (True, False):
+            with self.subTest(unknown_first=unknown_first):
+                rows = [json.dumps(known)] * 4
+                rows.insert(0 if unknown_first else len(rows), unknown)
+                path = self._ledger(*rows)
+                self.assertEqual(sg.metered_spend_today(path), (27.0, False))
+                stderr = io.StringIO()
+                with redirect_stderr(stderr), self.assertRaisesRegex(SpendCapError, "cap reached"):
+                    sg.enforce_daily_cap("gpt-6-astra", log_path=path)
+                self.assertIn("[DEGRADED]", stderr.getvalue())
 
     # --- enforce: refuse / allow ---
     def test_over_cap_refuses(self):
@@ -100,7 +127,7 @@ class TestSpendGuard(unittest.TestCase):
         self.assertEqual(cm.exception.exit_code, 7)
         self.assertIn("unpriced", str(cm.exception).lower())
 
-    def test_astra_python_chat_and_stream_refuse_before_sdk_construction(self):
+    def test_unknown_model_chat_and_stream_refuse_before_sdk_construction(self):
         from unittest.mock import patch
 
         from llmx.api import LLM
@@ -110,13 +137,25 @@ class TestSpendGuard(unittest.TestCase):
             patch("llmx.providers.OpenAI") as chat_client,
             patch("openai.OpenAI") as stream_client,
         ):
-            llm = LLM(provider="openai", model="gpt-6-astra", auth="api")
+            llm = LLM(provider="openai", model="unknown-test-model", auth="api")
             with self.assertRaisesRegex(SpendCapError, "unpriced"):
                 llm.chat("hi")
             with self.assertRaisesRegex(SpendCapError, "unpriced"):
                 list(llm.stream("hi"))
         chat_client.assert_not_called()
         stream_client.assert_not_called()
+
+    def test_astra_long_context_spend_blocks_at_actual_tier(self):
+        row = json.loads(_row("gpt-6-astra", "api", 300_000, 10_000))
+        row.update(provider="openai", cached_tokens=0, cache_write_tokens=0)
+        path = self._ledger(*(json.dumps(row) for _ in range(4)))
+        self.assertAlmostEqual(sg.metered_spend_today(path)[0], 27.0)
+        with self.assertRaisesRegex(SpendCapError, "cap reached"):
+            sg.enforce_daily_cap("gpt-6-astra", log_path=path)
+
+    def test_astra_unknown_cache_writes_use_conservative_guard_rate(self):
+        path = self._ledger(_row("gpt-6-astra", "api", 300_000, 10_000))
+        self.assertAlmostEqual(sg.metered_spend_today(path)[0], 8.25)
 
     def test_research_path_skips_unpriced_but_enforces_cap(self):
         empty = self._ledger()

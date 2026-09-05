@@ -13,10 +13,10 @@ approved 2026-07-06):
   worker's metered escalation bypasses the foreground-Bash ``pretool-cost-guard``
   but still appends to this ledger like every other call — so the funnel is the
   only surface-agnostic choke point (epistemic-discipline #8: don't guard a proxy).
-- **Fail-open on an unreadable ledger, but LOUD.** A missing/corrupt ledger prints
-  ``[DEGRADED] spend guard: ledger unreadable`` to stderr and allows the call — a
-  spend guard must never silently disable itself, but it also must not wedge all
-  dispatch because a log rotated.
+- **Fail-open on missing accounting, but LOUD.** An unreadable/incomplete ledger
+  prints ``[DEGRADED]`` to stderr. The known subtotal still blocks at the cap;
+  unknown spend alone does not wedge dispatch because a log rotated or a provider
+  omitted usage.
 - **Fail-LOUD refuse on an unpriced model.** A model with no ``PRICING`` entry can't
   be metered, so it's refused (never priced at $0 — that would let an unpriced model
   spend unbounded). Add it to ``usage_report.PRICING`` or set the override.
@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .providers import GeminiPolicyError, SpendCapError
-from .usage_report import DEFAULT_LOG, PRICING, est_cost
+from .usage_report import DEFAULT_LOG, PRICING, cost_for_usage
 
 # The constitution / invariants.md daily cap. ONE number; the launchd alarm
 # (usage-check.py --alarm) and pretool-cost-guard reconcile to it.
@@ -84,15 +84,15 @@ def is_metered_transport(transport: str | None) -> bool:
 def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool]:
     """Sum today's genuinely-billed (metered) spend from the usage ledger.
 
-    Returns ``(spend_usd, ledger_ok)``. ``ledger_ok`` is False when the ledger is
-    missing or unreadable — the caller then fails open with a loud warning. Cost is
-    the same PRICING estimate the rollups use; unpriced metered rows contribute $0
-    to the *historical* sum here (they can't be priced), but a NEW dispatch of an
-    unpriced model is refused up front by ``enforce_daily_cap``.
+    Returns ``(known_subtotal_usd, ledger_ok)``. ``ledger_ok`` is False when the
+    ledger is missing/unreadable or today's metered rows have unknown cost.
+    The caller warns and checks the known subtotal even when it is incomplete.
+    A NEW dispatch of an unpriced model is still refused up front.
     """
     path = Path(log_path) if log_path else DEFAULT_LOG
     today = datetime.now(timezone.utc).date().isoformat()
     total = 0.0
+    ledger_ok = True
     try:
         raw = path.read_text()
     except (FileNotFoundError, OSError, UnicodeDecodeError):
@@ -108,12 +108,12 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
             continue
         if not is_metered_transport(r.get("transport")):
             continue
-        prompt = r.get("prompt_tokens") or 0
-        out = (r.get("completion_tokens") or 0) + (r.get("reasoning_tokens") or 0)
-        c = est_cost(r.get("model") or "", prompt, out)
-        if c is not None:
+        c = cost_for_usage(r, conservative=True)
+        if c is None:
+            ledger_ok = False
+        else:
             total += c
-    return total, True
+    return total, ledger_ok
 
 
 def enforce_daily_cap(
@@ -129,8 +129,8 @@ def enforce_daily_cap(
       1. ``model`` has no ``PRICING`` entry (can't be metered → fail-loud refuse), or
       2. today's already-billed metered spend has reached ``cap_usd``.
 
-    ``LLMX_SPEND_OVERRIDE=1`` bypasses both. A missing/unreadable ledger fails open
-    with a loud ``[DEGRADED]`` stderr warning (never a silent skip).
+    ``LLMX_SPEND_OVERRIDE=1`` bypasses both. Missing/unreadable/incomplete accounting
+    warns loudly with ``[DEGRADED]`` and fails open below the known subtotal's cap.
 
     ``check_model_priced=False`` skips (1) for providers that self-report cost and
     are legitimately absent from ``PRICING`` (e.g. the Perplexity Agent research
@@ -162,11 +162,11 @@ def enforce_daily_cap(
     spend, ok = metered_spend_today(log_path)
     if not ok:
         print(
-            "[DEGRADED] spend guard: ledger unreadable — metered-spend cap NOT "
-            "enforced this call (failing open). Check the usage ledger.",
+            "[DEGRADED] spend guard: ledger unreadable or incomplete — checking "
+            "the known metered subtotal only (failing open below cap). "
+            "Unreported spend remains unknown; check the usage ledger.",
             file=sys.stderr,
         )
-        return
 
     if spend >= cap_usd:
         raise SpendCapError(

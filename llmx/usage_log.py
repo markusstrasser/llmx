@@ -91,6 +91,8 @@ def log_usage(
     error: Optional[str] = None,
     source: Optional[str] = None,
     note: Optional[str] = None,
+    cache_write_tokens: Optional[int] = None,
+    completion_includes_reasoning: Optional[bool] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -104,6 +106,8 @@ def log_usage(
             "completion_tokens": completion_tokens,
             "reasoning_tokens": reasoning_tokens,
             "cached_tokens": cached_tokens,
+            "cache_write_tokens": cache_write_tokens,
+            "completion_includes_reasoning": completion_includes_reasoning,
             "latency_s": round(latency_s, 3),
             "error": error,
             "source": source,

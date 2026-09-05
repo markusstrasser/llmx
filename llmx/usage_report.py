@@ -143,11 +143,69 @@ for cursor_model in CURSOR_GROK_MODELS:
     CONTEXT_WINDOW[cursor_model] = 500_000
 
 
-def est_cost(model: str, prompt: int, out: int) -> float | None:
+def est_cost(
+    model: str,
+    prompt: int,
+    out: int,
+    *,
+    cached_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    conservative: bool = False,
+) -> float | None:
+    """Price total input and billable output; cache counts partition total input.
+
+    Three-argument callers retain an uncached-input estimate. For Astra, the
+    conservative guard prices unknown input categories at the cache-write rate.
+    Explicit zero cache counts mean known absence; None means unreported.
+    """
     rate = PRICING.get(model)
     if rate is None:
         return None
-    return (prompt / 1_000_000) * rate[0] + (out / 1_000_000) * rate[1]
+    input_rate, output_rate = rate
+    if model not in {"gpt-6-astra", "gpt-6"}:
+        return (prompt * input_rate + out * output_rate) / 1_000_000
+
+    # https://developers.openai.com/api/docs/models/gpt-6-astra
+    read_rate, write_rate = 1.0, 12.50
+    if prompt > 272_000:
+        input_rate *= 2
+        read_rate *= 2
+        write_rate *= 2
+        output_rate *= 1.5
+    read = max(0, min(cached_tokens or 0, prompt))
+    written = max(0, min(cache_write_tokens or 0, prompt - read))
+    ordinary = prompt - read - written
+    ordinary_rate = write_rate if conservative and cache_write_tokens is None else input_rate
+    return (
+        ordinary * ordinary_rate + read * read_rate + written * write_rate + out * output_rate
+    ) / 1_000_000
+
+
+def output_tokens(row: dict) -> int:
+    """Return billable output, without adding OpenAI's reasoning subset twice.
+
+    New SDK rows declare the relationship explicitly. Historical native OpenAI
+    rows use the SDK contract; other historical rows retain their prior semantics.
+    """
+    completion = row.get("completion_tokens") or 0
+    included = row.get("completion_includes_reasoning")
+    if included is None:
+        included = row.get("provider") == "openai" or (row.get("model") or "").startswith("gpt-")
+    return completion if included else completion + (row.get("reasoning_tokens") or 0)
+
+
+def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:
+    """Price reported totals; absent input/output totals leave cost unknown."""
+    if row.get("prompt_tokens") is None or row.get("completion_tokens") is None:
+        return None
+    return est_cost(
+        row.get("model") or "",
+        row["prompt_tokens"],
+        output_tokens(row),
+        cached_tokens=row.get("cached_tokens"),
+        cache_write_tokens=row.get("cache_write_tokens"),
+        conservative=conservative,
+    )
 
 
 def summarize(
@@ -192,14 +250,13 @@ def summarize(
         if model and r.get("model") != model:
             continue
         n += 1
-        m = r.get("model") or "?"
         key = r.get(by)
         if key is None:
             key = "(unattributed)" if by in ("caller", "cwd") else "?"
         if by == "cwd" and isinstance(key, str) and key != "(unattributed)":
             key = os.path.basename(key.rstrip("/")) or key
         prompt = r.get("prompt_tokens") or 0
-        out = (r.get("completion_tokens") or 0) + (r.get("reasoning_tokens") or 0)
+        out = output_tokens(r)
         g = groups[key]
         g["calls"] += 1
         g["prompt"] += prompt
@@ -207,7 +264,7 @@ def summarize(
         g["max_in"] = max(g["max_in"], prompt)
         if r.get("error"):
             g["errors"] += 1
-        c = est_cost(m, prompt, out)
+        c = cost_for_usage(r, conservative=True)
         if c is None:
             g["cost_known"] = False
         else:
@@ -248,12 +305,17 @@ def summarize(
         f"  {'-' * w}  {'-' * 6}  {'-' * 11}  {'-' * 11}  {'-' * 9}  {'-' * 9}"
         + (f"  {'-' * 9}  {'-' * 6}" if show_ctx else "")
     )
-    out_lines.append(
-        f"  {'TOTAL':<{w}}  {total['calls']:>6}  {total['prompt']:>11,}  {total['out']:>11,}  "
-        f"{'':>9}  {'$' + format(total['cost'], '.2f'):>9}"
+    total_cost = f"${total['cost']:.2f}" + (
+        "" if all(g["cost_known"] for g in groups.values()) else "+?"
     )
     out_lines.append(
-        "\n  (cost = estimate from PRICING; '+?' = unpriced model. Tokens exact. "
+        f"  {'TOTAL':<{w}}  {total['calls']:>6}  {total['prompt']:>11,}  {total['out']:>11,}  "
+        f"{'':>9}  {total_cost:>9}"
+    )
+    out_lines.append(
+        "\n  (cost = conservative estimate from PRICING; unknown Astra input is charged "
+        "at the cache-write rate. '+?' = unpriced model or unreported usage. "
+        "Token sums include reported counts. "
         "max_in = biggest single call's input; %used vs ctx_win.)"
     )
     return "\n".join(out_lines)

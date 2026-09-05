@@ -774,7 +774,10 @@ def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = F
     """Get model name for provider — no prefixes needed (native SDKs)"""
     if model:
         # Strip any leftover LiteLLM prefixes
-        return _normalize_model(provider, model)
+        normalized = _normalize_model(provider, model)
+        if provider in {"openai", "codex-cli"} and normalized == "gpt-6":
+            return _MODEL_UPGRADES[normalized]
+        return normalized
 
     config = PROVIDER_CONFIGS.get(provider)
     if not config:
@@ -1155,9 +1158,9 @@ def _usage_reasoning_tokens(usage) -> Optional[int]:
 def _normalize_usage(provider: str, raw) -> dict:
     """Normalize per-provider usage objects to a flat token dict.
 
-    Returns {"prompt_tokens", "completion_tokens", "total_tokens",
-    "reasoning_tokens", "cached_tokens"} with None for fields the
-    provider didn't report. Total is computed when not provided.
+    Token fields are None when unreported. completion_includes_reasoning records
+    whether reasoning is already part of completion_tokens. Total is computed
+    when not provided.
     """
     if raw is None:
         return {
@@ -1166,18 +1169,22 @@ def _normalize_usage(provider: str, raw) -> dict:
             "total_tokens": None,
             "reasoning_tokens": None,
             "cached_tokens": None,
+            "cache_write_tokens": None,
+            "completion_includes_reasoning": provider != "google",
         }
     if provider == "google":
         prompt = _usage_get(raw, "prompt_token_count")
         completion = _usage_get(raw, "candidates_token_count")
         reasoning = _usage_get(raw, "thoughts_token_count")
         cached = _usage_get(raw, "cached_content_token_count")
+        cache_write = None
     else:  # openai-compatible
         prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
         completion = _usage_get(raw, "completion_tokens", "output_tokens")
         reasoning = _usage_reasoning_tokens(raw)
         prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
         cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
+        cache_write = _usage_get(prompt_details, "cache_write_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
         "prompt_tokens": prompt,
@@ -1185,6 +1192,8 @@ def _normalize_usage(provider: str, raw) -> dict:
         "total_tokens": total,
         "reasoning_tokens": reasoning,
         "cached_tokens": cached,
+        "cache_write_tokens": cache_write,
+        "completion_includes_reasoning": provider != "google",
     }
 
 
@@ -1298,6 +1307,7 @@ def _google_chat(
             completion_tokens=getattr(usage, "candidates_token_count", None),
             reasoning_tokens=getattr(usage, "thoughts_token_count", None),
             cached_tokens=getattr(usage, "cached_content_token_count", None),
+            completion_includes_reasoning=False,
             latency_s=_time.time() - started,
         )
 
@@ -1491,6 +1501,7 @@ def _openai_chat(
     result_text = ""
     finish_reason = None
     usage = None
+    error = None
     started = _time.time()
 
     try:
@@ -1532,6 +1543,9 @@ def _openai_chat(
             result_text = content
             finish_reason = response.choices[0].finish_reason
             print(result_text)
+    except BaseException as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         cached = _usage_get(usage, "prompt_tokens_details", "input_tokens_details")
         log_usage(
@@ -1543,7 +1557,11 @@ def _openai_chat(
             completion_tokens=_usage_get(usage, "completion_tokens", "output_tokens"),
             reasoning_tokens=_usage_reasoning_tokens(usage),
             cached_tokens=_usage_get(cached, "cached_tokens", "cached_input_tokens"),
+            cache_write_tokens=_usage_get(cached, "cache_write_tokens"),
+            completion_includes_reasoning=True,
             latency_s=_time.time() - started,
+            error=error,
+            note="provider usage unreported" if usage is None else None,
         )
 
     # Reasoning-starvation detection: finish_reason="length" with empty visible

@@ -15,6 +15,7 @@ from .providers import (
     _google_chat,
     _openai_chat,
     _openai_request_parameters,
+    _normalize_usage,
     RateLimitError,
     check_api_key,
     get_model_name,
@@ -134,10 +135,7 @@ class LLM:
         self.kwargs = kwargs
 
         if model is not None:
-            if self._is_cli:
-                self.model = model
-            else:
-                self.model = get_model_name(provider, model)
+            self.model = get_model_name(provider, model)
         else:
             if self._cli_provider:
                 logical_provider = (
@@ -352,8 +350,15 @@ class LLM:
         """Stream response chunks."""
         from .spend_guard import enforce_daily_cap
 
-        enforce_daily_cap(self.model)
         call_kwargs = {**self.kwargs, **kwargs}
+        if subscription_route(auth=call_kwargs.get("auth"), lite=call_kwargs.get("lite")):
+            resolve_cli_api_fallback(
+                self._cli_provider or self.provider,
+                auth=call_kwargs.get("auth"),
+                lite=call_kwargs.get("lite"),
+                reason="streaming not supported by CLI",
+            )
+        enforce_daily_cap(self.model)
         temp = self.temperature
 
         if self.provider == "google":
@@ -397,24 +402,53 @@ class LLM:
             if self.provider == "anthropic" and not model.startswith("anthropic/"):
                 model = f"anthropic/{model}"
 
-            response = client.chat.completions.create(
+            parameters = _openai_request_parameters(
                 model=model,
-                messages=messages,
-                stream=True,
-                **_openai_request_parameters(
-                    model=model,
-                    provider=self.provider,
-                    temperature=temp,
-                    reasoning_effort=call_kwargs.get("reasoning_effort"),
-                ),
+                provider=self.provider,
+                temperature=temp,
+                reasoning_effort=call_kwargs.get("reasoning_effort"),
             )
+            usage = None
+            error = None
+            started = time.time()
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **parameters,
+                )
+                for chunk in response:
+                    if getattr(chunk, "usage", None) is not None:
+                        usage = chunk.usage
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        yield delta.content
+            except BaseException as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                from .usage_log import log_usage
 
-            for chunk in response:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield delta.content
+                normalized = _normalize_usage(self.provider, usage)
+                log_usage(
+                    provider=self.provider,
+                    model=model,
+                    transport="api",
+                    reasoning_effort=parameters.get("reasoning_effort"),
+                    prompt_tokens=normalized["prompt_tokens"],
+                    completion_tokens=normalized["completion_tokens"],
+                    reasoning_tokens=normalized["reasoning_tokens"],
+                    cached_tokens=normalized["cached_tokens"],
+                    cache_write_tokens=normalized["cache_write_tokens"],
+                    completion_includes_reasoning=normalized["completion_includes_reasoning"],
+                    latency_s=time.time() - started,
+                    error=error,
+                    note="provider usage unreported" if usage is None else None,
+                )
 
 
 # Simple function API

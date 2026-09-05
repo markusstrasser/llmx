@@ -30,7 +30,7 @@ def _fake_response(content: str = "OK"):
         completion_tokens=5,
         total_tokens=15,
         completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
-        prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+        prompt_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
     )
     message = SimpleNamespace(content=content, refusal=None)
     choice = SimpleNamespace(message=message, finish_reason="stop")
@@ -52,7 +52,7 @@ class _CapturingClient:
         if kwargs.get("stream"):
             return iter([SimpleNamespace(choices=[SimpleNamespace(
                 delta=SimpleNamespace(content="OK"), finish_reason="stop",
-            )])])
+            )]), SimpleNamespace(choices=[], usage=_fake_response().usage)])
         return _fake_response()
 
 
@@ -61,6 +61,7 @@ class _Capture:
 
     def __init__(self, error: Exception | None = None):
         self.calls: list = []
+        self.usage_rows: list = []
         self._error = error
         self._patches: list = []
 
@@ -79,7 +80,7 @@ class _Capture:
             patch("llmx.api._get_api_key", return_value="test-key"),
             patch("llmx.api.check_api_key", return_value=None),
             patch("llmx.spend_guard.enforce_daily_cap", return_value=None),
-            patch("llmx.usage_log.log_usage", return_value=None),
+            patch("llmx.usage_log.log_usage", side_effect=lambda **row: self.usage_rows.append(row)),
         ]
         for p in self._patches:
             p.start()
@@ -228,6 +229,95 @@ class TestOpenrouterRequestBody(unittest.TestCase):
 
 
 class TestAstraRequestBody(unittest.TestCase):
+    def test_subscription_stream_refuses_metered_fallback_before_sdk(self):
+        from llmx.api import LLM
+
+        for provider in ("openai", "codex-cli"):
+            with self.subTest(provider=provider), _Capture() as cap:
+                llm = LLM(provider=provider, model="gpt-6", auth="subscription")
+                self.assertEqual(llm.model, "gpt-6-astra")
+                with self.assertRaisesRegex(RuntimeError, "auth=subscription forbids"):
+                    list(llm.stream("hi"))
+                self.assertEqual(cap.calls, [])
+
+    def test_alias_uses_astra_contract_for_direct_python_calls(self):
+        from llmx.api import LLM
+
+        for stream in (False, True):
+            with self.subTest(stream=stream), _Capture() as cap:
+                llm = LLM(provider="openai", model="gpt-6", auth="api", reasoning_effort="none")
+                if stream:
+                    list(llm.stream("hi"))
+                else:
+                    llm.chat("hi")
+                self.assertEqual(cap.body["model"], "gpt-6-astra")
+                self.assertEqual(cap.body["reasoning_effort"], "low")
+                self.assertNotIn("temperature", cap.body)
+
+    def test_priced_astra_request_passes_real_guard_and_logs_stream_usage(self):
+        import tempfile
+        from pathlib import Path
+
+        from llmx.api import LLM
+        from llmx.spend_guard import enforce_daily_cap
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "usage.jsonl"
+            ledger.write_text("")
+            for stream in (False, True):
+                with self.subTest(stream=stream), _Capture() as cap, patch(
+                    "llmx.spend_guard.enforce_daily_cap",
+                    side_effect=lambda model: enforce_daily_cap(model, log_path=ledger),
+                ) as guard:
+                    llm = LLM(provider="openai", model="gpt-6-astra", auth="api")
+                    if stream:
+                        self.assertEqual(list(llm.stream("hi")), ["OK"])
+                        self.assertEqual(cap.body["stream_options"], {"include_usage": True})
+                    else:
+                        self.assertEqual(llm.chat("hi").content, "OK")
+                    guard.assert_called_once_with("gpt-6-astra")
+                    self.assertEqual(len(cap.usage_rows), 1)
+                    self.assertEqual(cap.usage_rows[0]["prompt_tokens"], 10)
+                    self.assertEqual(cap.usage_rows[0]["cache_write_tokens"], 0)
+                    self.assertTrue(cap.usage_rows[0]["completion_includes_reasoning"])
+
+    def test_request_errors_preserve_exception_and_log_unreported_usage(self):
+        from llmx.api import LLM
+        from llmx.providers import _openai_chat
+
+        for entrypoint in ("LLM.stream", "_openai_chat"):
+            error = RuntimeError("offline request failure")
+            with self.subTest(entrypoint=entrypoint), _Capture(error=error) as cap:
+                with self.assertRaises(RuntimeError) as raised:
+                    if entrypoint == "LLM.stream":
+                        list(LLM(provider="openai", auth="api").stream("hi"))
+                    else:
+                        _openai_chat(
+                            "hi", "gpt-6-astra", "openai", None, 0.7, 30,
+                            True, None, None, None,
+                        )
+                self.assertIs(raised.exception, error)
+                self.assertEqual(len(cap.usage_rows), 1)
+                row = cap.usage_rows[0]
+                self.assertEqual(row["error"], "RuntimeError: offline request failure")
+                self.assertEqual(row["note"], "provider usage unreported")
+                self.assertIsNone(row["prompt_tokens"])
+                self.assertIsNone(row["completion_tokens"])
+
+    def test_interrupted_stream_logs_interruption_without_inventing_usage(self):
+        from llmx.api import LLM
+
+        with _Capture() as cap:
+            stream = LLM(provider="openai", auth="api").stream("hi")
+            self.assertEqual(next(stream), "OK")
+            stream.close()
+            self.assertEqual(len(cap.usage_rows), 1)
+            row = cap.usage_rows[0]
+            self.assertEqual(row["error"], "GeneratorExit: ")
+            self.assertEqual(row["note"], "provider usage unreported")
+            self.assertIsNone(row["prompt_tokens"])
+            self.assertIsNone(row["completion_tokens"])
+
     def test_supported_effort_and_omitted_sampling_across_all_entrypoints(self):
         from llmx.api import LLM
 
