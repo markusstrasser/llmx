@@ -261,10 +261,8 @@ def build_dispatch_plan(
     )
     warnings.extend(mode_warns)
 
-    # Bare "grok-4.5" has no direct Cursor slug — fill the gap left by f156e1f
-    # (which intentionally requires exact CURSOR_GROK45_MODELS ids) by routing
-    # subscription auth to the default-effort Cursor slug instead of dead-ending
-    # on the metered xai-api transport. See model_ids.resolve_grok_subscription_slug.
+    # Bare Grok subscription aliases are centralized so planning and live dispatch
+    # agree. Retired versions fail here before they can reach a metered API route.
     if resolved_auth == "subscription" and final_provider == "xai":
         grok_slug = resolve_grok_subscription_slug(model)
         if grok_slug:

@@ -748,7 +748,7 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
     # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Exact Cursor-native Grok slugs (4.5 and 4.6) are Cursor-exclusive. Bare `grok-4.x`
+    # Exact Cursor-native Grok 4.6 slugs are Cursor-exclusive. Bare `grok-4.x`
     # remains the xAI API model; do not infer it as a subscription route.
     if (
         model.startswith("cursor/")
@@ -1737,15 +1737,9 @@ def chat(
             subscription_route,
         )
 
-        # Mirrors dispatch_plan.build_dispatch_plan's bare-grok-4.5 alias (see
-        # model_ids.resolve_grok_subscription_slug). chat() re-derives its own
-        # cli_provider/cli_model from the raw `model` string rather than trusting
-        # a caller-supplied dispatch plan, so this must be re-applied here too —
-        # otherwise a direct chat(provider="xai", model="grok-4.5", auth="subscription")
-        # call (or the CLI path, which passes the raw --model string through) would
-        # dry-run clean but send the unknown literal "grok-4.5" to cursor-agent for
-        # real. provider may already be "cursor" here (cli.py passes
-        # dispatch_plan.provider but the ORIGINAL --model string) — cover both.
+        # Mirror dispatch_plan's bare-Grok subscription resolution. chat() derives
+        # its CLI model from the raw model string, so direct calls must share the
+        # same supported-alias and retired-model behavior as planning.
         if auth == "subscription" and provider in {"xai", "cursor"}:
             grok_slug = resolve_grok_subscription_slug(model)
             if grok_slug:

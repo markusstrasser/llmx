@@ -221,6 +221,16 @@ class TestLlmSubscriptionFallback(unittest.TestCase):
 
 
 class TestCliExitCode(unittest.TestCase):
+    def test_retired_grok45_subscription_names_supported_routes(self):
+        result = CliRunner().invoke(
+            cli,
+            ["chat", "--dry-run", "--subscription", "--model", "grok-4.5", "hi"],
+        )
+
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("cursor-grok-4.6-high", result.output)
+        self.assertIn("-p grok -m grok-4.6", result.output)
+
     def test_quota_error_exits_6(self):
         quota_error = QuotaError(
             MONTHLY_SPEND_DETAIL,
@@ -289,6 +299,32 @@ class TestCliExitCode(unittest.TestCase):
 
 
 class TestProviderSubscriptionFallback(unittest.TestCase):
+    def test_retired_grok45_subscription_never_reaches_a_transport(self):
+        from llmx.providers import chat
+
+        with (
+            patch("llmx.cli_backends.cli_chat") as cli_chat_mock,
+            patch("llmx.providers.OpenAI") as api_client,
+            self.assertRaisesRegex(
+                ValueError,
+                r"cursor-grok-4\.6-high.*-p grok -m grok-4\.6",
+            ),
+        ):
+            chat(
+                "hi",
+                provider="xai",
+                model="grok-4.5",
+                temperature=0.7,
+                reasoning_effort=None,
+                stream=False,
+                debug=False,
+                json_output=False,
+                auth="subscription",
+            )
+
+        cli_chat_mock.assert_not_called()
+        api_client.assert_not_called()
+
     @patch(
         "llmx.cli_backends.needs_api_fallback",
         return_value="structured output not supported by CLI",

@@ -196,8 +196,7 @@ LITE_ALLOWED_MODELS = {
     # account since launch day). Plan-vs-usage-credit billing is per plan/seat —
     # Claude Code's /model picker says "Requires usage credits" when it applies.
     "claude-fable-5-1",
-    # 2026-07-14: Cursor subscription pool — composer plus the exact live Grok
-    # registry slugs. Bare `grok-4.5` is the metered xAI API model and is excluded.
+    # Cursor subscription pool: composer plus the exact live Grok 4.6 slugs.
     "composer-2.5",
     *CURSOR_GROK_MODELS,
 }
