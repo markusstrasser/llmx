@@ -42,9 +42,7 @@ EXIT_RATE_LIMIT = 3  # 429, 503 (transient)
 EXIT_TIMEOUT = 4
 EXIT_MODEL_ERROR = 5  # context too large, model not found, invalid request
 EXIT_QUOTA = 6  # insufficient_quota, billing exhausted (permanent until topped up)
-EXIT_SPEND_CAP = (
-    7  # daily metered-spend cap reached, or unpriced model — policy refusal
-)
+EXIT_SPEND_CAP = 7  # daily metered-spend cap reached, or unpriced model — policy refusal
 
 
 class LlmxError(RuntimeError):
@@ -318,6 +316,20 @@ MODEL_RESTRICTIONS = {
     # temperature=1.0 pin, the exact looping/degraded-reasoning footgun the 3.x comment
     # above warns about) and `gemini-3.5-flash-lite` silently inherited 3.5-flash's
     # narrower effort ladder. The -lite key is longer than "gemini-3.5-flash", so it wins.
+    "gemini-3.8-flash": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+        "default_effort": "medium",
+    },
+    "gemini-3.7-flash": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+        "default_effort": "medium",
+    },
     "gemini-3.6-flash": {
         "temperature": 1.0,
         "fixed": True,
@@ -410,17 +422,17 @@ MODEL_RESTRICTIONS = {
 
 PROVIDER_CONFIGS = {
     "google": {
-        "model": "gemini-3.1-pro-preview",
-        "legacy_model": "gemini-3-pro-preview",
+        "model": "gemini-3.8-flash",
+        "legacy_model": "gemini-3.1-pro-preview",
         "env_var": "GEMINI_API_KEY or GOOGLE_API_KEY or GEMINI_API_KEY_CRITIQUE_ONLY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
-        "flash_model": "gemini-3-flash-preview",
+        "flash_model": "gemini-3.8-flash",
         "flash_lite_model": "gemini-3.1-flash-lite-preview",
     },
     "openai": {
-        "model": "gpt-5.6-sol",
-        "legacy_model": "gpt-5.4",
+        "model": "gpt-6-astra",
+        "legacy_model": "gpt-5.6-sol",
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -459,7 +471,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "openrouter": {
-        "model": "openai/gpt-5.6-sol",
+        "model": "openai/gpt-6-astra",
         "env_var": "OPENROUTER_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -591,6 +603,8 @@ _KNOWN_MODELS = {
     "google": [
         "gemini-3.1-pro-preview",
         "gemini-3-pro-preview",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
@@ -599,10 +613,12 @@ _KNOWN_MODELS = {
         "gemini-3.1-flash-lite-preview",
     ],
     "openai": [
+        "gpt-6-astra",
+        "gpt-6",  # alias → astra
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.6",  # alias → sol
+        "gpt-5.6",  # alias → sol; keep as named 5.6-suite pin
         "gpt-5.4",
         "gpt-5.3",
         "gpt-5.2",
@@ -653,19 +669,21 @@ _KNOWN_MODELS = {
 # Deprecated → current model upgrades. Auto-applied with warning.
 _MODEL_UPGRADES = {
     "gemini-2.5-pro": "gemini-3.1-pro-preview",
-    "gemini-2.5-flash": "gemini-3-flash-preview",
-    "gemini-2.0-flash": "gemini-3-flash-preview",
+    "gemini-2.5-flash": "gemini-3.8-flash",
+    "gemini-2.0-flash": "gemini-3.8-flash",
     "gemini-pro": "gemini-3.1-pro-preview",
-    "gemini-flash": "gemini-3-flash-preview",
+    "gemini-flash": "gemini-3.8-flash",
     # Common guesses that 404 at the API (agents drop the -preview suffix /
     # version digit; gemini-3-pro alone caused 10 indexed 404s, 2026-06).
     "gemini-3-pro": "gemini-3.1-pro-preview",
-    "gemini-3-flash": "gemini-3-flash-preview",
+    "gemini-3-flash": "gemini-3.8-flash",
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
-    "gpt-4o": "gpt-5.6-sol",
+    "gpt-4o": "gpt-6-astra",
     "gpt-4o-mini": "gpt-5.1-mini",
-    "gpt-4": "gpt-5.6-sol",
-    "gpt-4-turbo": "gpt-5.6-sol",
+    "gpt-4": "gpt-6-astra",
+    "gpt-4-turbo": "gpt-6-astra",
+    # GPT-6 Astra (2026-09): bare alias → Astra. Keep the 5.6 suite as named pins.
+    "gpt-6": "gpt-6-astra",
     # GPT-5.6 suite (2026-07-09): bare alias → Sol. GPT-5.5 fully removed — do not upgrade.
     "gpt-5.6": "gpt-5.6-sol",
     "claude-3.5-sonnet": "claude-sonnet-5",
@@ -689,9 +707,7 @@ def _warn_unknown_model(model: str, provider: str):
     if known and model not in known:
         close = difflib.get_close_matches(model, known, n=1, cutoff=0.6)
         if close:
-            logger.warn(
-                f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?"
-            )
+            logger.warn(f"Unknown model '{model}' for {provider}. Did you mean '{close[0]}'?")
 
 
 def infer_provider_from_model(model: str) -> Optional[str]:
@@ -754,9 +770,7 @@ def check_gemini_flash_usage(model_name: str, prompt: str) -> None:
     )
 
 
-def get_model_name(
-    provider: str, model: Optional[str] = None, use_old: bool = False
-) -> str:
+def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = False) -> str:
     """Get model name for provider — no prefixes needed (native SDKs)"""
     if model:
         # Strip any leftover LiteLLM prefixes
@@ -1086,9 +1100,7 @@ def _normalize_schema_for_provider(schema: Any, provider: str) -> Any:
         if key == "additionalProperties" and provider in ("openai", "google"):
             continue  # re-derived below for openai; dropped for google
         if key in _SCHEMA_SUBSCHEMA_MAPS and isinstance(val, dict):
-            out[key] = {
-                k: _normalize_schema_for_provider(v, provider) for k, v in val.items()
-            }
+            out[key] = {k: _normalize_schema_for_provider(v, provider) for k, v in val.items()}
         elif key in _SCHEMA_SUBSCHEMA_LISTS and isinstance(val, list):
             out[key] = [_normalize_schema_for_provider(v, provider) for v in val]
         elif key == "items":
@@ -1164,9 +1176,7 @@ def _normalize_usage(provider: str, raw) -> dict:
         prompt = _usage_get(raw, "prompt_tokens", "input_tokens")
         completion = _usage_get(raw, "completion_tokens", "output_tokens")
         reasoning = _usage_reasoning_tokens(raw)
-        prompt_details = _usage_get(
-            raw, "prompt_tokens_details", "input_tokens_details"
-        )
+        prompt_details = _usage_get(raw, "prompt_tokens_details", "input_tokens_details")
         cached = _usage_get(prompt_details, "cached_tokens", "cached_input_tokens")
     total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
     return {
@@ -1214,9 +1224,7 @@ def _google_chat(
     from .usage_log import log_usage
 
     client = genai.Client(
-        http_options=types.HttpOptions(
-            timeout=max(timeout * 1000, 10_000) if timeout else 300_000
-        )
+        http_options=types.HttpOptions(timeout=max(timeout * 1000, 10_000) if timeout else 300_000)
     )
     config = types.GenerateContentConfig(temperature=temperature)
 
@@ -1267,9 +1275,7 @@ def _google_chat(
                 response = chunk  # last chunk carries usage_metadata
             sys.stdout.write("\n")
         else:
-            response = client.models.generate_content(
-                model=model, contents=contents, config=config
-            )
+            response = client.models.generate_content(model=model, contents=contents, config=config)
             # Guard empty candidates from safety filter
             if not response.candidates:
                 feedback = getattr(response, "prompt_feedback", None)
@@ -1282,9 +1288,7 @@ def _google_chat(
             finish_reason = str(response.candidates[0].finish_reason)
             print(result_text)
     finally:
-        usage = (
-            getattr(response, "usage_metadata", None) if response is not None else None
-        )
+        usage = getattr(response, "usage_metadata", None) if response is not None else None
         log_usage(
             provider="google",
             model=model,
@@ -1299,9 +1303,7 @@ def _google_chat(
 
     # Truncation detection
     if finish_reason and "MAX_TOKENS" in str(finish_reason):
-        logger.warn(
-            f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)"
-        )
+        logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
 
     if usage_out is not None:
         usage_out.update(_normalize_usage("google", usage))
@@ -1580,9 +1582,7 @@ class SearchUnavailableError(Exception):
     pass
 
 
-def _build_search_kwargs(
-    provider: str, model_name: str, *, strict: bool = False
-) -> dict:
+def _build_search_kwargs(provider: str, model_name: str, *, strict: bool = False) -> dict:
     """Build provider-specific kwargs for web search grounding.
     Only meaningful for legacy callers — search is handled natively in _google_chat.
 
@@ -1747,9 +1747,7 @@ def chat(
                     lite=lite,
                     reason=fallback_reason,
                 )
-                logger.info(
-                    f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})"
-                )
+                logger.info(f"[cli→api] {cli_provider} → {api_provider} ({fallback_reason})")
                 provider = api_provider
                 model = cli_model
             else:
@@ -1768,9 +1766,7 @@ def chat(
                     print(cli_result)
                     return cli_result
                 if not isinstance(cli_result, CliBackendFailure):
-                    raise TypeError(
-                        f"Unexpected CLI result type: {type(cli_result).__name__}"
-                    )
+                    raise TypeError(f"Unexpected CLI result type: {type(cli_result).__name__}")
                 if (
                     subscription_route(auth=auth, lite=lite)
                     or CLI_PROVIDERS[cli_provider]["api_fallback"] is None
@@ -1880,9 +1876,7 @@ def chat(
             default_effort = restriction.get("default_effort")
             if default_effort:
                 reasoning_effort = default_effort
-                logger.info(
-                    f"Defaulting to --reasoning-effort {default_effort} for {model_name}"
-                )
+                logger.info(f"Defaulting to --reasoning-effort {default_effort} for {model_name}")
 
         logger.debug(
             "Starting chat",
@@ -2023,11 +2017,7 @@ def chat(
         # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
         # Parse the error body to distinguish them.
         err_body = getattr(e, "body", {}) or {}
-        err_code = (
-            err_body.get("error", {}).get("code", "")
-            if isinstance(err_body, dict)
-            else ""
-        )
+        err_code = err_body.get("error", {}).get("code", "") if isinstance(err_body, dict) else ""
         if err_code == "insufficient_quota":
             raise QuotaError(
                 f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",

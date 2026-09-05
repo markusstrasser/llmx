@@ -39,6 +39,7 @@ from .dispatch_api import (  # noqa: F401 — re-export for `from llmx.api impor
     dispatch,
     load_context_paths,
 )
+
 # Dispatch auto-retry on TRANSIENT failures (RateLimitError + its ServiceUnavailableError
 # subclass = 429/503/overload/connection). Exponential backoff + JITTER (the jitter matters:
 # under concurrent multi-session load, deterministic backoff thundering-herds). Non-transient
@@ -90,7 +91,7 @@ class LLM:
     """Stateful LLM client for multiple calls
 
     Example:
-        >>> llm = LLM(provider="openai", model="gpt-5.6-sol", temperature=0.7)
+        >>> llm = LLM(provider="openai", model="gpt-6-astra")
         >>> response = llm.chat("What is 2+2?")
         >>> print(response.content)
         4
@@ -120,9 +121,7 @@ class LLM:
                 lite=kwargs.get("lite"),
                 api_only=api_only,
             )
-        kwargs.update(
-            auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode)
-        )
+        kwargs.update(auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode))
         kwargs["auth"] = resolved_auth
         lite = kwargs.get("lite")
         self._cli_provider = preferred_cli_provider(
@@ -209,9 +208,7 @@ class LLM:
                         raw=None,
                     )
                 if not isinstance(cli_result, CliBackendFailure):
-                    raise TypeError(
-                        f"Unexpected CLI result type: {type(cli_result).__name__}"
-                    )
+                    raise TypeError(f"Unexpected CLI result type: {type(cli_result).__name__}")
                 if (
                     subscription_route(auth=auth, lite=lite)
                     or CLI_PROVIDERS[self._cli_provider]["api_fallback"] is None
@@ -229,9 +226,7 @@ class LLM:
                 lite=lite,
                 reason=fallback_reason,
             )
-            logger.info(
-                f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason})"
-            )
+            logger.info(f"[cli→api] {self._cli_provider} → {api_provider} ({fallback_reason})")
             fallback_kwargs = {
                 **self.kwargs,
                 "auth": "api",
@@ -246,9 +241,7 @@ class LLM:
                 **fallback_kwargs,
             )
             fallback._cli_provider = None  # prevent infinite fallback loop
-            return fallback.chat(
-                prompt, system=system, temperature=temperature, **kwargs
-            )
+            return fallback.chat(prompt, system=system, temperature=temperature, **kwargs)
 
         # Native SDK call — this branch is ALWAYS metered (a real API provider;
         # CLI/subscription providers returned above). Enforce the daily metered-spend
@@ -340,9 +333,7 @@ class LLM:
                     "cached_tokens": None,
                 }
 
-                trace.set_response(
-                    {"content": content, "usage": usage, "latency": latency}
-                )
+                trace.set_response({"content": content, "usage": usage, "latency": latency})
 
                 return Response(
                     content=content,
@@ -357,9 +348,7 @@ class LLM:
                 trace.set_error(e)
                 raise
 
-    def stream(
-        self, prompt: str, system: Optional[str] = None, **kwargs
-    ) -> Iterator[str]:
+    def stream(self, prompt: str, system: Optional[str] = None, **kwargs) -> Iterator[str]:
         """Stream response chunks."""
         from .spend_guard import enforce_daily_cap
 
@@ -450,9 +439,7 @@ def chat(
         lite=kwargs.get("lite"),
         api_only=api_only,
     )
-    kwargs.update(
-        auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode)
-    )
+    kwargs.update(auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode))
     kwargs["auth"] = resolved_auth
     # Pull init-time fields out so LLM.__init__ doesn't see them as **kwargs
     # carried into self.kwargs (timeout/max_tokens/reasoning_effort/response_format
@@ -507,7 +494,7 @@ def batch(
 
 def batch_submit(
     input_file: str,
-    model: str = "gemini-3-flash-preview",
+    model: str = "gemini-3.8-flash",
     display_name: Optional[str] = None,
 ) -> str:
     """Submit a Gemini batch job from a JSONL file. Returns job name."""

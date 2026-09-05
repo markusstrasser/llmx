@@ -32,17 +32,18 @@ uv tool install --editable /path/to/llmx
 
 ```bash
 # Model auto-infers provider
-llmx -m gpt-5.6-sol "Explain Python"
+llmx -m gpt-6-astra "Explain Python"
 llmx -m claude-opus-5 "Write code"          # → claude-cli subscription
+llmx -m claude-fable-5-1 "Hard synthesis"   # Fable 5.1, same claude-cli transport
 llmx -m kimi-k3 "Complex task"
 llmx -m cerebras/qwen-3.8-27b -e none "Fast coding"
 
 # Pipe / files as context (repeatable -f concatenates with === File: path ===)
 cat code.py | llmx -m claude-opus-5 "Review this"
-llmx chat -f a.md -f b.md -m gpt-5.6-sol "Synthesize"
+llmx chat -f a.md -f b.md -m gpt-6-astra "Synthesize"
 
 # Subscription routes (OAuth / pool — preferred for Claude + GPT batch work)
-llmx chat --subscription -m gpt-5.6-sol "Quick task"
+llmx chat --subscription -m gpt-6-astra "Quick task"
 llmx chat --subscription -m claude-opus-5 "Review this"
 
 # Workspace agent: caller cwd + project rules + native CLI tools
@@ -60,7 +61,7 @@ llmx chat --auth api -p openai -m gpt-5.6-luna "cheap extract"
 llmx -p anthropic-direct -m claude-opus-5 "metered Claude API (opt-in)"
 
 # Effort / timeout / output
-llmx -m gpt-5.6-sol -e max --timeout 3600 -o out.md "Hard task"
+llmx -m gpt-6-astra -e max --timeout 3600 -o out.md "Hard task"
 llmx -m gemini-3.5-flash -e high "Hard task"
 llmx --fast "Quick question"          # Gemini Flash + low effort
 llmx --search "Latest on fusion"      # Google grounding
@@ -266,7 +267,9 @@ llmx chat --subscription -m claude-opus-5 …
 
 **Other**
 
-- GPT-5.6 suite: `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`; effort includes `max`.
+- GPT-6 Astra (`gpt-6-astra`, alias `gpt-6`): default OpenAI / Codex subscription model. Effort `low`…`max`; `none`/`minimal` map to `low`.
+- GPT-5.6 suite remains a named cost-tier pin: `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`.
+- Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli; `claude-fable-5` stays an explicit prior pin.
 - Grok 4.5 via Cursor subscription: use an exact live slug such as
   `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
   variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.

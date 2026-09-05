@@ -1,7 +1,7 @@
 """CLI commands for Gemini Batch API.
 
 Usage:
-    llmx batch submit prompts.jsonl -m gemini-3-flash-preview
+    llmx batch submit prompts.jsonl -m gemini-3.8-flash
     llmx batch submit prompts.jsonl --wait -o results.jsonl
     llmx batch status batches/abc123
     llmx batch get batches/abc123 -o results.jsonl
@@ -25,11 +25,13 @@ def batch_group():
 
 @batch_group.command("submit")
 @click.argument("input_file", type=click.Path(exists=True))
-@click.option("-m", "--model", default="gemini-3-flash-preview", help="Model (default: gemini-3-flash-preview)")
+@click.option("-m", "--model", default="gemini-3.8-flash", help="Model (default: gemini-3.8-flash)")
 @click.option("--wait", is_flag=True, help="Wait for completion and print results")
 @click.option("-o", "--output", help="Output file for results (JSONL)")
 @click.option("--name", "display_name", help="Human-readable job name")
-@click.option("--poll-interval", type=int, default=30, help="Poll interval in seconds (default: 30)")
+@click.option(
+    "--poll-interval", type=int, default=30, help="Poll interval in seconds (default: 30)"
+)
 @click.option("--debug", is_flag=True, help="Debug logging")
 def submit_cmd(input_file, model, wait, output, display_name, poll_interval, debug):
     """Submit a batch job from a JSONL file.

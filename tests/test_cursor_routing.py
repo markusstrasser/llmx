@@ -15,6 +15,7 @@ def test_cursor_prefix_overrides_substring_families() -> None:
         "cursor/deepseek-v3",
         "cursor/claude-opus-4-8",
         "cursor/gpt-5.6-sol",
+        "cursor/gpt-6-astra",
     ):
         assert infer(model) == "cursor", f"{model} must route to cursor"
 
@@ -60,6 +61,7 @@ def test_non_cursor_models_keep_native_routes() -> None:
         "minimax-m3": "minimax",
         "qwen-3": "cerebras",
         "gpt-5.6-sol": "openai",
+        "gpt-6-astra": "openai",
         "claude-opus-4-8": "anthropic",
         "deepseek-v3": "deepseek",
         "openrouter/x": "openrouter",

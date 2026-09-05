@@ -39,6 +39,20 @@ class TestEffortNormalize(unittest.TestCase):
         self.assertEqual(applied, "max")
         self.assertFalse(warns)
 
+    def test_api_max_passthrough_astra(self):
+        applied, warns = map_effort_for_backend(
+            "max", transport="openai-api", provider="openai", model="gpt-6-astra"
+        )
+        self.assertEqual(applied, "max")
+        self.assertFalse(warns)
+
+    def test_none_maps_low_for_astra(self):
+        applied, warns = map_effort_for_backend(
+            "none", transport="openai-api", provider="openai", model="gpt-6-astra"
+        )
+        self.assertEqual(applied, "low")
+        self.assertTrue(warns)
+
     def test_codex_max_passthrough_gpt56(self):
         applied, _ = map_effort_for_backend(
             "max", transport="codex-cli", provider="openai", model="gpt-5.6-terra"
@@ -53,6 +67,23 @@ class TestEffortNormalize(unittest.TestCase):
 
 
 class TestAstraDispatch(unittest.TestCase):
+    def test_openai_default_is_astra(self):
+        from llmx.providers import PROVIDER_CONFIGS, get_model_name
+        from llmx.usage_report import PRICING
+
+        self.assertEqual(PROVIDER_CONFIGS["openai"]["model"], "gpt-6-astra")
+        self.assertEqual(get_model_name("openai"), "gpt-6-astra")
+        self.assertEqual(PRICING["gpt-6-astra"], (10.0, 50.0))
+
+    def test_google_default_is_gemini_38_flash(self):
+        from llmx.providers import PROVIDER_CONFIGS, get_model_name
+        from llmx.usage_report import PRICING
+
+        self.assertEqual(PROVIDER_CONFIGS["google"]["model"], "gemini-3.8-flash")
+        self.assertEqual(PROVIDER_CONFIGS["google"]["flash_model"], "gemini-3.8-flash")
+        self.assertEqual(get_model_name("google"), "gemini-3.8-flash")
+        self.assertEqual(PRICING["gemini-3.8-flash"], (0.75, 3.75))
+
     def test_explicit_subscription_and_api_report_applied_effort(self):
         from unittest.mock import patch
 

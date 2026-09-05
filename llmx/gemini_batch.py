@@ -22,7 +22,7 @@ from typing import Optional
 from .logger import logger
 
 
-DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 # Terminal states for polling
 TERMINAL_STATES = {
@@ -42,8 +42,10 @@ def _get_api_key() -> str:
     # (spend_guard.enforce_gemini_policy) must fire here too — otherwise batch
     # would silently resolve the scoped key and bill Gemini around the policy.
     from .spend_guard import enforce_gemini_policy
+
     enforce_gemini_policy("gemini-batch")
     from .providers import check_api_key as _provider_check, _get_api_key as _provider_get
+
     _provider_check("google")  # raises RuntimeError with hint if missing
     key = _provider_get("google")
     if not key:
@@ -53,6 +55,7 @@ def _get_api_key() -> str:
 
 def _get_client():
     from google import genai
+
     return genai.Client(api_key=_get_api_key())
 
 
@@ -66,6 +69,7 @@ def _strip_model_prefix(model: str) -> str:
 @dataclass
 class BatchRequest:
     """A single request within a batch."""
+
     key: str
     prompt: str
     system: Optional[str] = None
@@ -75,6 +79,7 @@ class BatchRequest:
 @dataclass
 class BatchResult:
     """Result for a single batch request."""
+
     key: str
     content: Optional[str] = None
     error: Optional[str] = None
@@ -94,12 +99,14 @@ def parse_input_jsonl(path: str) -> list[BatchRequest]:
             if not line:
                 continue
             obj = json.loads(line)
-            requests.append(BatchRequest(
-                key=obj.get("key", str(i)),
-                prompt=obj["prompt"],
-                system=obj.get("system"),
-                model=obj.get("model"),
-            ))
+            requests.append(
+                BatchRequest(
+                    key=obj.get("key", str(i)),
+                    prompt=obj["prompt"],
+                    system=obj.get("system"),
+                    model=obj.get("model"),
+                )
+            )
     return requests
 
 

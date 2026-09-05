@@ -35,9 +35,19 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-3.5-flash": (1.50, 9.0),
     # 2026-07-21 launch: 3.6 Flash supersedes 3.5 Flash at a LOWER output rate
     # ($7.50 vs $9.00) with ~17% fewer output tokens claimed.
+    # Gemini 3.8 Flash (ai.google.dev/gemini-api/docs/pricing, 2026-09-05):
+    # intro $0.75/$3.75 through 2026-12-31; standard $1.50/$7.50 from 2027-01-01.
+    # 3.7 Flash is the same intro rate. Register both so the spend guard prices them.
+    "gemini-3.8-flash": (0.75, 3.75),
+    "gemini-3.7-flash": (0.75, 3.75),
     "gemini-3.6-flash": (1.50, 7.50),
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-pro-preview": (1.25, 10.0),
+    # GPT-6 Astra (developers.openai.com/api/docs/models/gpt-6-astra, 2026-09-05):
+    # $10/$50 short context; 2x/1.5x above 272K input. Fast mode is 2x Standard.
+    # Alias gpt-6 → astra. Subscription (codex-cli) remains $0 against the ChatGPT plan.
+    "gpt-6-astra": (10.0, 50.0),
+    "gpt-6": (10.0, 50.0),
     # GPT-5.6 suite (developers.openai.com/api/docs/pricing, GA 2026-07-09;
     # price cut 2026-07-30: Luna -80% to $0.20/$1.20, Terra -20% to $2/$12, Sol unchanged —
     # openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6)
@@ -87,9 +97,7 @@ PRICING: dict[str, tuple[float, float]] = {
 # Shadow prices for the Cursor subscription lanes ($0 billed); 4.6 mirrors 4.5
 # until xAI publishes its own list price.
 for cursor_model in CURSOR_GROK_MODELS:
-    PRICING[cursor_model] = (
-        (4.0, 18.0) if cursor_model.endswith("-fast") else (2.0, 6.0)
-    )
+    PRICING[cursor_model] = (4.0, 18.0) if cursor_model.endswith("-fast") else (2.0, 6.0)
 
 # Context-window limit (max input tokens) per model. Static capability, not from the
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
@@ -99,9 +107,13 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gemini-3.1-flash-lite-preview": 1_000_000,
     "gemini-3.1-flash-lite": 1_000_000,
     "gemini-3.5-flash": 1_000_000,
+    "gemini-3.8-flash": 1_000_000,
+    "gemini-3.7-flash": 1_000_000,
     "gemini-3.6-flash": 1_000_000,
     "gemini-3.5-flash-lite": 1_000_000,
     "gemini-3.1-pro-preview": 1_000_000,
+    "gpt-6-astra": 1_050_000,
+    "gpt-6": 1_050_000,
     "gpt-5.6-sol": 1_050_000,
     "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
@@ -208,9 +220,7 @@ def summarize(
     if not groups:
         return f"No records since {floor}" + (f" for model {model}" if model else "")
 
-    rows = sorted(
-        groups.items(), key=lambda kv: (kv[1]["cost"], kv[1]["calls"]), reverse=True
-    )
+    rows = sorted(groups.items(), key=lambda kv: (kv[1]["cost"], kv[1]["calls"]), reverse=True)
     w = min(40, max(len(k) for k, _ in rows))
     show_ctx = by == "model"
     out_lines = [

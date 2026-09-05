@@ -159,13 +159,14 @@ def _research_mcp_args() -> list[str]:
 # Lite mode is restricted to frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
-# research-mcp only); gpt-5.6-* routes via codex-cli. gemini-3-flash-preview
+# research-mcp only); gpt-6-astra and gpt-5.6-* route via codex-cli. gemini-3-flash-preview
 # stays allowed for back-compat but no longer has a CLI backend — with the
 # free gemini-cli retired (2026-06-18) it routes to the paid Gemini API and
 # --lite only contributes the no-tools prompt prefix (no cwd/MCP stripping,
 # no cost saving) for Google.
 LITE_ALLOWED_MODELS = {
     "gpt-6-astra",
+    "gpt-6",  # alias → astra
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -295,9 +296,7 @@ def needs_api_fallback(
     return None
 
 
-def subscription_route(
-    *, auth: Optional[str] = None, lite: Optional[str] = None
-) -> bool:
+def subscription_route(*, auth: Optional[str] = None, lite: Optional[str] = None) -> bool:
     """True when the caller chose subscription billing (CLI OAuth / app sub)."""
     return auth == "subscription" or lite in _LITE_MODES
 
@@ -344,9 +343,7 @@ def _lite_cwd(lite: str) -> str:
     pushing those into a user-owned dir.
     """
     if lite not in _LITE_MODES:
-        raise LiteEnvironmentError(
-            f"--lite {lite!r} unknown. Supported: {list(_LITE_MODES)}"
-        )
+        raise LiteEnvironmentError(f"--lite {lite!r} unknown. Supported: {list(_LITE_MODES)}")
     skel = _LITE_PACKAGE_SKEL / lite
     if not skel.is_dir():  # only fires on broken installs
         raise LiteEnvironmentError(
@@ -414,9 +411,7 @@ def _record_dispatch_attribution(*, cli_cwd: str, caller_cwd: str) -> None:
         try:
             raw = _DISPATCH_ATTRIBUTION.read_text(encoding="utf-8").splitlines()
             if len(raw) > 5000:
-                _DISPATCH_ATTRIBUTION.write_text(
-                    "\n".join(raw[-4000:]) + "\n", encoding="utf-8"
-                )
+                _DISPATCH_ATTRIBUTION.write_text("\n".join(raw[-4000:]) + "\n", encoding="utf-8")
         except OSError:
             pass
     except OSError as exc:
@@ -466,10 +461,7 @@ def _read_codex_rollout_usage(
                 except json.JSONDecodeError:
                     continue
                 payload = event.get("payload") if isinstance(event, dict) else None
-                if (
-                    not isinstance(payload, dict)
-                    or payload.get("type") != "token_count"
-                ):
+                if not isinstance(payload, dict) or payload.get("type") != "token_count":
                     continue
                 info = payload.get("info") or {}
                 usage = info.get("last_token_usage") or info.get("total_token_usage")
@@ -614,9 +606,7 @@ def _classify_cli_failure(detail: str, status: int = 0) -> CliBackendFailure:
         or ("quota" in normalized and not has_rate_limit_marker)
     ):
         kind = QuotaError
-    elif status in {408, 504} or any(
-        marker in normalized for marker in _TIMEOUT_MARKERS
-    ):
+    elif status in {408, 504} or any(marker in normalized for marker in _TIMEOUT_MARKERS):
         kind = TimeoutError_
     elif status == 404 or any(marker in normalized for marker in _MODEL_MARKERS):
         kind = ModelError
@@ -653,9 +643,7 @@ def _claude_payload_reports_error(stdout: str) -> bool:
     if isinstance(events, dict):
         events = [events]
     return isinstance(events, list) and any(
-        isinstance(event, dict)
-        and event.get("type") == "result"
-        and bool(event.get("is_error"))
+        isinstance(event, dict) and event.get("type") == "result" and bool(event.get("is_error"))
         for event in events
     )
 
@@ -678,14 +666,12 @@ def _claude_final_assistant_text(
         message = event.get("message")
         if not isinstance(message, dict):
             return None, (
-                "Claude CLI verbose assistant event "
-                f"{event_index} contained no message object"
+                f"Claude CLI verbose assistant event {event_index} contained no message object"
             )
         message_id = message.get("id")
         if not isinstance(message_id, str) or not message_id:
             return None, (
-                "Claude CLI verbose assistant event "
-                f"{event_index} contained no message id"
+                f"Claude CLI verbose assistant event {event_index} contained no message id"
             )
         assistant_messages.append((event_index, message_id, message))
 
@@ -700,8 +686,7 @@ def _claude_final_assistant_text(
         content = message.get("content")
         if not isinstance(content, list):
             return None, (
-                "Claude CLI verbose assistant event "
-                f"{event_index} contained no content block list"
+                f"Claude CLI verbose assistant event {event_index} contained no content block list"
             )
         for block_index, block in enumerate(content):
             if not isinstance(block, dict):
@@ -1227,9 +1212,7 @@ def cli_chat(
                 note_prefix=f"codex-cli timed out after {timeout}s",
                 error="timeout",
             )
-            logger.info(
-                f"[cli→api] {binary} timed out after {timeout}s (killed process group)"
-            )
+            logger.info(f"[cli→api] {binary} timed out after {timeout}s (killed process group)")
             return CliBackendFailure(
                 kind=TimeoutError_,
                 status=0,
@@ -1240,9 +1223,7 @@ def cli_chat(
             if binary == "claude" and _claude_payload_reports_error(stdout):
                 parsed_result, _ = _parse_claude_json(stdout)
                 if isinstance(parsed_result, CliBackendFailure):
-                    logger.info(
-                        f"[cli] claude failed: {parsed_result.fallback_reason()}"
-                    )
+                    logger.info(f"[cli] claude failed: {parsed_result.fallback_reason()}")
                     return parsed_result
             stderr_hint = stderr.strip()[:300] if stderr else ""
             stdout_hint = stdout.strip()[:200] if stdout else ""

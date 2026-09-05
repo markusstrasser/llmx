@@ -28,32 +28,32 @@ from .logger import logger
 
 # Supported media types
 IMAGE_MIMES = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.heic': 'image/heic',
-    '.heif': 'image/heif',
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 }
 
 VIDEO_MIMES = {
-    '.mp4': 'video/mp4',
-    '.mpeg': 'video/mpeg',
-    '.mpg': 'video/mpg',
-    '.mov': 'video/mov',
-    '.avi': 'video/avi',
-    '.webm': 'video/webm',
-    '.wmv': 'video/wmv',
-    '.flv': 'video/x-flv',
-    '.3gp': 'video/3gpp',
+    ".mp4": "video/mp4",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpg",
+    ".mov": "video/mov",
+    ".avi": "video/avi",
+    ".webm": "video/webm",
+    ".wmv": "video/wmv",
+    ".flv": "video/x-flv",
+    ".3gp": "video/3gpp",
 }
 
 # Size thresholds
 INLINE_MAX_SIZE = 20 * 1024 * 1024  # 20MB for inline
 VIDEO_INLINE_MAX = 100 * 1024 * 1024  # 100MB for video inline
 
-DEFAULT_VISION_MODEL = "gemini-3-flash-preview"
+DEFAULT_VISION_MODEL = "gemini-3.8-flash"
 
 
 class UnsupportedMediaError(Exception):
@@ -69,19 +69,19 @@ def get_mime_type(file_path: Path) -> tuple[str, str]:
     suffix = file_path.suffix.lower()
 
     if suffix in IMAGE_MIMES:
-        return IMAGE_MIMES[suffix], 'image'
+        return IMAGE_MIMES[suffix], "image"
     if suffix in VIDEO_MIMES:
-        return VIDEO_MIMES[suffix], 'video'
+        return VIDEO_MIMES[suffix], "video"
 
     # Fallback to mimetypes
     mime, _ = mimetypes.guess_type(str(file_path))
     if mime:
-        if mime.startswith('image/'):
-            return mime, 'image'
-        if mime.startswith('video/'):
-            return mime, 'video'
+        if mime.startswith("image/"):
+            return mime, "image"
+        if mime.startswith("video/"):
+            return mime, "video"
 
-    return 'application/octet-stream', 'unknown'
+    return "application/octet-stream", "unknown"
 
 
 def resolve_media(media: list) -> list[tuple[Path, str, str, int]]:
@@ -112,7 +112,7 @@ def build_google_contents(media: list, prompt: str, client) -> list:
 
     contents = []
     for path, mime, category, size in resolve_media(media):
-        too_big = size > (VIDEO_INLINE_MAX if category == 'video' else INLINE_MAX_SIZE)
+        too_big = size > (VIDEO_INLINE_MAX if category == "video" else INLINE_MAX_SIZE)
         if too_big:
             logger.info(f"Uploading {path.name} via Files API...")
             contents.append(client.files.upload(file=str(path)))
@@ -126,7 +126,7 @@ def build_openai_content(media: list, prompt: str) -> list:
     """OpenAI-compatible multimodal `content`: text part + base64 image parts."""
     content: list = [{"type": "text", "text": prompt}]
     for path, mime, category, size in resolve_media(media):
-        if category != 'image':
+        if category != "image":
             raise UnsupportedMediaError(
                 f"{path.name} is {category}; OpenAI-compatible endpoints accept images only. "
                 f"Route video to Gemini (-p google)."
@@ -137,10 +137,12 @@ def build_openai_content(media: list, prompt: str) -> list:
                 f"inline limit for this provider. Route to Gemini (-p google), which can upload it."
             )
         b64 = base64.b64encode(path.read_bytes()).decode()
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            }
+        )
     return content
 
 
