@@ -23,6 +23,7 @@ from .providers import (
     get_model_restriction,
     infer_provider_from_model,
     _auto_upgrade_model,
+    _KNOWN_MODELS,
 )
 from .model_ids import resolve_grok_subscription_slug
 
@@ -341,7 +342,7 @@ def collect_routing_mirror() -> dict[str, Any]:
         cli = configured_cli_provider(logical, lite="bare")
         logical_aliases[logical] = {
             "lite_bare_cli": cli,
-            "lite_bare_available": binary_available(logical) if cli else False,
+            "lite_bare_available": binary_available(cli) if cli else False,
         }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -352,6 +353,7 @@ def collect_routing_mirror() -> dict[str, Any]:
         "mode_surface": "Use --mode chat|agent. chat=one-shot req/res; agent=CLI tools/MCP loop (subscription only). --lite bare|research are deprecated aliases.",
         "logical_subscription_routes": logical_aliases,
         "lite_allowed_models": sorted(LITE_ALLOWED_MODELS),
+        "known_models": {provider: list(models) for provider, models in _KNOWN_MODELS.items()},
         "effort_aliases": sorted(CANONICAL_EFFORTS),
         "note": (
             "Transport facts only. Task-class economics and cosigner policy live in "

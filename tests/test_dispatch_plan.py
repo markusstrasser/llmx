@@ -67,6 +67,31 @@ class TestEffortNormalize(unittest.TestCase):
 
 
 class TestAstraDispatch(unittest.TestCase):
+    def test_mirror_exposes_known_models_from_canonical_registry(self):
+        from llmx.dispatch_plan import collect_routing_mirror
+        from llmx.providers import _KNOWN_MODELS
+
+        known = collect_routing_mirror()["known_models"]
+        self.assertEqual(known, _KNOWN_MODELS)
+        self.assertIn("gpt-6-astra", known["openai"])
+        self.assertIn("gpt-6", known["openai"])
+        self.assertIn("gemini-3.8-flash", known["google"])
+        self.assertIn("claude-fable-5-1", known["anthropic-direct"])
+
+    def test_subscription_mirror_checks_the_resolved_cli(self):
+        from unittest.mock import patch
+
+        from llmx.dispatch_plan import collect_routing_mirror
+
+        for installed in (False, True):
+            with self.subTest(installed=installed), patch(
+                "shutil.which", side_effect=lambda binary: f"/bin/{binary}" if installed else None
+            ):
+                routes = collect_routing_mirror()["logical_subscription_routes"]
+            for provider in ("openai", "anthropic", "cursor"):
+                self.assertEqual(routes[provider]["lite_bare_available"], installed)
+            self.assertFalse(routes["google"]["lite_bare_available"])
+
     def test_openai_default_is_astra(self):
         from llmx.providers import PROVIDER_CONFIGS, get_model_name
         from llmx.usage_report import PRICING
