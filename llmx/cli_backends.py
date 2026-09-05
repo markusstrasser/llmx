@@ -165,6 +165,7 @@ def _research_mcp_args() -> list[str]:
 # --lite only contributes the no-tools prompt prefix (no cwd/MCP stripping,
 # no cost saving) for Google.
 LITE_ALLOWED_MODELS = {
+    "gpt-6-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -894,12 +895,14 @@ def cli_chat(
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
             cmd = ["codex", "exec", "--skip-git-repo-check"]
             if mode == "agent" and not lite:
-                cmd.append("--full-auto")
+                cmd.extend(["-s", "workspace-write"])
+            else:
+                cmd.extend(["-s", "read-only"])
             if lite:
                 # Lite mode: skip config.toml entirely so codex doesn't re-enable
                 # bundled plugins on each launch. Inject MCPs via -c overrides.
-                # --ignore-rules (codex 0.122, PR #18646) strips project AGENTS.md
-                # in addition to user config — pairs with empty cwd.
+                # --ignore-rules skips execpolicy .rules files. The isolated
+                # cwd, not that flag, avoids caller-project AGENTS.md autoload.
                 cmd.append("--ignore-user-config")
                 cmd.append("--ignore-rules")
                 if lite == "research":
@@ -925,14 +928,17 @@ def cli_chat(
             }:
                 from .dispatch_plan import resolve_effort
 
-                codex_effort, _ = resolve_effort(
+                codex_effort, effort_warnings = resolve_effort(
                     reasoning_effort,
                     transport="codex-cli",
                     provider="openai",
                     model=model,
                 )
+                for warning in effort_warnings:
+                    logger.warn(warning)
                 if codex_effort:
                     cmd.extend(["-c", f'model_reasoning_effort="{codex_effort}"'])
+                    reasoning_effort = codex_effort
             if schema:
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".json", delete=False, encoding="utf-8"

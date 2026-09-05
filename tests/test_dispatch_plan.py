@@ -52,6 +52,39 @@ class TestEffortNormalize(unittest.TestCase):
         self.assertEqual(applied, "xhigh")
 
 
+class TestAstraDispatch(unittest.TestCase):
+    def test_explicit_subscription_and_api_report_applied_effort(self):
+        from unittest.mock import patch
+
+        from llmx.cli_backends import lite_model_allowed
+        from llmx.dispatch_plan import build_dispatch_plan
+
+        self.assertTrue(lite_model_allowed("gpt-6-astra"))
+        for auth, transport in (("subscription", "codex-cli"), ("api", "openai-api")):
+            for requested in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+                expected = "low" if requested in {"none", "minimal"} else requested
+                with self.subTest(auth=auth, requested=requested):
+                    with patch("llmx.dispatch_plan.binary_available", return_value=True):
+                        plan = build_dispatch_plan(
+                            provider="openai",
+                            model="gpt-6-astra",
+                            reasoning_effort=requested,
+                            timeout=300,
+                            lite=None,
+                            mode=None,
+                            auth=auth,
+                            subscription=False,
+                            api_only=None,
+                            use_old=False,
+                        )
+                    self.assertEqual(plan.transport, transport)
+                    self.assertEqual(plan.model, "gpt-6-astra")
+                    self.assertEqual(plan.requested_effort, requested)
+                    self.assertEqual(plan.effort_applied, expected)
+                    if requested != expected:
+                        self.assertTrue(any("mapped to low" in w for w in plan.effort_warnings))
+
+
 class TestDefaultTimeout(unittest.TestCase):
     def test_chat_defaults_preserve_short_low_effort_calls(self):
         self.assertEqual(default_timeout_for(mode="chat", effort="low"), 300)

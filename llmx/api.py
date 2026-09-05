@@ -14,6 +14,7 @@ from .providers import (
     _get_api_key,
     _google_chat,
     _openai_chat,
+    _openai_request_parameters,
     RateLimitError,
     check_api_key,
     get_model_name,
@@ -360,13 +361,17 @@ class LLM:
         self, prompt: str, system: Optional[str] = None, **kwargs
     ) -> Iterator[str]:
         """Stream response chunks."""
+        from .spend_guard import enforce_daily_cap
+
+        enforce_daily_cap(self.model)
+        call_kwargs = {**self.kwargs, **kwargs}
         temp = self.temperature
 
         if self.provider == "google":
             from google import genai
             from google.genai import types
 
-            timeout = kwargs.get("timeout", 300)
+            timeout = call_kwargs.get("timeout", 300)
             client = genai.Client(
                 http_options=types.HttpOptions(
                     timeout=max(timeout * 1000, 10_000) if timeout else 300_000
@@ -386,7 +391,7 @@ class LLM:
 
             base_url = OPENAI_COMPAT_URLS.get(self.provider)
             api_key = _get_api_key(self.provider)
-            timeout = kwargs.get("timeout", 300)
+            timeout = call_kwargs.get("timeout", 300)
 
             client = OpenAI(
                 api_key=api_key,
@@ -406,8 +411,13 @@ class LLM:
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=temp,
                 stream=True,
+                **_openai_request_parameters(
+                    model=model,
+                    provider=self.provider,
+                    temperature=temp,
+                    reasoning_effort=call_kwargs.get("reasoning_effort"),
+                ),
             )
 
             for chunk in response:

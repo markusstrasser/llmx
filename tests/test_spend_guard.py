@@ -100,6 +100,24 @@ class TestSpendGuard(unittest.TestCase):
         self.assertEqual(cm.exception.exit_code, 7)
         self.assertIn("unpriced", str(cm.exception).lower())
 
+    def test_astra_python_chat_and_stream_refuse_before_sdk_construction(self):
+        from unittest.mock import patch
+
+        from llmx.api import LLM
+
+        with (
+            patch("llmx.api.check_api_key"),
+            patch("llmx.providers.OpenAI") as chat_client,
+            patch("openai.OpenAI") as stream_client,
+        ):
+            llm = LLM(provider="openai", model="gpt-6-astra", auth="api")
+            with self.assertRaisesRegex(SpendCapError, "unpriced"):
+                llm.chat("hi")
+            with self.assertRaisesRegex(SpendCapError, "unpriced"):
+                list(llm.stream("hi"))
+        chat_client.assert_not_called()
+        stream_client.assert_not_called()
+
     def test_research_path_skips_unpriced_but_enforces_cap(self):
         empty = self._ledger()
         # unpriced agent model allowed under cap when check_model_priced=False

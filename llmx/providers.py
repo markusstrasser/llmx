@@ -176,6 +176,14 @@ def raise_cli_backend_failure(
 
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
+    # Astra plain-text Chat Completions contract; tool calls require Responses.
+    # Pricing/admission remains governed independently by the spend guard.
+    "gpt-6-astra": {
+        "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
+        "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
+    },
     # OpenAI GPT-5.6 suite (GA 2026-07-09): Sol/Terra/Luna. Effort includes `max`
     # (beyond xhigh). Pro quality is reasoning.mode=pro on the same model id, not a
     # separate slug (API docs). Alias `gpt-5.6` → sol via _MODEL_UPGRADES.
@@ -1353,6 +1361,40 @@ def openrouter_reasoning_body(reasoning_effort: Optional[str]) -> Optional[dict]
     return dict(body)
 
 
+def _openai_request_parameters(
+    *, model: str, provider: str, temperature: float, reasoning_effort: Optional[str]
+) -> dict:
+    """Shared sampling/reasoning contract for OpenAI-compatible chat and stream."""
+    restriction = get_model_restriction(model) if provider == "openai" else None
+    if restriction and restriction.get("reasoning_effort_aliases") and reasoning_effort:
+        # The dispatch plan and direct Python callers must apply the same mapping.
+        if reasoning_effort not in restriction["reasoning_effort_levels"]:
+            from .dispatch_plan import resolve_effort
+
+            reasoning_effort, warnings = resolve_effort(
+                reasoning_effort, transport="openai-api", provider=provider, model=model
+            )
+            for warning in warnings:
+                logger.warn(warning)
+
+    parameters = {}
+    # Anthropic's compatibility endpoint also rejects temperature.
+    if provider != "anthropic-direct":
+        parameters["temperature"] = temperature
+    if reasoning_effort:
+        if provider == "openrouter":
+            body = openrouter_reasoning_body(reasoning_effort)
+            parameters["extra_body"] = {"reasoning": body}
+            logger.info(
+                f"openrouter reasoning: {json.dumps(body)} (from effort={reasoning_effort})"
+            )
+        else:
+            parameters["reasoning_effort"] = reasoning_effort
+    for parameter in (restriction or {}).get("unsupported_parameters", ()):
+        parameters.pop(parameter, None)
+    return parameters
+
+
 def _openai_chat(
     prompt,
     model,
@@ -1408,10 +1450,15 @@ def _openai_chat(
     messages.append({"role": "user", "content": user_content})
 
     kwargs = {"model": model, "messages": messages}
-    # claude-opus-4-8 (and other Anthropic reasoning models) deprecate `temperature`
-    # on the OpenAI-compat endpoint — sending it 400s. Omit for anthropic-direct.
-    if provider != "anthropic-direct":
-        kwargs["temperature"] = temperature
+    kwargs.update(
+        _openai_request_parameters(
+            model=model,
+            provider=provider,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
+    )
+    reasoning_effort = kwargs.get("reasoning_effort", reasoning_effort)
     # On reasoning models, max_completion_tokens bounds reasoning AND visible
     # output together. A user-set --max-tokens (e.g. 32K) on xhigh is silently
     # consumed entirely by reasoning, yielding empty content with
@@ -1429,15 +1476,6 @@ def _openai_chat(
             )
         else:
             kwargs["max_completion_tokens"] = max_tokens
-    if reasoning_effort:
-        if provider == "openrouter":
-            body = openrouter_reasoning_body(reasoning_effort)
-            kwargs.setdefault("extra_body", {})["reasoning"] = body
-            logger.info(
-                f"openrouter reasoning: {json.dumps(body)} (from effort={reasoning_effort})"
-            )
-        else:
-            kwargs["reasoning_effort"] = reasoning_effort
     if schema:
         kwargs["response_format"] = {
             "type": "json_schema",

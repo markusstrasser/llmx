@@ -49,6 +49,10 @@ class _CapturingClient:
         self._calls.append(kwargs)
         if self._error is not None:
             raise self._error
+        if kwargs.get("stream"):
+            return iter([SimpleNamespace(choices=[SimpleNamespace(
+                delta=SimpleNamespace(content="OK"), finish_reason="stop",
+            )])])
         return _fake_response()
 
 
@@ -66,8 +70,14 @@ class _Capture:
                 "llmx.providers.OpenAI",
                 lambda **_: _CapturingClient(self.calls, self._error),
             ),
+            patch(
+                "openai.OpenAI",
+                lambda **_: _CapturingClient(self.calls, self._error),
+            ),
             patch("llmx.providers._get_api_key", return_value="test-key"),
             patch("llmx.providers.check_api_key", return_value=None),
+            patch("llmx.api._get_api_key", return_value="test-key"),
+            patch("llmx.api.check_api_key", return_value=None),
             patch("llmx.spend_guard.enforce_daily_cap", return_value=None),
             patch("llmx.usage_log.log_usage", return_value=None),
         ]
@@ -92,7 +102,7 @@ class _Capture:
         return self.body.get("extra_body", {}).get("reasoning")
 
 
-def _chat(provider, model, effort, temperature=0.7):
+def _chat(provider, model, effort, temperature=0.7, stream=False):
     """Drive the FULL dispatch path (llmx.providers.chat), not just the builder.
 
     The regression lived upstream of the request builder, so a test that called
@@ -106,7 +116,7 @@ def _chat(provider, model, effort, temperature=0.7):
         model=model,
         temperature=temperature,
         reasoning_effort=effort,
-        stream=False,
+        stream=stream,
         debug=False,
         json_output=False,
         timeout=30,
@@ -215,6 +225,44 @@ class TestOpenrouterRequestBody(unittest.TestCase):
                 _chat_openrouter("low")
         self.assertEqual(len(cap.calls), 1)  # one attempt, no field-dropping retry
         self.assertIn("reasoning", str(ctx.exception))
+
+
+class TestAstraRequestBody(unittest.TestCase):
+    def test_supported_effort_and_omitted_sampling_across_all_entrypoints(self):
+        from llmx.api import LLM
+
+        for entrypoint in ("providers.chat", "providers.stream", "LLM.chat", "LLM.stream"):
+            for requested in (None, "none", "minimal", "low", "medium", "high", "xhigh", "max"):
+                expected = "low" if requested in {"none", "minimal"} else requested
+                with self.subTest(entrypoint=entrypoint, requested=requested):
+                    with _Capture() as cap:
+                        if entrypoint.startswith("providers."):
+                            _chat("openai", "gpt-6-astra", requested,
+                                  stream=entrypoint.endswith("stream"))
+                        else:
+                            llm = LLM(provider="openai", model="gpt-6-astra", auth="api",
+                                      reasoning_effort=requested)
+                            if entrypoint.endswith("stream"):
+                                self.assertEqual(list(llm.stream("hi")), ["OK"])
+                            else:
+                                self.assertEqual(llm.chat("hi").content, "OK")
+                    self.assertEqual(cap.body.get("reasoning_effort"), expected)
+                    for parameter in ("temperature", "top_p", "top_logprobs", "logprobs"):
+                        self.assertNotIn(parameter, cap.body)
+                    self.assertEqual(cap.body["model"], "gpt-6-astra")
+
+    def test_python_call_effort_overrides_constructor_effort(self):
+        from llmx.api import LLM
+
+        for stream in (False, True):
+            with self.subTest(stream=stream), _Capture() as cap:
+                llm = LLM(provider="openai", model="gpt-6-astra", auth="api",
+                          reasoning_effort="max")
+                if stream:
+                    list(llm.stream("hi", reasoning_effort="minimal"))
+                else:
+                    llm.chat("hi", reasoning_effort="minimal")
+                self.assertEqual(cap.body["reasoning_effort"], "low")
 
 
 class TestOtherTransportsUnchanged(unittest.TestCase):

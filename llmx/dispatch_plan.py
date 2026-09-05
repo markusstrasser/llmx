@@ -18,7 +18,12 @@ from .cli_backends import (
     preferred_cli_provider,
     subscription_route,
 )
-from .providers import get_model_name, infer_provider_from_model, _auto_upgrade_model
+from .providers import (
+    get_model_name,
+    get_model_restriction,
+    infer_provider_from_model,
+    _auto_upgrade_model,
+)
 from .model_ids import resolve_grok_subscription_slug
 
 SCHEMA_VERSION = "llmx-routing.v1"
@@ -59,9 +64,11 @@ def map_effort_for_backend(
     warnings: list[str] = []
     e = effort.lower()
     model_l = (model or "").lower()
-    # GPT-5.6 suite natively supports effort=max (beyond xhigh). Older GPT-5.x
-    # and non-OpenAI API transports still map max → xhigh.
-    gpt56 = "gpt-5.6" in model_l
+    restriction = get_model_restriction(model_l) or {}
+    # Preserve the GPT-5.6 alias and consult the model contract for newer models.
+    native_max = "gpt-5.6" in model_l or "max" in restriction.get(
+        "reasoning_effort_levels", []
+    )
     # OpenRouter's effort ceiling is "high" — it has no xhigh/max tier — and the
     # effort travels as its native `reasoning` body object, not as a top-level
     # reasoning_effort string (providers.openrouter_reasoning_body). Mapping here
@@ -72,8 +79,12 @@ def map_effort_for_backend(
         if e in {"xhigh", "max"}:
             return "high", [f"effort {e} mapped to high for openrouter (its ceiling)"]
         return e, warnings
+    if provider == "openai" or transport == "codex-cli":
+        applied = restriction.get("reasoning_effort_aliases", {}).get(e, e)
+        if applied != e:
+            return applied, [f"effort {e} mapped to {applied} for {model}"]
     if transport.endswith("-api") or provider in {"openai", "google", "anthropic-direct"}:
-        if e == "max" and not gpt56:
+        if e == "max" and not native_max:
             return "xhigh", ["effort max mapped to xhigh for API transport"]
         return e, warnings
     if transport == "claude-cli":
@@ -92,8 +103,8 @@ def map_effort_for_backend(
             warnings.append(f"effort {e} mapped to {applied} for claude-cli")
         return applied, warnings
     if transport == "codex-cli":
-        # Codex: GPT-5.6 accepts max; older models map max → xhigh
-        if e == "max" and not gpt56:
+        # Codex preserves native max; older models map max → xhigh.
+        if e == "max" and not native_max:
             return "xhigh", ["effort max mapped to xhigh for codex-cli"]
         mapping = {
             "max": "max",
