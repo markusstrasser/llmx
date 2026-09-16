@@ -12,6 +12,8 @@ from llmx.api import LLM, Response
 from llmx.cli import cli
 from llmx.cli_backends import (
     CliBackendFailure,
+    _classify_cli_failure,
+    _cli_failure_detail,
     _parse_claude_json,
     cli_chat,
     resolve_cli_api_fallback,
@@ -41,6 +43,18 @@ MONTHLY_SPEND_FAILURE = CliBackendFailure(
     kind=QuotaError,
     status=429,
     detail=MONTHLY_SPEND_DETAIL,
+)
+CODEX_USAGE_LIMIT_ERROR = (
+    "ERROR: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit "
+    "https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 4:21 PM."
+)
+CODEX_USAGE_LIMIT_STDERR = (
+    "Reading additional input from stdin...\n"
+    "OpenAI Codex v0.153.4\n--------\n"
+    "workdir: /tmp/llmx-lite\nmodel: gpt-6-astra\nprovider: openai\napproval: never\n"
+    "sandbox: read-only\nreasoning effort: medium\nreasoning summaries: none\n"
+    "session id: 01a0aa42-d56f-76e3-a082-beb6642205f7\n--------\nuser\nhi\n\n"
+    f"{CODEX_USAGE_LIMIT_ERROR}\n{CODEX_USAGE_LIMIT_ERROR}\n"
 )
 TRUNCATED_MULTIBLOCK_JSON = json.dumps(
     [
@@ -164,6 +178,39 @@ class TestClaudeCliFailureParsing(unittest.TestCase):
                 self.assertEqual(result.status, status)
                 self.assertEqual(result.detail, detail)
                 self.assertIsNone(usage)
+
+
+class TestCodexCliFailureDetail(unittest.TestCase):
+    """Regression (2026-09-16): codex prints its banner before the error, and the head of
+    stderr hid a subscription usage limit behind a generic failure."""
+
+    def test_usage_limit_after_banner_is_typed_quota(self):
+        with (
+            patch("llmx.cli_backends.subprocess.Popen") as popen,
+            patch("llmx.cli_backends._codex_rollout_snapshot", return_value={}),
+            patch("llmx.cli_backends._latest_codex_rollout_usage", return_value=({}, None)),
+            patch("llmx.usage_log.log_usage"),
+        ):
+            process = popen.return_value
+            process.pid = 123
+            process.returncode = 1
+            process.communicate.return_value = ("", CODEX_USAGE_LIMIT_STDERR)
+            result = cli_chat("codex-cli", "hi", "gpt-6-astra", 30, mode="chat", lite="bare")
+
+        self.assertIsInstance(result, CliBackendFailure)
+        self.assertIs(result.kind, QuotaError)
+        self.assertIn("try again at 4:21 PM", result.detail)
+        self.assertNotIn("OpenAI Codex v", result.detail)
+        self.assertEqual(result.detail.count("hit your usage limit"), 1)
+
+    def test_detail_falls_back_to_tail_without_error_lines(self):
+        stderr = "OpenAI Codex v0.153.4\n" + "banner line\n" * 40 + "stream disconnected before completion"
+        self.assertTrue(_cli_failure_detail(stderr, "").endswith("stream disconnected before completion"))
+
+    def test_plan_limit_messages_classify_as_quota(self):
+        for detail in (CODEX_USAGE_LIMIT_ERROR, "You've hit your session limit · resets 3pm"):
+            with self.subTest(detail=detail):
+                self.assertIs(_classify_cli_failure(detail).kind, QuotaError)
 
 
 class TestLlmSubscriptionFallback(unittest.TestCase):

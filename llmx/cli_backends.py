@@ -583,6 +583,12 @@ def _latest_codex_rollout_usage(
 
 _QUOTA_MARKERS = (
     "billing",
+    # Subscription plan limits that reset on a clock. codex-cli prints "You've hit your usage
+    # limit ... try again at 4:21 PM." (observed 2026-09-16); Claude surfaces "You've hit your
+    # session limit · resets 3pm". Retrying before the reset only burns time, so treat as quota;
+    # the detail keeps the reset time for the caller.
+    "hit your session limit",
+    "hit your usage limit",
     "monthly spend limit",
     "monthly usage limit",
     "credit balance",
@@ -625,6 +631,24 @@ _SERVICE_UNAVAILABLE_MARKERS = (
     "overloaded",
     "temporarily unavailable",
 )
+
+
+def _cli_failure_detail(stderr: str, stdout: str) -> str:
+    """Failure text for a non-zero CLI exit: explicit ERROR lines first, else the output tail.
+
+    codex-cli prints its startup banner (version, workdir, model, sandbox) on stderr before any
+    work and its failure last. Keeping the head of stderr kept only the banner, so a subscription
+    usage limit classified as a generic failure and callers recorded empty output (2026-09-16).
+    """
+    for stream in (stderr, stdout):
+        error_lines = [
+            line.strip() for line in (stream or "").splitlines() if line.lstrip().startswith("ERROR")
+        ]
+        if error_lines:
+            return " | ".join(dict.fromkeys(error_lines))[:500]
+    stderr_tail = (stderr or "").strip()[-300:]
+    stdout_tail = (stdout or "").strip()[-200:]
+    return stderr_tail or stdout_tail or "unknown error"
 
 
 def _classify_cli_failure(detail: str, status: int = 0) -> CliBackendFailure:
@@ -1359,9 +1383,7 @@ def cli_chat(
                 if isinstance(parsed_result, CliBackendFailure):
                     logger.info(f"[cli] claude failed: {parsed_result.fallback_reason()}")
                     return parsed_result
-            stderr_hint = stderr.strip()[:300] if stderr else ""
-            stdout_hint = stdout.strip()[:200] if stdout else ""
-            detail = stderr_hint or stdout_hint or "unknown error"
+            detail = _cli_failure_detail(stderr, stdout)
             _log_codex_usage(
                 note_prefix=f"codex-cli exited {proc.returncode}: {detail}",
                 error=f"exit_{proc.returncode}",
