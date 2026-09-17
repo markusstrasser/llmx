@@ -50,10 +50,12 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-6": (10.0, 50.0),
     # GPT-5.6 suite (developers.openai.com/api/docs/pricing, GA 2026-07-09;
     # price cut 2026-07-30: Luna -80% to $0.20/$1.20, Terra -20% to $2/$12, Sol unchanged —
-    # openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6)
+    # openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6;
+    # Sol cut 2026-08-21 to $4/$20 (from $5/$30), promotional "at least through 2026-11-21"
+    # per developers.openai.com/api/docs/pricing.md — re-verify after that date)
     # Alias gpt-5.6 → sol. Pro mode bills at same model rates (more tokens).
-    "gpt-5.6-sol": (5.0, 30.0),
-    "gpt-5.6": (5.0, 30.0),
+    "gpt-5.6-sol": (4.0, 20.0),
+    "gpt-5.6": (4.0, 20.0),
     "gpt-5.6-terra": (2.0, 12.0),
     "gpt-5.6-luna": (0.20, 1.20),
     "gpt-5.3-chat-latest": (1.75, 14.0),
