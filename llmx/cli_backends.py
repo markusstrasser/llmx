@@ -1072,6 +1072,11 @@ def cli_chat(
                 # which _parse_claude_json reconstructs and checks exactly.
                 "--verbose",
                 "--disable-slash-commands",
+                # Unattended host: anything that would prompt is auto-denied while the
+                # active permission mode keeps deciding (CC 2.1.259). Explicit, so a
+                # future permission mode cannot hang a headless call on a prompt.
+                "--permission-prompts",
+                "none",
             ]
             if mode == "agent" and not lite:
                 cmd.extend(["--permission-mode", "bypassPermissions"])
