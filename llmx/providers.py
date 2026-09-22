@@ -681,6 +681,7 @@ _KNOWN_MODELS = {
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3.8-27b", "gpt-oss-120b"],
     "anthropic-direct": [
+        "claude-opus-5-5",
         "claude-opus-5",
         "claude-opus-4-8",
         "claude-fable-5-1",

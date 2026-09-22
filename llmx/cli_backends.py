@@ -196,6 +196,9 @@ LITE_ALLOWED_MODELS = {
     # account since launch day). Plan-vs-usage-credit billing is per plan/seat —
     # Claude Code's /model picker says "Requires usage credits" when it applies.
     "claude-fable-5-1",
+    # 2026-09-22: Opus 5.5 (same transport; Claude Code 2.1.280's default Opus).
+    # Thinking can't be disabled — effort is the only control (API default medium).
+    "claude-opus-5-5",
     # Cursor subscription pool: composer plus the exact live Grok 4.6 slugs.
     "composer-2.5",
     *CURSOR_GROK_MODELS,

@@ -76,6 +76,7 @@ class TestAstraDispatch(unittest.TestCase):
         self.assertIn("gpt-6-astra", known["openai"])
         self.assertIn("gpt-6", known["openai"])
         self.assertIn("gemini-3.8-flash", known["google"])
+        self.assertIn("claude-opus-5-5", known["anthropic-direct"])
         self.assertIn("claude-fable-5-1", known["anthropic-direct"])
 
     def test_subscription_mirror_checks_the_resolved_cli(self):

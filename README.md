@@ -35,6 +35,7 @@ uv tool install --editable /path/to/llmx
 llmx -m gpt-6-astra "Explain Python"
 llmx -m claude-opus-5 "Write code"          # → claude-cli subscription
 llmx -m claude-fable-5-1 "Hard synthesis"   # Fable 5.1, same claude-cli transport
+llmx -m claude-opus-5-5 "Refactor this"     # Opus 5.5, same claude-cli transport
 llmx -m kimi-k3 "Complex task"
 llmx -m cerebras/qwen-3.8-27b -e none "Fast coding"
 
@@ -270,6 +271,7 @@ llmx chat --subscription -m claude-opus-5 …
 - GPT-6 Astra (`gpt-6-astra`, alias `gpt-6`): default OpenAI / Codex subscription model. Effort `low`…`max`; `none`/`minimal` map to `low`.
 - GPT-5.6 suite remains a named cost-tier pin: `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`.
 - Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli; `claude-fable-5` stays an explicit prior pin.
+- Claude Opus 5.5 (`claude-opus-5-5`): claude-cli and anthropic-direct, $4/$20, 1M context. Thinking is always on, so effort is the only control (API default `medium`); `claude-opus-5` stays the Opus default.
 - Grok 4.5 via Cursor subscription: use an exact live slug such as
   `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
   variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.

@@ -66,6 +66,9 @@ PRICING: dict[str, tuple[float, float]] = {
     # Fable 5.1 (2026-09-01): same $10/$50; cache read $0.25 vs $1.00 on Fable 5
     # (platform.claude.com/docs/en/models/fable-5-1/overview).
     "claude-fable-5-1": (10.0, 50.0),
+    # Opus 5.5 (2026-09-22): $4/$20; cache read $0.20, 5m write $5, 1h write $8
+    # (platform.claude.com/docs/en/models/opus-5-5/overview).
+    "claude-opus-5-5": (4.0, 20.0),
     "claude-sonnet-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
@@ -126,6 +129,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "claude-opus-4-8": 1_000_000,
     "claude-fable-5": 1_000_000,
     "claude-fable-5-1": 1_000_000,
+    "claude-opus-5-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
     "claude-sonnet-4-6": 1_000_000,
     # dense-student screen candidates (2026-07-10): gemma4 256K, qwen3-32b 32K native
