@@ -617,7 +617,7 @@ def _normalize_model(provider: str, model: str) -> str:
     if prefix and model.startswith(prefix):
         logger.debug(f"Stripped prefix '{prefix}' from model '{model}'")
         return model[len(prefix) :]
-    # OpenRouter models use real slashes (anthropic/claude-sonnet-4-6) — preserve
+    # OpenRouter models use real slashes (anthropic/claude-sonnet-5) — preserve
     return model
 
 
@@ -706,7 +706,7 @@ _MODEL_UPGRADES = {
     "gemini-3-flash": "gemini-3.8-flash",
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
     "gpt-4o": "gpt-6-astra",
-    "gpt-4o-mini": "gpt-5.1-mini",
+    "gpt-4o-mini": "gpt-6-astra",
     "gpt-4": "gpt-6-astra",
     "gpt-4-turbo": "gpt-6-astra",
     # GPT-6 Astra (2026-09): bare alias → Astra. Keep the 5.6 suite as named pins.

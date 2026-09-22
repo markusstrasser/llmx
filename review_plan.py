@@ -80,12 +80,12 @@ def review_gemini(context: str) -> str:
 
 
 def review_gpt(context: str) -> str:
-    """Dispatch to GPT-5.4 via openai SDK."""
+    """Dispatch to GPT-6 Astra via openai SDK."""
     from openai import OpenAI
 
     client = OpenAI(timeout=600.0)
     response = client.chat.completions.create(
-        model="gpt-5.4",
+        model="gpt-6-astra",
         messages=[
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": context + "\n\nRESPOND WITH:\n## 1. Logical Inconsistencies\n## 2. Cost-Benefit Analysis\n## 3. Testable Predictions\n## 4. What's Missing\n## 5. My Top 5 Recommendations\n## 6. Where I'm Likely Wrong"},

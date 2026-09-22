@@ -6,5 +6,5 @@ install:
 
 # Quick test: verify GPT and Gemini work
 test:
-    llmx chat -m gpt-5.4 "say OK" --timeout 15
-    llmx chat -m gemini-3-flash-preview --stream "say OK" --timeout 15
+    llmx chat -m gpt-6-astra "say OK" --timeout 15
+    llmx chat -m gemini-3.8-flash --stream "say OK" --timeout 15

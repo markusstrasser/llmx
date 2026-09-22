@@ -418,7 +418,7 @@ Output the raw SVG code starting with <svg and ending with </svg>."""
         # Fallback to text model if image model doesn't work for text
         try:
             response = client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-3.8-flash",
                 contents=[svg_prompt],
             )
         except Exception as e2:

@@ -5,7 +5,7 @@ llmx - Unified LLM CLI via native SDKs
 Usage:
     llmx "your prompt"
     llmx --model gpt-5.6-sol "your prompt"
-    cat file.txt | llmx --model claude-sonnet-4-6 "review"
+    cat file.txt | llmx --model claude-sonnet-5 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
     llmx svg "physics momentum arrow icon" -o momentum.svg
@@ -251,7 +251,7 @@ def svg_cmd(prompt, output, model, debug):
 @click.option(
     "-m", "--model",
     default=None,
-    help="Any vision-capable model id (default: gemini-3-flash-preview). "
+    help="Any vision-capable model id (default: gemini-3.8-flash). "
          "e.g. gemini-3.6-flash, gpt-5.6-sol, gpt-5.6-luna",
 )
 @click.option("--provider", default=None, help="Override the provider inferred from --model")
@@ -538,7 +538,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
 @click.option(
     "--fallback",
     "fallback_model",
-    help="Fallback model on rate-limit/timeout (e.g., gemini-3-flash-preview). Auto-retries once.",
+    help="Fallback model on rate-limit/timeout (e.g., gemini-3.8-flash). Auto-retries once.",
 )
 @click.option(
     "--mode",
