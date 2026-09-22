@@ -429,7 +429,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5.6-sol', 'claude-opus-5', 'gemini-3.6-flash', 'kimi-k3', 'cerebras/qwen-3.8-27b'.",
+    help="Model: 'gpt-5.6-sol', 'claude-opus-5-5', 'gemini-3.6-flash', 'kimi-k3', 'cerebras/qwen-3.8-27b'.",
 )
 @click.option(
     "-p",

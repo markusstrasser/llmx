@@ -442,7 +442,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "anthropic": {
-        "model": "claude-opus-5",
+        "model": "claude-opus-5-5",
         "legacy_model": "claude-opus-4-8",
         # Default transport is claude-cli subscription (OAuth). API fallback uses
         # OpenRouter only when CLI unavailable or api_only=True.
@@ -454,7 +454,7 @@ PROVIDER_CONFIGS = {
     # Opt-in with `-p anthropic-direct` — never the default. claude-cli drops
     # ANTHROPIC_API_KEY for its OAuth path, so subscription transport is unaffected.
     "anthropic-direct": {
-        "model": "claude-opus-5",
+        "model": "claude-opus-5-5",
         "env_var": "ANTHROPIC_API_KEY",
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
@@ -714,9 +714,11 @@ _MODEL_UPGRADES = {
     # GPT-5.6 suite (2026-07-09): bare alias → Sol. GPT-5.5 fully removed — do not upgrade.
     "gpt-5.6": "gpt-5.6-sol",
     "claude-3.5-sonnet": "claude-sonnet-5",
-    "claude-3-opus": "claude-opus-5",
+    "claude-3-opus": "claude-opus-5-5",
     # Do NOT auto-upgrade claude-opus-4-8 → 5: Anthropic documents 4.8 as the
     # cyber-classifier fallback target for Opus 5 / Fable 5 (keep pin explicit).
+    # Do NOT auto-upgrade claude-opus-5 → 5-5 either: Opus 5 is the biology
+    # fallback target for Opus 5.5 and Fable 5.x, and eval arms pin it.
 }
 
 

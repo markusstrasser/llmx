@@ -69,7 +69,7 @@ PRICING: dict[str, tuple[float, float]] = {
     # Opus 5.5 (2026-09-22): $4/$20; cache read $0.20, 5m write $5, 1h write $8
     # (platform.claude.com/docs/en/models/opus-5-5/overview).
     "claude-opus-5-5": (4.0, 20.0),
-    "claude-sonnet-5": (3.0, 15.0),
+    "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
     "grok-4.5": (2.0, 6.0),
