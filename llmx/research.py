@@ -187,7 +187,9 @@ def research(
     """Run deep research query via OpenAI Responses API."""
     from openai import OpenAI
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    from .providers import _env_key
+
+    api_key = _env_key("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError(
             "OPENAI_API_KEY not set. Export it to use deep research.\n"

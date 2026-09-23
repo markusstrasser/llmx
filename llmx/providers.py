@@ -1019,6 +1019,27 @@ def _promote_scoped_key(var: str, val: str) -> None:
         os.environ.setdefault("GEMINI_API_KEY", val)
 
 
+METERED_SUFFIX = "_METERED"
+
+
+def _env_key(var: str) -> Optional[str]:
+    """Env value for ``var``, else its metered twin ``<var>_METERED``.
+
+    The shell exports paid per-token keys only under the twin name so no SDK
+    finds them by the standard name (policy: ~/dotfiles/scripts/
+    secret-env-policy.sh, 2026-09-23). llmx is the sanctioned consumer: the
+    twin is promoted to the standard name in-process, where the SDK client
+    reads it. CLI subscription backends strip the standard names again.
+    """
+    val = os.getenv(var)
+    if val:
+        return val
+    val = os.getenv(var + METERED_SUFFIX)
+    if val:
+        os.environ[var] = val
+    return val
+
+
 def check_api_key(provider: str) -> None:
     """Check if API key is available for provider (env vars → Keychain)."""
     config = PROVIDER_CONFIGS.get(provider)
@@ -1035,7 +1056,7 @@ def check_api_key(provider: str) -> None:
     key_vars = config["env_var"].replace(" or ", ",").split(",")
     for var in key_vars:
         var = var.strip()
-        val = os.getenv(var)
+        val = _env_key(var)
         if val:
             _promote_scoped_key(var, val)
             logger.debug(f"Found API key: {var}")
@@ -1056,6 +1077,7 @@ def check_api_key(provider: str) -> None:
 
     error_msg = f"API key not found for provider '{provider}'.\n"
     error_msg += f"Set one of these environment variables: {config['env_var']}\n"
+    error_msg += f"(each may also arrive as its metered twin <NAME>{METERED_SUFFIX})\n"
     error_msg += f"Example: export {key_vars[0].strip()}=your-key-here"
     if _keychain_available():
         error_msg += f"\n   or: llmx keys set {key_vars[0].strip()}"
@@ -1068,7 +1090,7 @@ def _get_api_key(provider: str) -> Optional[str]:
     # Check overrides first (e.g., anthropic -> OPENROUTER_API_KEY)
     key_env = API_KEY_OVERRIDES.get(provider)
     if key_env:
-        val = os.environ.get(key_env)
+        val = _env_key(key_env)
         if val:
             return val
         # Try Keychain
@@ -1085,7 +1107,7 @@ def _get_api_key(provider: str) -> Optional[str]:
     key_vars = config["env_var"].replace(" or ", ",").split(",")
     for var in key_vars:
         var = var.strip()
-        val = os.getenv(var)
+        val = _env_key(var)
         if val:
             _promote_scoped_key(var, val)
             return val

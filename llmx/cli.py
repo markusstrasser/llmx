@@ -1208,17 +1208,25 @@ def keys_delete(key_name):
 @keys_group.command("get")
 @click.argument("key_name")
 def keys_get(key_name):
-    """Show where an API key is resolved from (env, keychain, or missing)."""
-    import os
-    from .providers import _keychain_get
+    """Show where an API key is resolved from (env, metered twin, keychain, or missing).
 
+    Prints the source and length only: agents run this, and any part of a key
+    printed here lands in their transcript.
+    """
+    import os
+    from .providers import METERED_SUFFIX, _keychain_get
+
+    twin = key_name + METERED_SUFFIX
     env_val = os.environ.get(key_name)
-    kc_val = _keychain_get(key_name)
+    twin_val = os.environ.get(twin)
+    kc_val = None if (env_val or twin_val) else _keychain_get(key_name)
 
     if env_val:
-        console.print(f"{key_name}: [green]env[/green] ({key_name}={env_val[:8]}...)")
+        console.print(f"{key_name}: [green]env[/green] ({len(env_val)} chars)")
+    elif twin_val:
+        console.print(f"{key_name}: [green]env as {twin}[/green] ({len(twin_val)} chars)")
     elif kc_val:
-        console.print(f"{key_name}: [blue]keychain[/blue] ({kc_val[:8]}...)")
+        console.print(f"{key_name}: [blue]keychain[/blue] ({len(kc_val)} chars)")
     else:
         console.print(f"{key_name}: [red]not found[/red]")
 
