@@ -199,7 +199,7 @@ LITE_ALLOWED_MODELS = {
     # 2026-09-22: Opus 5.5 (same transport; Claude Code 2.1.280's default Opus).
     # Thinking can't be disabled — effort is the only control (API default medium).
     "claude-opus-5-5",
-    # Cursor subscription pool: composer plus the exact live Grok 4.6 slugs.
+    # Cursor subscription pool: composer plus exact Grok 4.7 and still-admitted 4.6 slugs.
     "composer-2.5",
     *CURSOR_GROK_MODELS,
 }
@@ -216,7 +216,9 @@ def lite_model_allowed(model: Optional[str], *, transport: Optional[str] = None)
     # Adding it to the shared set would also widen Cursor's exact-slug gate.
     if model in GROK_BUILD_MODELS:
         return transport == "grok-cli"
-    if model.startswith("cursor-grok-"):
+    # Any other grok id must be an exact Cursor slug: 4.7 slugs carry no
+    # `cursor-` prefix, so the prefix loop below would admit invented ones.
+    if model.startswith(("cursor-grok-", "grok-")):
         return model in CURSOR_GROK_MODELS
     for allowed in LITE_ALLOWED_MODELS:
         base = allowed.removesuffix("-preview")
@@ -1454,7 +1456,7 @@ def cli_chat(
                         )
                     log_usage(
                         provider=provider,
-                        model=model or "grok-4.6",
+                        model=model or GROK_BUILD_MODELS[0],
                         served_model=usage.get("served_model"),
                         transport="grok-cli",
                         billing="subscription",

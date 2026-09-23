@@ -1,7 +1,7 @@
 """Lock cursor transport routing against accidental paid-API fallback."""
 
 from llmx.cli_backends import lite_model_allowed
-from llmx.model_ids import CURSOR_GROK46_MODELS
+from llmx.model_ids import CURSOR_GROK46_MODELS, CURSOR_GROK47_MODELS
 from llmx.providers import infer_provider_from_model as infer
 
 
@@ -40,10 +40,41 @@ def test_cursor_native_grok46_effort_slugs() -> None:
         assert infer(model) == "cursor", f"{model} must route to cursor"
 
 
+def test_cursor_native_grok47_effort_slugs() -> None:
+    # `cursor-agent models`, 2026-09-23: 4.7 slugs carry no `cursor-` prefix.
+    assert CURSOR_GROK47_MODELS == (
+        "grok-4.7-low",
+        "grok-4.7-low-fast",
+        "grok-4.7-medium",
+        "grok-4.7-medium-fast",
+        "grok-4.7-high",
+        "grok-4.7-high-fast",
+        "grok-4.7-xhigh",
+        "grok-4.7-xhigh-fast",
+    )
+    for model in CURSOR_GROK47_MODELS:
+        assert infer(model) == "cursor", f"{model} must route to cursor"
+
+
+def test_unprefixed_grok_slugs_are_gated_exactly() -> None:
+    from llmx.cli_backends import lite_model_allowed
+
+    assert lite_model_allowed("grok-4.7-high")
+    assert lite_model_allowed("grok-4.7-xhigh-fast")
+    # Invented or retired shapes fail closed instead of prefix-matching a real slug.
+    assert not lite_model_allowed("grok-4.7-max")
+    assert not lite_model_allowed("grok-4.7-high-fast-x")
+    assert not lite_model_allowed("cursor-grok-4.7-high")
+    # Grok Build ids pass only on the grok-cli transport.
+    assert lite_model_allowed("grok-4.7-build-fast", transport="grok-cli")
+    assert not lite_model_allowed("grok-4.7-build-fast", transport="cursor-cli")
+
+
 def test_subscription_allowlist_is_exact_for_cursor_grok46() -> None:
-    for model in CURSOR_GROK46_MODELS:
+    for model in (*CURSOR_GROK46_MODELS, *CURSOR_GROK47_MODELS):
         assert lite_model_allowed(model)
     for retired_or_invented in (
+        "grok-4.7",
         "grok-4.6",
         "grok-4.6-high",
         "grok-4.6-fast-high",
@@ -59,6 +90,7 @@ def test_non_cursor_models_keep_native_routes() -> None:
         "kimi-k2.5": "kimi",
         "grok-4": "xai",
         "grok-4.5": "xai",
+        "grok-4.7": "xai",
         "minimax-m3": "minimax",
         "qwen-3": "cerebras",
         "gpt-5.6-sol": "openai",

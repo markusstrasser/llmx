@@ -275,8 +275,8 @@ class TestCliExitCode(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 1, result.output)
-        self.assertIn("cursor-grok-4.6-high", result.output)
-        self.assertIn("-p grok -m grok-4.6", result.output)
+        self.assertIn("grok-4.7-high", result.output)
+        self.assertIn("-p grok -m grok-4.7", result.output)
 
     def test_quota_error_exits_6(self):
         quota_error = QuotaError(
@@ -354,7 +354,7 @@ class TestProviderSubscriptionFallback(unittest.TestCase):
             patch("llmx.providers.OpenAI") as api_client,
             self.assertRaisesRegex(
                 ValueError,
-                r"cursor-grok-4\.6-high.*-p grok -m grok-4\.6",
+                r"grok-4\.7-high.*-p grok -m grok-4\.7",
             ),
         ):
             chat(

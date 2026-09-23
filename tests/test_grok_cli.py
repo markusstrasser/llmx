@@ -101,23 +101,27 @@ def test_grok_and_grok_cli_default_model_and_transport() -> None:
     for provider in ("grok", "grok-cli"):
         plan = _plan(provider=provider, model=None)
         assert plan.provider == provider
-        assert plan.model == "grok-4.6"
+        assert plan.model == "grok-4.7"
         assert plan.transport == "grok-cli"
         assert plan.auth == "subscription"
         assert not any("not on lite allowlist" in warning for warning in plan.warnings)
 
 
 def test_grok_allowlist_is_transport_scoped() -> None:
+    assert lite_model_allowed("grok-4.7", transport="grok-cli")
     assert lite_model_allowed("grok-4.6", transport="grok-cli")
+    assert not lite_model_allowed("grok-4.7")
     assert not lite_model_allowed("grok-4.6")
     assert not lite_model_allowed("grok-4.6", transport="cursor-cli")
 
 
 def test_bare_grok_subscription_still_rewrites_to_cursor() -> None:
-    plan = _plan(provider=None, model="grok-4.6", subscription=True)
+    plan = _plan(provider=None, model="grok-4.7", subscription=True)
     assert plan.provider == "cursor"
     assert plan.transport == "cursor-cli"
-    assert plan.model == GROK46_SUBSCRIPTION_DEFAULT
+    assert plan.model == "grok-4.7-high"
+    legacy = _plan(provider=None, model="grok-4.6", subscription=True)
+    assert legacy.model == GROK46_SUBSCRIPTION_DEFAULT
 
 
 def test_effort_mapping_table() -> None:

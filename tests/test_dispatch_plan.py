@@ -194,7 +194,7 @@ class TestLlmLiteRouting(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 ValueError,
-                r"grok-4\.5.*grok-4\.6.*cursor-grok-4\.6-high.*Grok Build",
+                r"grok-4\.5.*grok-4\.7.*Cursor grok-4\.7-high.*Grok Build",
             ):
                 build_dispatch_plan(
                     provider=None,

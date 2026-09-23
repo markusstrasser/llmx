@@ -460,7 +460,7 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "xai": {
-        "model": "grok-4.5",
+        "model": "grok-4.7",
         "fast_model": "grok-4-1-fast-reasoning",
         "non_thinking_model": "grok-4-1-fast-non-reasoning",
         "legacy_model": "grok-4",
@@ -546,14 +546,14 @@ PROVIDER_CONFIGS = {
     # `grok` name is separate from `xai`: bare grok-* model IDs continue to infer
     # the metered xAI API unless this provider is explicit.
     "grok": {
-        "model": "grok-4.6",
+        "model": "grok-4.7",
         "env_var": None,
         "temperature_range": (0.0, 1.0),
         "supports_streaming": False,
         "api_fallback": None,
     },
     "grok-cli": {
-        "model": "grok-4.6",
+        "model": "grok-4.7",
         "env_var": None,
         "temperature_range": (0.0, 1.0),
         "supports_streaming": False,
@@ -652,6 +652,7 @@ _KNOWN_MODELS = {
         "gpt-5-codex",
     ],
     "xai": [
+        "grok-4.7",
         "grok-4.6",
         "grok-4.5",
         "grok-4",
@@ -751,7 +752,7 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
     # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Exact Cursor-native Grok 4.6 slugs are Cursor-exclusive. Bare `grok-4.x`
+    # Exact Cursor-native Grok 4.7/4.6 slugs are Cursor-exclusive. Bare `grok-4.x`
     # remains the xAI API model; do not infer it as a subscription route.
     if (
         model.startswith("cursor/")

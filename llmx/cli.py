@@ -35,6 +35,7 @@ from .providers import (
 from .cli_backends import (
     lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
 )
+from .model_ids import GROK_BUILD_MODELS
 from .info_cmd import info_cmd
 from .logger import configure_logger, logger
 
@@ -895,7 +896,7 @@ def chat_cmd(
             ):
                 allowed_models = set(LITE_ALLOWED_MODELS)
                 if dispatch_plan.transport == "grok-cli":
-                    allowed_models.add("grok-4.6")
+                    allowed_models.update(GROK_BUILD_MODELS)
                 allowed = ", ".join(sorted(allowed_models))
                 click.echo(
                     f"Error: subscription CLI mode is restricted to frontier models: {allowed}.\n"

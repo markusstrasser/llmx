@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from llmx.model_ids import CURSOR_GROK46_MODELS
+from llmx.model_ids import CURSOR_GROK47_MODELS
 
 
 def parse_cursor_model_ids(output: str) -> set[str]:
@@ -36,7 +36,7 @@ composer-2.5 - Composer 2.5 (current)
     os.environ.get("LLMX_LIVE_CURSOR_REGISTRY") != "1",
     reason="set LLMX_LIVE_CURSOR_REGISTRY=1 for the live cursor-agent registry contract",
 )
-def test_live_cursor_registry_contains_configured_grok46_slugs() -> None:
+def test_live_cursor_registry_contains_configured_grok47_slugs() -> None:
     binary = shutil.which("cursor-agent")
     assert binary, "cursor-agent is required for the live registry contract"
     completed = subprocess.run(
@@ -47,7 +47,7 @@ def test_live_cursor_registry_contains_configured_grok46_slugs() -> None:
         timeout=30,
     )
     live_models = parse_cursor_model_ids(completed.stdout)
-    missing = set(CURSOR_GROK46_MODELS) - live_models
+    missing = set(CURSOR_GROK47_MODELS) - live_models
     assert not missing, (
         f"configured Cursor Grok slugs absent from live registry: {sorted(missing)}"
     )

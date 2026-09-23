@@ -73,6 +73,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (3.0, 15.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
     "grok-4.5": (2.0, 6.0),
+    # Grok 4.7 launch page (x.ai/news/grok-4-7, 2026-09-21): from $2/$6.
+    # Fast tier is 2×. Long-context cliff not restated on that page.
+    "grok-4.7": (2.0, 6.0),
+    "grok-4.6": (2.0, 6.0),
     # Kimi K3 (kimi.com research announcement 2026-07-16): $3.00/MTok cache-miss
     # input, $15.00/MTok output; cache-hit input $0.30/MTok (>90% hit rate claimed
     # in coding workloads — priced here at the conservative cache-miss rate).
@@ -99,10 +103,16 @@ PRICING: dict[str, tuple[float, float]] = {
     "deepseek/deepseek-v4-flash-0731": (0.14, 0.28),
     "deepseek/deepseek-v4-flash": (0.14, 0.28),
 }
-# Shadow prices for the Cursor subscription lanes ($0 billed); 4.6 mirrors 4.5
-# until xAI publishes its own list price.
+# Shadow prices for the Cursor subscription lanes ($0 billed).
+# 4.7 fast is 2× list ($4/$12) per the 2026-09-21 launch page.
+# 4.6 fast stays at the prior $4/$18 shadow until that lane is re-priced.
 for cursor_model in CURSOR_GROK_MODELS:
-    PRICING[cursor_model] = (4.0, 18.0) if cursor_model.endswith("-fast") else (2.0, 6.0)
+    if "grok-4.7" in cursor_model and cursor_model.endswith("-fast"):
+        PRICING[cursor_model] = (4.0, 12.0)
+    elif cursor_model.endswith("-fast"):
+        PRICING[cursor_model] = (4.0, 18.0)
+    else:
+        PRICING[cursor_model] = (2.0, 6.0)
 
 # Context-window limit (max input tokens) per model. Static capability, not from the
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
@@ -137,8 +147,11 @@ CONTEXT_WINDOW: dict[str, int] = {
     "google/gemma-4-31b-it": 256_000,
     "qwen/qwen3-32b": 32_768,
     "mistralai/mistral-small-3.2-24b-instruct": 128_000,
-    # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k
+    # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k.
+    # 4.6/4.7 carry the same window; the 4.7 news post did not restate it.
     "grok-4.5": 500_000,
+    "grok-4.6": 500_000,
+    "grok-4.7": 500_000,
     # Kimi K3 (2026-07-16): 1M-token context window
     "kimi-k3": 1_048_576,
     # Paid-tier public endpoint windows; free trial is 64/65k.
