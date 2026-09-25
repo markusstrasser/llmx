@@ -307,7 +307,7 @@ def needs_api_fallback(
     if stream:
         return "streaming not supported by CLI"
     if max_tokens:
-        return "max_tokens not supported by CLI (Gemini defaults to 8K)"
+        return "max_tokens not supported by subscription CLI transports (drop --max-tokens or use --auth api)"
     # Reasoning effort is never an API-fallback trigger. Grok forwards its
     # mapped value; other CLIs either map it later or use their native default.
 
