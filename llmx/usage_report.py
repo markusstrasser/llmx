@@ -32,15 +32,15 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-3-flash": (0.50, 3.00),
     "gemini-3.1-flash-lite-preview": (0.25, 1.50),
     "gemini-3.1-flash-lite": (0.25, 1.50),
-    "gemini-3.5-flash": (1.50, 9.0),
+    "gemini-3.5-flash": (1.50, 9.0),  # retired 2026-09-25: accounting only
     # 2026-07-21 launch: 3.6 Flash supersedes 3.5 Flash at a LOWER output rate
     # ($7.50 vs $9.00) with ~17% fewer output tokens claimed.
     # Gemini 3.8 Flash (ai.google.dev/gemini-api/docs/pricing, 2026-09-05):
     # intro $0.75/$3.75 through 2026-12-31; standard $1.50/$7.50 from 2027-01-01.
     # 3.7 Flash is the same intro rate. Register both so the spend guard prices them.
     "gemini-3.8-flash": (0.75, 3.75),
-    "gemini-3.7-flash": (0.75, 3.75),
-    "gemini-3.6-flash": (1.50, 7.50),
+    "gemini-3.7-flash": (0.75, 3.75),  # retired 2026-09-25: accounting only
+    "gemini-3.6-flash": (1.50, 7.50),  # retired 2026-09-25: accounting only
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-pro-preview": (1.25, 10.0),
     # GPT-6 Astra (developers.openai.com/api/docs/models/gpt-6-astra, 2026-09-05):
@@ -63,8 +63,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-5.6": (4.0, 20.0),
     "gpt-5.6-terra": (2.0, 12.0),
     "gpt-5.6-luna": (0.20, 1.20),
-    "gpt-5.3-chat-latest": (1.75, 14.0),
-    "gpt-5.3-codex": (1.25, 10.0),
+    "gpt-5.3-chat-latest": (1.75, 14.0),  # retired pending bake-off rerun: intel extract_incremental.py
+    "gpt-5.3-codex": (1.25, 10.0),  # retired 2026-09-25: accounting only
     "claude-opus-5": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),  # retired 2026-09-25: accounting only
     "claude-fable-5": (10.0, 50.0),  # retired 2026-09-25: accounting only
@@ -77,7 +77,7 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
-    "grok-4.5": (2.0, 6.0),
+    "grok-4.5": (2.0, 6.0),  # retired 2026-09-25: accounting only
     # Grok 4.7 launch page (x.ai/news/grok-4-7, 2026-09-21): from $2/$6.
     # Fast tier is 2×. Long-context cliff not restated on that page.
     "grok-4.7": (2.0, 6.0),
@@ -127,10 +127,10 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gemini-3-flash": 1_000_000,
     "gemini-3.1-flash-lite-preview": 1_000_000,
     "gemini-3.1-flash-lite": 1_000_000,
-    "gemini-3.5-flash": 1_000_000,
+    "gemini-3.5-flash": 1_000_000,  # retired 2026-09-25: accounting only
     "gemini-3.8-flash": 1_000_000,
-    "gemini-3.7-flash": 1_000_000,
-    "gemini-3.6-flash": 1_000_000,
+    "gemini-3.7-flash": 1_000_000,  # retired 2026-09-25: accounting only
+    "gemini-3.6-flash": 1_000_000,  # retired 2026-09-25: accounting only
     "gemini-3.5-flash-lite": 1_000_000,
     "gemini-3.1-pro-preview": 1_000_000,
     "gpt-6-astra": 1_050_000,
@@ -142,8 +142,8 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
     "gpt-5.6-luna": 1_050_000,
-    "gpt-5.3-chat-latest": 400_000,
-    "gpt-5.3-codex": 400_000,
+    "gpt-5.3-chat-latest": 400_000,  # retired pending bake-off rerun
+    "gpt-5.3-codex": 400_000,  # retired 2026-09-25: accounting only
     "claude-opus-5": 1_000_000,
     "claude-opus-4-8": 1_000_000,  # retired 2026-09-25: accounting only
     "claude-fable-5": 1_000_000,  # retired 2026-09-25: accounting only
@@ -158,7 +158,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "mistralai/mistral-small-3.2-24b-instruct": 128_000,
     # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k.
     # 4.6/4.7 carry the same window; the 4.7 news post did not restate it.
-    "grok-4.5": 500_000,
+    "grok-4.5": 500_000,  # retired 2026-09-25: accounting only
     "grok-4.6": 500_000,  # retired 2026-09-25: accounting only
     "grok-4.7": 500_000,
     # Kimi K3 (2026-07-16): 1M-token context window

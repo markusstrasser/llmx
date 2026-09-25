@@ -63,7 +63,7 @@ llmx -p anthropic-direct -m claude-opus-5-5 "metered Claude API (opt-in)"
 
 # Effort / timeout / output
 llmx -m gpt-6-astra -e max --timeout 3600 -o out.md "Hard task"
-llmx -m gemini-3.5-flash -e high "Hard task"
+llmx -m gemini-3.8-flash -e high "Hard task"
 llmx --fast "Quick question"          # Gemini Flash + low effort
 llmx --search "Latest on fusion"      # Google grounding
 llmx --stream "Tell me a story"
@@ -239,7 +239,7 @@ def expensive(code):
 | `openai` | GPT-6 Astra | API by default; `--subscription` → `codex-cli` |
 | `anthropic` | Claude Opus 5 | **claude-cli subscription by default**; keys stripped |
 | `anthropic-direct` | Claude Opus 5 | Metered Anthropic API (explicit opt-in) |
-| `xai` | Grok 4.5 | Metered xAI API; bare `grok-4.5` is never subscription auth |
+| `xai` | Grok 4.7 | Metered xAI API; bare `grok-4.7` under `--subscription` routes to Cursor `grok-4.7-high` |
 | `cursor` / `cursor-cli` | Composer / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
 | `cerebras` | Qwen 3.8 27B | Fast coding and agent loops; set `-e none` for minimum latency |
@@ -271,11 +271,10 @@ llmx chat --subscription -m claude-opus-5-5 …
 - GPT-6 Astra (`gpt-6-astra`, alias `gpt-6`): default OpenAI / Codex subscription model. Effort `low`…`max`; `none`/`minimal` map to `low`.
 - GPT-6 cost tiers: `gpt-6-sol`, `gpt-6-luna` (alias `gpt-6` → `gpt-6-astra`).
 - Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli.
-- Routing allowlists hold the Pareto frontier only. Retired 2026-09-25 (refused, priced for history only): `gpt-5.6*`, `claude-fable-5`, `claude-opus-4-8`, `gemini-3-flash-preview`, `cursor-grok-4.6-*`, `grok-4.6`.
+- Routing allowlists hold the Pareto frontier only. Retired 2026-09-25 (refused, priced for history only): `gpt-5.6*`, `claude-fable-5`, `claude-opus-4-8`, `gemini-3-flash-preview`, `cursor-grok-4.6-*`, `grok-4.6`. Pass 2 (API ids, refused with a successor): `gpt-5`/`5.1`/`5.2`/`5.4`/`-pro`/`-codex`/`5.3-codex` → `gpt-6-sol`/`gpt-6-luna`; `grok-4.5`, `grok-4`, `grok-4-1-fast-*`, `grok-4.20-*`, `grok-beta` → `grok-4.7`; `gemini-3-pro-preview` → `gemini-3.1-pro-preview`; `gemini-3.5/3.6/3.7-flash` → `gemini-3.8-flash`. `gpt-5.3`/`gpt-5.3-chat-latest` stay admitted pending an intel extraction bake-off rerun.
 - Claude Opus 5.5 (`claude-opus-5-5`): claude-cli and anthropic-direct, $4/$20, 1M context. Thinking is always on, so effort is the only control (API default `medium`); current Opus default. `claude-opus-5` stays an explicit pin for the biology-fallback lane (Opus 5.5 declines dual-use biology).
-- Grok 4.5 via Cursor subscription: use an exact live slug such as
-  `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort
-  variants are `low`, `medium`, and `high`; there is no Cursor `xhigh` slug.
+- Grok 4.7 via Cursor subscription: use an exact live slug such as
+  `grok-4.7-high` or `grok-4.7-high-fast` (effort `low`/`medium`/`high`/`xhigh`).
 - OpenRouter: effort travels as its native `reasoning` body object, so it works on
   third-party models llmx has no restriction-table entry for. Ceiling is `high`
   (`xhigh`/`max` map down to it), and `-e none` sends `{"reasoning":{"enabled":false}}`

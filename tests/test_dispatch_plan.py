@@ -252,25 +252,22 @@ class TestLlmLiteRouting(unittest.TestCase):
                 use_old=False,
             )
 
-    def test_bare_grok45_api_route_remains_xai(self):
+    def test_bare_grok45_api_route_is_retired(self):
         from llmx.dispatch_plan import build_dispatch_plan
 
-        plan = build_dispatch_plan(
-            provider=None,
-            model="grok-4.5",
-            reasoning_effort="high",
-            timeout=300,
-            lite=None,
-            mode=None,
-            auth="api",
-            subscription=False,
-            api_only=None,
-            use_old=False,
-        )
-
-        self.assertEqual(plan.provider, "xai")
-        self.assertEqual(plan.auth, "api")
-        self.assertEqual(plan.transport, "xai-api")
+        with self.assertRaisesRegex(ValueError, r"grok-4\.5 was retired.*grok-4\.7"):
+            build_dispatch_plan(
+                provider=None,
+                model="grok-4.5",
+                reasoning_effort="high",
+                timeout=300,
+                lite=None,
+                mode=None,
+                auth="api",
+                subscription=False,
+                api_only=None,
+                use_old=False,
+            )
 
     def test_lite_enables_claude_cli(self):
         from llmx.api import LLM

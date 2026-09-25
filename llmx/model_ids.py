@@ -66,3 +66,32 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
             "(Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
         )
     return _GROK_BARE_TO_SUBSCRIPTION.get(normalized)
+
+
+# API ids retired from routing 2026-09-25 (Pareto-frontier prune, pass 2) → successor.
+# Dispatch fails closed on these (providers._auto_upgrade_model raises). Pricing rows
+# stay in usage_report for accounting only. gpt-5.3 / gpt-5.3-chat-latest are NOT here:
+# retired pending bake-off rerun (evals DECISIONS.md intel-extract-model).
+_GROK_SUCCESSOR = "grok-4.7 (Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
+
+RETIRED_API_MODELS: dict[str, str] = {
+    "gpt-5.4": "gpt-6-sol",
+    "gpt-5.3-codex": "gpt-6-sol",
+    "gpt-5.2": "gpt-6-sol",
+    "gpt-5.1": "gpt-6-sol",
+    "gpt-5.1-mini": "gpt-6-luna",
+    "gpt-5": "gpt-6-sol",
+    "gpt-5-pro": "gpt-6-sol",
+    "gpt-5-codex": "gpt-6-sol",
+    "grok-4.5": _GROK_SUCCESSOR,
+    "grok-4": _GROK_SUCCESSOR,
+    "grok-4-1-fast-reasoning": _GROK_SUCCESSOR,
+    "grok-4-1-fast-non-reasoning": _GROK_SUCCESSOR,
+    "grok-4.20-0309-reasoning": _GROK_SUCCESSOR,
+    "grok-4.20-0309-non-reasoning": _GROK_SUCCESSOR,
+    "grok-beta": _GROK_SUCCESSOR,
+    "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+    "gemini-3.7-flash": "gemini-3.8-flash",
+    "gemini-3.6-flash": "gemini-3.8-flash",
+    "gemini-3.5-flash": "gemini-3.8-flash",
+}

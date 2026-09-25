@@ -360,7 +360,7 @@ class TestOtherTransportsUnchanged(unittest.TestCase):
 
     def test_openai_still_uses_top_level_reasoning_effort(self):
         with _Capture() as cap:
-            _chat("openai", "gpt-5.6", "low", temperature=1.0)
+            _chat("openai", "gpt-6-sol", "low", temperature=1.0)
         self.assertEqual(cap.body.get("reasoning_effort"), "low")
         self.assertNotIn("extra_body", cap.body)
 

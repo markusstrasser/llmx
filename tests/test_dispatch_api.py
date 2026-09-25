@@ -53,7 +53,7 @@ class DispatchApiTest(unittest.TestCase):
         result = dispatch(
             "hello",
             provider="google",
-            model="gemini-3.5-flash",
+            model="gemini-3.8-flash",
             dry_run=True,
             auth="api",
         )
@@ -80,7 +80,7 @@ class DispatchApiTest(unittest.TestCase):
         mock_resp.latency = 0.1
         mock_resp.usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         mock_resp.provider = "google"
-        mock_resp.model = "gemini-3.5-flash"
+        mock_resp.model = "gemini-3.8-flash"
 
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "out.md"
@@ -88,7 +88,7 @@ class DispatchApiTest(unittest.TestCase):
                 result = dispatch(
                     "ping",
                     provider="google",
-                    model="gemini-3.5-flash",
+                    model="gemini-3.8-flash",
                     auth="api",
                     output_path=out,
                 )
@@ -99,7 +99,7 @@ class DispatchApiTest(unittest.TestCase):
 
     def test_live_rate_limit_returns_status(self) -> None:
         with patch("llmx.api.chat", side_effect=RateLimitError("429")):
-            result = dispatch("x", provider="google", model="gemini-3.5-flash", auth="api")
+            result = dispatch("x", provider="google", model="gemini-3.8-flash", auth="api")
         self.assertEqual(result.status, "rate_limit")
         self.assertTrue(result.retryable)
         self.assertEqual(result.exit_code, 3)

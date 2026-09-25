@@ -20,6 +20,7 @@ from .logger import logger
 from .model_ids import (
     CURSOR_GROK_MODELS,
     GROK_BUILD_MODELS,
+    RETIRED_API_MODELS,
     resolve_grok_subscription_slug,
 )
 
@@ -201,64 +202,9 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["none", "low", "medium", "high", "xhigh", "max"],
         "reasoning_effort_aliases": {"minimal": "low"},
     },
-    # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
-    "gpt-5.4": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": [
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-        ],
-        "default_effort": "high",
-    },
-    "gpt-5.2": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    "gpt-5.1": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    "gpt-5.1-mini": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    # Legacy GPT-5 models
-    "gpt-5": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    "gpt-5-pro": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    "gpt-5-codex": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["low", "medium", "high"],
-        "default_effort": "high",
-    },  # No minimal
+    # GPT-5/5.1/5.2/5.4/-pro/-codex restriction rows retired 2026-09-25 (frontier prune;
+    # successor gpt-6-luna bulk / gpt-6-sol general). Retired ids fail closed via
+    # model_ids.RETIRED_API_MODELS.
     # Gemini 3.x thinking models: temperature=1 required (lower causes looping/degraded reasoning)
     "gemini-3.1-pro": {
         "temperature": 1.0,
@@ -278,12 +224,6 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
     },
-    "gemini-3.5-flash": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["low", "medium", "high"],
-    },
     # Gemini 3.6 Flash / 3.5 Flash-Lite (2026-07-21). BOTH need explicit keys, not for
     # completeness but for correctness: get_model_restriction() does a longest-key-first
     # SUBSTRING match, so without these `gemini-3.6-flash` matched nothing (→ no
@@ -297,19 +237,6 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high"],
         "default_effort": "medium",
     },
-    "gemini-3.7-flash": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["low", "medium", "high"],
-        "default_effort": "medium",
-    },
-    "gemini-3.6-flash": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
-    },
     "gemini-3.5-flash-lite": {
         "temperature": 1.0,
         "fixed": True,
@@ -322,6 +249,8 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["low", "medium", "high"],
     },
+    # retired pending bake-off rerun: intel tools/substack/extract_incremental.py
+    # (evals DECISIONS.md intel-extract-model chose gpt-5.3-chat-latest, 2026-06-08).
     # OpenAI GPT-5.3 (Mar 2026): "Instant" variant, reduced hallucination, max reasoning_effort=medium
     "gpt-5.3": {
         "temperature": 1.0,
@@ -337,15 +266,6 @@ MODEL_RESTRICTIONS = {
         "fixed": False,
         "reasoning_effort": True,
         "reasoning_effort_levels": ["high", "xhigh"],
-    },
-    # SpaceXAI Grok 4.5 (2026-07-08): API docs — reasoning low/medium/high (default high).
-    # Cursor slugs bake effort into their exact model ids and also match this restriction.
-    "grok-4.5": {
-        "temperature": 1.0,
-        "fixed": False,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["low", "medium", "high"],
-        "default_effort": "high",
     },
     # Cerebras public shared-endpoint models (verified 2026-09-03). Both use the
     # OpenAI-compatible top-level `reasoning_effort` parameter. Qwen additionally
@@ -429,9 +349,6 @@ PROVIDER_CONFIGS = {
     },
     "xai": {
         "model": "grok-4.7",
-        "fast_model": "grok-4-1-fast-reasoning",
-        "non_thinking_model": "grok-4-1-fast-non-reasoning",
-        "legacy_model": "grok-4",
         "env_var": "XAI_API_KEY or GROK_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
@@ -593,11 +510,7 @@ def _normalize_model(provider: str, model: str) -> str:
 _KNOWN_MODELS = {
     "google": [
         "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
         "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
         "gemini-3.1-flash-lite-preview",
@@ -607,24 +520,12 @@ _KNOWN_MODELS = {
         "gpt-6",  # alias → astra
         "gpt-6-sol",
         "gpt-6-luna",
-        "gpt-5.4",
+        # retired pending bake-off rerun: intel tools/substack/extract_incremental.py
         "gpt-5.3",
-        "gpt-5.2",
-        "gpt-5.1",
-        "gpt-5.1-mini",
-        "gpt-5",
-        "gpt-5-pro",
-        "gpt-5-codex",
+        "gpt-5.3-chat-latest",
     ],
     "xai": [
         "grok-4.7",
-        "grok-4.5",
-        "grok-4",
-        "grok-4-1-fast-reasoning",
-        "grok-4-1-fast-non-reasoning",
-        "grok-4.20-0309-reasoning",
-        "grok-4.20-0309-non-reasoning",
-        "grok-beta",
     ],
     "cursor": [
         "composer-2.5",
@@ -684,6 +585,11 @@ _MODEL_UPGRADES = {
 
 def _auto_upgrade_model(model: str) -> str:
     """Auto-upgrade deprecated model names. Returns upgraded name or original."""
+    successor = RETIRED_API_MODELS.get(model)
+    if successor:
+        raise ValueError(
+            f"{model} was retired 2026-09-25 (Pareto-frontier prune); use -m {successor}"
+        )
     upgraded = _MODEL_UPGRADES.get(model)
     if upgraded:
         logger.warn(f"Model '{model}' is deprecated — auto-upgrading to '{upgraded}'")

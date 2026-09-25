@@ -157,7 +157,7 @@ def analyze_media(
 ) -> str:
     """Analyze images or videos with any vision-capable model.
 
-    `model` is a real model id (`gemini-3.6-flash`, `gpt-6-sol`, ...). Provider
+    `model` is a real model id (`gemini-3.8-flash`, `gpt-6-sol`, ...). Provider
     is inferred from it unless given explicitly.
     """
     from .providers import chat, infer_provider_from_model
