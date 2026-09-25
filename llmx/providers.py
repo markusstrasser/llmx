@@ -249,16 +249,6 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["low", "medium", "high"],
     },
-    # retired pending bake-off rerun: intel tools/substack/extract_incremental.py
-    # (evals DECISIONS.md intel-extract-model chose gpt-5.3-chat-latest, 2026-06-08).
-    # OpenAI GPT-5.3 (Mar 2026): "Instant" variant, reduced hallucination, max reasoning_effort=medium
-    "gpt-5.3": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": ["medium"],
-        "default_effort": "medium",
-    },
     # Z.ai GLM-5.2 (2026-06-13): dual reasoning modes; OpenRouter exposes effort high/xhigh
     # (xhigh → max). No fixed temperature; provider temperature_range (0.0, 1.0) governs.
     "glm-5.2": {
@@ -520,9 +510,6 @@ _KNOWN_MODELS = {
         "gpt-6",  # alias → astra
         "gpt-6-sol",
         "gpt-6-luna",
-        # retired pending bake-off rerun: intel tools/substack/extract_incremental.py
-        "gpt-5.3",
-        "gpt-5.3-chat-latest",
     ],
     "xai": [
         "grok-4.7",

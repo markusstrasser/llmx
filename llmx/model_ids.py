@@ -70,13 +70,15 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
 
 # API ids retired from routing 2026-09-25 (Pareto-frontier prune, pass 2) → successor.
 # Dispatch fails closed on these (providers._auto_upgrade_model raises). Pricing rows
-# stay in usage_report for accounting only. gpt-5.3 / gpt-5.3-chat-latest are NOT here:
-# retired pending bake-off rerun (evals DECISIONS.md intel-extract-model).
+# stay in usage_report for accounting only. gpt-5.3* retired by operator ruling
+# ("6 luna wins", 2026-09-25), superseding evals DECISIONS.md intel-extract-model.
 _GROK_SUCCESSOR = "grok-4.7 (Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
 
 RETIRED_API_MODELS: dict[str, str] = {
     "gpt-5.4": "gpt-6-sol",
-    "gpt-5.3-codex": "gpt-6-sol",
+    "gpt-5.3": "gpt-6-luna",
+    "gpt-5.3-chat-latest": "gpt-6-luna",
+    "gpt-5.3-codex": "gpt-6-luna",
     "gpt-5.2": "gpt-6-sol",
     "gpt-5.1": "gpt-6-sol",
     "gpt-5.1-mini": "gpt-6-luna",

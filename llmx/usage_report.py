@@ -63,7 +63,7 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-5.6": (4.0, 20.0),
     "gpt-5.6-terra": (2.0, 12.0),
     "gpt-5.6-luna": (0.20, 1.20),
-    "gpt-5.3-chat-latest": (1.75, 14.0),  # retired pending bake-off rerun: intel extract_incremental.py
+    "gpt-5.3-chat-latest": (1.75, 14.0),  # retired 2026-09-25: accounting only
     "gpt-5.3-codex": (1.25, 10.0),  # retired 2026-09-25: accounting only
     "claude-opus-5": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),  # retired 2026-09-25: accounting only
@@ -142,7 +142,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
     "gpt-5.6-luna": 1_050_000,
-    "gpt-5.3-chat-latest": 400_000,  # retired pending bake-off rerun
+    "gpt-5.3-chat-latest": 400_000,  # retired 2026-09-25: accounting only
     "gpt-5.3-codex": 400_000,  # retired 2026-09-25: accounting only
     "claude-opus-5": 1_000_000,
     "claude-opus-4-8": 1_000_000,  # retired 2026-09-25: accounting only

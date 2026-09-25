@@ -48,9 +48,12 @@ def test_retired_api_ids_refuse_with_successor(model: str) -> None:
     assert all(model not in ids for ids in _KNOWN_MODELS.values())
 
 
-def test_eval_pinned_gpt53_stays_admitted() -> None:
-    assert _auto_upgrade_model("gpt-5.3-chat-latest") == "gpt-5.3-chat-latest"
-    assert "gpt-5.3-chat-latest" in _KNOWN_MODELS["openai"]
+def test_gpt53_retired_to_luna() -> None:
+    # Operator ruling "6 luna wins" (2026-09-25) revoked the bake-off exception.
+    for model in ("gpt-5.3", "gpt-5.3-chat-latest", "gpt-5.3-codex"):
+        assert RETIRED_API_MODELS[model] == "gpt-6-luna"
+        with pytest.raises(ValueError, match="use -m gpt-6-luna"):
+            _auto_upgrade_model(model)
 
 
 def test_pass2_successors_route() -> None:
