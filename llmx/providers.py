@@ -186,6 +186,21 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
         "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
     },
+    # GPT-6 Sol / Luna (2026-09-22, openai.com/index/introducing-gpt-6-sol-and-luna):
+    # cost tiers of the Astra generation. Unlike Astra, effort includes `none`
+    # (developers.openai.com/api/docs/models/gpt-6-sol, gpt-6-luna).
+    "gpt-6-sol": {
+        "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["none", "low", "medium", "high", "xhigh", "max"],
+        "reasoning_effort_aliases": {"minimal": "low"},
+    },
+    "gpt-6-luna": {
+        "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["none", "low", "medium", "high", "xhigh", "max"],
+        "reasoning_effort_aliases": {"minimal": "low"},
+    },
     # OpenAI GPT-5.6 suite (GA 2026-07-09): Sol/Terra/Luna. Effort includes `max`
     # (beyond xhigh). Pro quality is reasoning.mode=pro on the same model id, not a
     # separate slug (API docs). Alias `gpt-5.6` → sol via _MODEL_UPGRADES.
@@ -638,6 +653,8 @@ _KNOWN_MODELS = {
     "openai": [
         "gpt-6-astra",
         "gpt-6",  # alias → astra
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",

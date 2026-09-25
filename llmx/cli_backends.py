@@ -173,7 +173,7 @@ def _research_mcp_args() -> list[str]:
 # Lite mode is restricted to frontier models. Anthropic routes via
 # claude-cli (Claude Code) in headless `-p` mode with OAuth subscription auth
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
-# research-mcp only); gpt-6-astra and gpt-5.6-* route via codex-cli. gemini-3-flash-preview
+# research-mcp only); gpt-6-* and gpt-5.6-* route via codex-cli. gemini-3-flash-preview
 # stays allowed for back-compat but no longer has a CLI backend — with the
 # free gemini-cli retired (2026-06-18) it routes to the paid Gemini API and
 # --lite only contributes the no-tools prompt prefix (no cwd/MCP stripping,
@@ -181,6 +181,9 @@ def _research_mcp_args() -> list[str]:
 LITE_ALLOWED_MODELS = {
     "gpt-6-astra",
     "gpt-6",  # alias → astra
+    # 2026-09-25: codex-cli subscription serves both (live `codex exec -m` probe).
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",

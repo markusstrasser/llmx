@@ -48,6 +48,10 @@ PRICING: dict[str, tuple[float, float]] = {
     # Alias gpt-6 → astra. Subscription (codex-cli) remains $0 against the ChatGPT plan.
     "gpt-6-astra": (10.0, 50.0),
     "gpt-6": (10.0, 50.0),
+    # GPT-6 Sol / Luna (developers.openai.com/api/docs/models/gpt-6-sol, gpt-6-luna,
+    # 2026-09-22): same cache and >272K structure as Astra.
+    "gpt-6-sol": (2.0, 10.0),
+    "gpt-6-luna": (0.10, 0.50),
     # GPT-5.6 suite (developers.openai.com/api/docs/pricing, GA 2026-07-09;
     # price cut 2026-07-30: Luna -80% to $0.20/$1.20, Terra -20% to $2/$12, Sol unchanged —
     # openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6;
@@ -129,6 +133,8 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gemini-3.1-pro-preview": 1_000_000,
     "gpt-6-astra": 1_050_000,
     "gpt-6": 1_050_000,
+    "gpt-6-sol": 1_050_000,
+    "gpt-6-luna": 1_050_000,
     "gpt-5.6-sol": 1_050_000,
     "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
@@ -181,11 +187,12 @@ def est_cost(
     if rate is None:
         return None
     input_rate, output_rate = rate
-    if model not in {"gpt-6-astra", "gpt-6"}:
+    if model not in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6-luna"}:
         return (prompt * input_rate + out * output_rate) / 1_000_000
 
-    # https://developers.openai.com/api/docs/models/gpt-6-astra
-    read_rate, write_rate = 1.0, 12.50
+    # developers.openai.com/api/docs/models/gpt-6-{astra,sol,luna}: cached reads 10%,
+    # cache writes 1.25x of the uncached input rate.
+    read_rate, write_rate = input_rate * 0.10, input_rate * 1.25
     if prompt > 272_000:
         input_rate *= 2
         read_rate *= 2

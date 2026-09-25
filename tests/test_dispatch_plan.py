@@ -53,6 +53,30 @@ class TestEffortNormalize(unittest.TestCase):
         self.assertEqual(applied, "low")
         self.assertTrue(warns)
 
+    def test_none_passes_through_for_gpt6_sol_luna(self):
+        for model in ("gpt-6-sol", "gpt-6-luna"):
+            with self.subTest(model=model):
+                applied, warns = map_effort_for_backend(
+                    "none", transport="openai-api", provider="openai", model=model
+                )
+                self.assertEqual(applied, "none")
+                self.assertFalse(warns)
+
+    def test_gpt6_sol_luna_registered_priced_and_subscription_allowed(self):
+        from llmx.cli_backends import lite_model_allowed
+        from llmx.providers import _KNOWN_MODELS
+        from llmx.usage_report import PRICING, est_cost
+
+        self.assertEqual(PRICING["gpt-6-sol"], (2.0, 10.0))
+        self.assertEqual(PRICING["gpt-6-luna"], (0.10, 0.50))
+        for model in ("gpt-6-sol", "gpt-6-luna"):
+            self.assertIn(model, _KNOWN_MODELS["openai"])
+            self.assertTrue(lite_model_allowed(model))
+        # >272K input: 2x input, 1.5x output for the full request (model page).
+        cost = est_cost("gpt-6-sol", 300_000, 100_000)
+        assert cost is not None
+        self.assertAlmostEqual(cost, (300_000 * 4 + 100_000 * 15) / 1e6)
+
     def test_codex_max_passthrough_gpt56(self):
         applied, _ = map_effort_for_backend(
             "max", transport="codex-cli", provider="openai", model="gpt-5.6-terra"
