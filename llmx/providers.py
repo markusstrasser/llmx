@@ -201,51 +201,6 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["none", "low", "medium", "high", "xhigh", "max"],
         "reasoning_effort_aliases": {"minimal": "low"},
     },
-    # OpenAI GPT-5.6 suite (GA 2026-07-09): Sol/Terra/Luna. Effort includes `max`
-    # (beyond xhigh). Pro quality is reasoning.mode=pro on the same model id, not a
-    # separate slug (API docs). Alias `gpt-5.6` → sol via _MODEL_UPGRADES.
-    "gpt-5.6-sol": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-        ],
-        "default_effort": "medium",
-    },
-    "gpt-5.6-terra": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-        ],
-        "default_effort": "medium",
-    },
-    "gpt-5.6-luna": {
-        "temperature": 1.0,
-        "fixed": True,
-        "reasoning_effort": True,
-        "reasoning_effort_levels": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-        ],
-        "default_effort": "medium",
-    },
     # OpenAI GPT-5.x thinking models: temperature=1 only, support reasoning_effort
     "gpt-5.4": {
         "temperature": 1.0,
@@ -451,14 +406,12 @@ PROVIDER_CONFIGS = {
     },
     "openai": {
         "model": "gpt-6-astra",
-        "legacy_model": "gpt-5.6-sol",
         "env_var": "OPENAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
     },
     "anthropic": {
         "model": "claude-opus-5-5",
-        "legacy_model": "claude-opus-4-8",
         # Default transport is claude-cli subscription (OAuth). API fallback uses
         # OpenRouter only when CLI unavailable or api_only=True.
         "env_var": "OPENROUTER_API_KEY",
@@ -646,7 +599,6 @@ _KNOWN_MODELS = {
         "gemini-3.6-flash",
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
-        "gemini-3-flash-preview",
         "gemini-3.1-flash-lite",
         "gemini-3.1-flash-lite-preview",
     ],
@@ -655,10 +607,6 @@ _KNOWN_MODELS = {
         "gpt-6",  # alias → astra
         "gpt-6-sol",
         "gpt-6-luna",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "gpt-5.6",  # alias → sol; keep as named 5.6-suite pin
         "gpt-5.4",
         "gpt-5.3",
         "gpt-5.2",
@@ -670,7 +618,6 @@ _KNOWN_MODELS = {
     ],
     "xai": [
         "grok-4.7",
-        "grok-4.6",
         "grok-4.5",
         "grok-4",
         "grok-4-1-fast-reasoning",
@@ -701,9 +648,7 @@ _KNOWN_MODELS = {
     "anthropic-direct": [
         "claude-opus-5-5",
         "claude-opus-5",
-        "claude-opus-4-8",
         "claude-fable-5-1",
-        "claude-fable-5",
         "claude-sonnet-5",
         "claude-haiku-4-5",
     ],
@@ -727,14 +672,11 @@ _MODEL_UPGRADES = {
     "gpt-4o-mini": "gpt-6-astra",
     "gpt-4": "gpt-6-astra",
     "gpt-4-turbo": "gpt-6-astra",
-    # GPT-6 Astra (2026-09): bare alias → Astra. Keep the 5.6 suite as named pins.
+    # GPT-6 Astra (2026-09): bare alias → Astra. The 5.6 suite was retired
+    # 2026-09-25 (no upgrade alias: retired ids fail closed; successor gpt-6-sol/luna).
     "gpt-6": "gpt-6-astra",
-    # GPT-5.6 suite (2026-07-09): bare alias → Sol. GPT-5.5 fully removed — do not upgrade.
-    "gpt-5.6": "gpt-5.6-sol",
     "claude-3.5-sonnet": "claude-sonnet-5",
     "claude-3-opus": "claude-opus-5-5",
-    # Do NOT auto-upgrade claude-opus-4-8 → 5: Anthropic documents 4.8 as the
-    # cyber-classifier fallback target for Opus 5 / Fable 5 (keep pin explicit).
     # Do NOT auto-upgrade claude-opus-5 → 5-5 either: Opus 5 is the biology
     # fallback target for Opus 5.5 and Fable 5.x, and eval arms pin it.
 }
@@ -769,11 +711,14 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
     # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Exact Cursor-native Grok 4.7/4.6 slugs are Cursor-exclusive. Bare `grok-4.x`
-    # remains the xAI API model; do not infer it as a subscription route.
+    # Exact Cursor-native Grok 4.7 slugs are Cursor-exclusive. Bare `grok-4.x`
+    # remains the xAI API model; do not infer it as a subscription route. Any
+    # `cursor-grok-*` id (incl. retired 4.6 slugs) stays on cursor so it fails
+    # closed at the exact-slug gate instead of falling through to paid xAI.
     if (
         model.startswith("cursor/")
         or model_lower.startswith("composer")
+        or model_lower.startswith("cursor-grok-")
         or model_lower in CURSOR_GROK_MODELS
     ):
         return "cursor"

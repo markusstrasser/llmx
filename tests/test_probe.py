@@ -22,7 +22,7 @@ def _response(content: str = "OK") -> Response:
     return Response(
         content=content,
         provider="claude-cli",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         usage={},
         latency=0.1,
         raw=None,
@@ -40,7 +40,7 @@ def test_success_is_typed_and_cached_without_second_call(tmp_path: Path) -> None
     client_factory = Mock(return_value=client)
     first = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW,
         monotonic_fn=Mock(side_effect=[10.0, 10.25]),
@@ -48,7 +48,7 @@ def test_success_is_typed_and_cached_without_second_call(tmp_path: Path) -> None
     )
     second = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW + timedelta(minutes=1),
         client_factory=client_factory,
@@ -72,12 +72,12 @@ def test_quota_failure_preserves_exit_six_and_never_falls_back(tmp_path: Path) -
     client.chat.side_effect = QuotaError(
         "You've hit your monthly spend limit",
         provider="claude-cli",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         status_code=429,
     )
     result = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW,
         monotonic_fn=Mock(side_effect=[1.0, 1.1]),
@@ -95,12 +95,12 @@ def test_transient_rate_limit_is_indeterminate(tmp_path: Path) -> None:
     client.chat.side_effect = RateLimitError(
         "try later",
         provider="claude-cli",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         status_code=429,
     )
     result = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW,
         monotonic_fn=Mock(side_effect=[1.0, 1.1]),
@@ -115,7 +115,7 @@ def test_expired_cache_forces_a_new_call(tmp_path: Path) -> None:
     client_factory = Mock(side_effect=_client_factory)
     run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         cache_ttl_seconds=10,
         now_fn=lambda: NOW,
@@ -124,7 +124,7 @@ def test_expired_cache_forces_a_new_call(tmp_path: Path) -> None:
     )
     run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         cache_ttl_seconds=10,
         now_fn=lambda: NOW + timedelta(seconds=11),
@@ -139,7 +139,7 @@ def test_corrupt_cache_is_not_authority(tmp_path: Path) -> None:
     client_factory = Mock(side_effect=_client_factory)
     first = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW,
         monotonic_fn=Mock(side_effect=[1.0, 1.1]),
@@ -152,7 +152,7 @@ def test_corrupt_cache_is_not_authority(tmp_path: Path) -> None:
 
     run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         now_fn=lambda: NOW + timedelta(seconds=1),
         monotonic_fn=Mock(side_effect=[2.0, 2.1]),
@@ -165,7 +165,7 @@ def test_cache_policy_is_part_of_identity(tmp_path: Path) -> None:
     client_factory = Mock(side_effect=_client_factory)
     run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         cache_ttl_seconds=900,
         now_fn=lambda: NOW,
@@ -174,7 +174,7 @@ def test_cache_policy_is_part_of_identity(tmp_path: Path) -> None:
     )
     run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_dir=tmp_path,
         cache_ttl_seconds=10,
         now_fn=lambda: NOW + timedelta(seconds=1),
@@ -212,7 +212,7 @@ def test_probe_refuses_api_transport_before_client_construction(tmp_path: Path) 
 def test_cli_emits_cached_typed_quota_exit() -> None:
     quota_result = run_subscription_probe(
         provider="anthropic",
-        model="claude-opus-4-8",
+        model="claude-opus-5-5",
         cache_ttl_seconds=0,
         now_fn=lambda: NOW,
         monotonic_fn=Mock(side_effect=[1.0, 1.1]),
@@ -222,7 +222,7 @@ def test_cli_emits_cached_typed_quota_exit() -> None:
                     side_effect=QuotaError(
                         "You've hit your monthly spend limit",
                         provider="claude-cli",
-                        model="claude-opus-4-8",
+                        model="claude-opus-5-5",
                         status_code=429,
                     )
                 )

@@ -49,7 +49,7 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
             result = cli_chat(
                 "claude-cli",
                 "inspect the current repository",
-                "claude-opus-4-8",
+                "claude-opus-5-5",
                 30,
                 mode="agent",
             )
@@ -80,7 +80,7 @@ class TestClaudeWorkspaceAgent(unittest.TestCase):
         result = cli_chat(
             "claude-cli",
             "find papers",
-            "claude-opus-4-8",
+            "claude-opus-5-5",
             30,
             lite="research",
             mode="agent",

@@ -68,7 +68,7 @@ def _run(timeout: int):
     result = cb.cli_chat(
         provider="codex-cli",
         prompt="say hi",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         timeout=timeout,
         lite="bare",
     )

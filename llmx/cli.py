@@ -4,7 +4,7 @@ llmx - Unified LLM CLI via native SDKs
 
 Usage:
     llmx "your prompt"
-    llmx --model gpt-5.6-sol "your prompt"
+    llmx --model gpt-6-sol "your prompt"
     cat file.txt | llmx --model claude-sonnet-5 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
@@ -253,7 +253,7 @@ def svg_cmd(prompt, output, model, debug):
     "-m", "--model",
     default=None,
     help="Any vision-capable model id (default: gemini-3.8-flash). "
-         "e.g. gemini-3.6-flash, gpt-5.6-sol, gpt-5.6-luna",
+         "e.g. gemini-3.6-flash, gpt-6-sol, gpt-6-luna",
 )
 @click.option("--provider", default=None, help="Override the provider inferred from --model")
 @click.option("-e", "--effort", "reasoning_effort", default=None, help="Reasoning effort")
@@ -270,7 +270,7 @@ def vision_cmd(files, prompt, model, provider, reasoning_effort, sample, json_ou
 
     Examples:
         llmx vision screenshot.png -p "What UI issues do you see?"
-        llmx vision figure.png -m gpt-5.6-sol -p "Read the axis labels"
+        llmx vision figure.png -m gpt-6-sol -p "Read the axis labels"
         llmx vision figure.png -m gemini-3.6-flash -e low -p "Extract the table"
         llmx vision frame*.png -p "Summarize gameplay" --sample 5
         llmx vision gameplay.mp4 -p "List all UI elements visible"
@@ -430,7 +430,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
 @click.option(
     "-m",
     "--model",
-    help="Model: 'gpt-5.6-sol', 'claude-opus-5-5', 'gemini-3.6-flash', 'kimi-k3', 'cerebras/qwen-3.8-27b'.",
+    help="Model: 'gpt-6-sol', 'claude-opus-5-5', 'gemini-3.6-flash', 'kimi-k3', 'cerebras/qwen-3.8-27b'.",
 )
 @click.option(
     "-p",
@@ -1092,7 +1092,7 @@ def cli():
 
     Examples:
         llmx "What is 2+2?"                                  # Text generation (default)
-        llmx --model gpt-5.6-sol "Explain Python"            # Specific model
+        llmx --model gpt-6-sol "Explain Python"            # Specific model
         llmx image "a cute robot" -o robot.png               # Image generation
         llmx svg "physics arrow icon" -o arrow.svg           # SVG generation
     """

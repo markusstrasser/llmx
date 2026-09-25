@@ -58,7 +58,7 @@ llmx info --write-mirror          # → ~/.claude/cache/llmx-routing.json
 llmx probe --provider anthropic   # one bounded live subscription call
 
 # Auth surface: --auth api|subscription  (--subscription aliases --auth subscription)
-llmx chat --auth api -p openai -m gpt-5.6-luna "cheap extract"
+llmx chat --auth api -p openai -m gpt-6-luna "cheap extract"
 llmx -p anthropic-direct -m claude-opus-5-5 "metered Claude API (opt-in)"
 
 # Effort / timeout / output
@@ -155,7 +155,7 @@ response = chat(
 )
 
 # Stateful client (multi-turn / stream)
-llm = LLM(provider="openai", model="gpt-5.6-sol", temperature=0.3)
+llm = LLM(provider="openai", model="gpt-6-sol", temperature=0.3)
 r1 = llm.chat("Explain Python")
 r2 = llm.chat("Now compare to Rust", temperature=0.7)
 for chunk in llm.stream("Tell me a story"):
@@ -236,7 +236,7 @@ def expensive(code):
 | Provider | Default model | Notes |
 |----------|---------------|-------|
 | `google` | Gemini 3.x | Paid API (free Gemini CLI retired 2026-05-31) |
-| `openai` | GPT-5.6 Sol | API by default; `--subscription` → `codex-cli` |
+| `openai` | GPT-6 Astra | API by default; `--subscription` → `codex-cli` |
 | `anthropic` | Claude Opus 5 | **claude-cli subscription by default**; keys stripped |
 | `anthropic-direct` | Claude Opus 5 | Metered Anthropic API (explicit opt-in) |
 | `xai` | Grok 4.5 | Metered xAI API; bare `grok-4.5` is never subscription auth |
@@ -269,8 +269,9 @@ llmx chat --subscription -m claude-opus-5-5 …
 **Other**
 
 - GPT-6 Astra (`gpt-6-astra`, alias `gpt-6`): default OpenAI / Codex subscription model. Effort `low`…`max`; `none`/`minimal` map to `low`.
-- GPT-5.6 suite remains a named cost-tier pin: `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`.
-- Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli; `claude-fable-5` stays an explicit prior pin.
+- GPT-6 cost tiers: `gpt-6-sol`, `gpt-6-luna` (alias `gpt-6` → `gpt-6-astra`).
+- Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli.
+- Routing allowlists hold the Pareto frontier only. Retired 2026-09-25 (refused, priced for history only): `gpt-5.6*`, `claude-fable-5`, `claude-opus-4-8`, `gemini-3-flash-preview`, `cursor-grok-4.6-*`, `grok-4.6`.
 - Claude Opus 5.5 (`claude-opus-5-5`): claude-cli and anthropic-direct, $4/$20, 1M context. Thinking is always on, so effort is the only control (API default `medium`); current Opus default. `claude-opus-5` stays an explicit pin for the biology-fallback lane (Opus 5.5 declines dual-use biology).
 - Grok 4.5 via Cursor subscription: use an exact live slug such as
   `cursor-grok-4.5-high` or `cursor-grok-4.5-high-fast`. The supported effort

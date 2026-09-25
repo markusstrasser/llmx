@@ -77,8 +77,9 @@ def map_effort_for_backend(
     e = effort.lower()
     model_l = (model or "").lower()
     restriction = get_model_restriction(model_l) or {}
-    # Preserve the GPT-5.6 alias and consult the model contract for newer models.
-    native_max = "gpt-5.6" in model_l or "max" in restriction.get(
+    # GPT-6 family (incl. the bare `gpt-6` alias, which has no restriction entry
+    # of its own) supports native max; otherwise consult the model contract.
+    native_max = model_l.startswith("gpt-6") or "max" in restriction.get(
         "reasoning_effort_levels", []
     )
     # OpenRouter's effort ceiling is "high" — it has no xhigh/max tier — and the

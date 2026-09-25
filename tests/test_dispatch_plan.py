@@ -32,9 +32,9 @@ class TestEffortNormalize(unittest.TestCase):
         self.assertEqual(applied, "xhigh")
         self.assertTrue(warns)
 
-    def test_api_max_passthrough_gpt56(self):
+    def test_api_max_passthrough_gpt6(self):
         applied, warns = map_effort_for_backend(
-            "max", transport="openai-api", provider="openai", model="gpt-5.6-sol"
+            "max", transport="openai-api", provider="openai", model="gpt-6-sol"
         )
         self.assertEqual(applied, "max")
         self.assertFalse(warns)
@@ -77,9 +77,9 @@ class TestEffortNormalize(unittest.TestCase):
         assert cost is not None
         self.assertAlmostEqual(cost, (300_000 * 4 + 100_000 * 15) / 1e6)
 
-    def test_codex_max_passthrough_gpt56(self):
+    def test_codex_max_passthrough_gpt6(self):
         applied, _ = map_effort_for_backend(
-            "max", transport="codex-cli", provider="openai", model="gpt-5.6-terra"
+            "max", transport="codex-cli", provider="openai", model="gpt-6-sol"
         )
         self.assertEqual(applied, "max")
 
@@ -192,7 +192,7 @@ class TestLlmLiteRouting(unittest.TestCase):
         ):
             plan = build_dispatch_plan(
                 provider=None,
-                model="cursor-grok-4.6-high",
+                model="grok-4.7-high",
                 reasoning_effort=None,
                 timeout=300,
                 lite=None,
@@ -275,13 +275,13 @@ class TestLlmLiteRouting(unittest.TestCase):
     def test_lite_enables_claude_cli(self):
         from llmx.api import LLM
 
-        llm = LLM(provider="anthropic", model="claude-opus-4-8", lite="bare")
+        llm = LLM(provider="anthropic", model="claude-opus-5-5", lite="bare")
         self.assertEqual(llm._cli_provider, "claude-cli")
 
     def test_anthropic_defaults_subscription_cli(self):
         from llmx.api import LLM
 
-        llm = LLM(provider="anthropic", model="claude-opus-4-8")
+        llm = LLM(provider="anthropic", model="claude-opus-5-5")
         self.assertEqual(llm._cli_provider, "claude-cli")
         self.assertEqual(llm.kwargs.get("lite"), "bare")
 
@@ -290,7 +290,7 @@ class TestLlmLiteRouting(unittest.TestCase):
 
         plan = build_dispatch_plan(
             provider="anthropic",
-            model="claude-opus-4-8",
+            model="claude-opus-5-5",
             reasoning_effort=None,
             timeout=300,
             lite=None,
@@ -311,7 +311,7 @@ class TestLlmLiteRouting(unittest.TestCase):
 
         plan = build_dispatch_plan(
             provider="anthropic",
-            model="claude-opus-4-8",
+            model="claude-opus-5-5",
             reasoning_effort="max",
             timeout=3600,
             lite=None,

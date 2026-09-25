@@ -58,13 +58,13 @@ class TestSpendGuard(unittest.TestCase):
 
     # --- spend summation ---
     def test_metered_spend_sums_only_metered_today(self):
-        # claude-opus-4-8 = (5,25)/M → 1M in + 1M out = $30 metered.
+        # claude-opus-5 = (5,25)/M → 1M in + 1M out = $30 metered.
         # A subscription row (claude-cli) and a yesterday row must NOT count.
         yday = "2020-01-01T10:00:00Z"
         p = self._ledger(
-            _row("claude-opus-4-8", "api", 1_000_000, 1_000_000),
-            _row("claude-opus-4-8", "claude-cli", 9_000_000, 9_000_000),
-            _row("claude-opus-4-8", "api", 1_000_000, 1_000_000, ts=yday),
+            _row("claude-opus-5", "api", 1_000_000, 1_000_000),
+            _row("claude-opus-5", "claude-cli", 9_000_000, 9_000_000),
+            _row("claude-opus-5", "api", 1_000_000, 1_000_000, ts=yday),
         )
         spend, ok = sg.metered_spend_today(p)
         self.assertTrue(ok)
@@ -105,20 +105,20 @@ class TestSpendGuard(unittest.TestCase):
 
     # --- enforce: refuse / allow ---
     def test_over_cap_refuses(self):
-        p = self._ledger(_row("claude-opus-4-8", "api", 1_000_000, 1_000_000))  # $30
+        p = self._ledger(_row("claude-opus-5", "api", 1_000_000, 1_000_000))  # $30
         with self.assertRaises(SpendCapError) as cm:
-            sg.enforce_daily_cap("claude-opus-4-8", log_path=p)
+            sg.enforce_daily_cap("claude-opus-5", log_path=p)
         self.assertEqual(cm.exception.exit_code, 7)
 
     def test_under_cap_allows(self):
-        p = self._ledger(_row("claude-opus-4-8", "api", 100_000, 100_000))  # ~$3
-        sg.enforce_daily_cap("claude-opus-4-8", log_path=p)  # no raise
+        p = self._ledger(_row("claude-opus-5", "api", 100_000, 100_000))  # ~$3
+        sg.enforce_daily_cap("claude-opus-5", log_path=p)  # no raise
 
     def test_exactly_at_cap_refuses(self):
         # 1M in @ $5 + 800k out @ $25 = $5 + $20 = $25.00 == cap → refuse (>=)
-        p = self._ledger(_row("claude-opus-4-8", "api", 1_000_000, 800_000))
+        p = self._ledger(_row("claude-opus-5", "api", 1_000_000, 800_000))
         with self.assertRaises(SpendCapError):
-            sg.enforce_daily_cap("claude-opus-4-8", log_path=p)
+            sg.enforce_daily_cap("claude-opus-5", log_path=p)
 
     def test_unpriced_model_refuses(self):
         p = self._ledger()  # empty → $0 spend, well under cap
@@ -162,15 +162,15 @@ class TestSpendGuard(unittest.TestCase):
         # unpriced agent model allowed under cap when check_model_priced=False
         sg.enforce_daily_cap("agent:deep-research", log_path=empty, check_model_priced=False)
         # but still refused over cap
-        over = self._ledger(_row("claude-opus-4-8", "api", 1_000_000, 1_000_000))
+        over = self._ledger(_row("claude-opus-5", "api", 1_000_000, 1_000_000))
         with self.assertRaises(SpendCapError):
             sg.enforce_daily_cap("agent:deep-research", log_path=over, check_model_priced=False)
 
     # --- override ---
     def test_override_bypasses_over_cap(self):
         os.environ[sg._OVERRIDE_ENV] = "1"
-        p = self._ledger(_row("claude-opus-4-8", "api", 1_000_000, 1_000_000))  # $30
-        sg.enforce_daily_cap("claude-opus-4-8", log_path=p)  # no raise
+        p = self._ledger(_row("claude-opus-5", "api", 1_000_000, 1_000_000))  # $30
+        sg.enforce_daily_cap("claude-opus-5", log_path=p)  # no raise
 
     def test_override_bypasses_unpriced(self):
         os.environ[sg._OVERRIDE_ENV] = "1"
@@ -180,7 +180,7 @@ class TestSpendGuard(unittest.TestCase):
     # --- fail-open on unreadable ledger ---
     def test_missing_ledger_fails_open(self):
         # No raise; guard fails open (loud [DEGRADED] warning to stderr).
-        sg.enforce_daily_cap("claude-opus-4-8", log_path="/nonexistent/does/not/exist.jsonl")
+        sg.enforce_daily_cap("claude-opus-5", log_path="/nonexistent/does/not/exist.jsonl")
 
     def test_missing_ledger_spend_reports_not_ok(self):
         spend, ok = sg.metered_spend_today("/nonexistent/does/not/exist.jsonl")
@@ -199,7 +199,7 @@ class TestGeminiPolicy(unittest.TestCase):
 
     def test_gemini_refused_without_allow_env(self):
         with self.assertRaises(GeminiPolicyError) as cm:
-            sg.enforce_gemini_policy("gemini-3-flash-preview")
+            sg.enforce_gemini_policy("gemini-3.8-flash")
         self.assertEqual(cm.exception.exit_code, 7)
         self.assertIn("critique-only", str(cm.exception))
 
@@ -208,15 +208,15 @@ class TestGeminiPolicy(unittest.TestCase):
         sg.enforce_gemini_policy("gemini-3.5-flash")  # no raise
 
     def test_non_gemini_unaffected(self):
-        sg.enforce_gemini_policy("claude-opus-4-8")  # no raise
-        sg.enforce_gemini_policy("gpt-5.6-luna")  # no raise
+        sg.enforce_gemini_policy("claude-opus-5")  # no raise
+        sg.enforce_gemini_policy("gpt-6-luna")  # no raise
 
     def test_spend_override_does_not_bypass_policy(self):
         os.environ[sg._OVERRIDE_ENV] = "1"
         p = _ledger()
         try:
             with self.assertRaises(GeminiPolicyError):
-                sg.enforce_daily_cap("gemini-3-flash-preview", log_path=p)
+                sg.enforce_daily_cap("gemini-3.8-flash", log_path=p)
         finally:
             Path(p).unlink(missing_ok=True)
 

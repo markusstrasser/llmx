@@ -1,7 +1,7 @@
 """Lock cursor transport routing against accidental paid-API fallback."""
 
 from llmx.cli_backends import lite_model_allowed
-from llmx.model_ids import CURSOR_GROK46_MODELS, CURSOR_GROK47_MODELS
+from llmx.model_ids import CURSOR_GROK46_RETIRED_MODELS, CURSOR_GROK47_MODELS
 from llmx.providers import infer_provider_from_model as infer
 
 
@@ -13,8 +13,8 @@ def test_cursor_prefix_overrides_substring_families() -> None:
         "cursor/minimax-m3",
         "cursor/qwen-3",
         "cursor/deepseek-v3",
-        "cursor/claude-opus-4-8",
-        "cursor/gpt-5.6-sol",
+        "cursor/claude-opus-5-5",
+        "cursor/gpt-6-sol",
         "cursor/gpt-6-astra",
     ):
         assert infer(model) == "cursor", f"{model} must route to cursor"
@@ -25,8 +25,8 @@ def test_bare_composer_is_cursor() -> None:
     assert infer("composer-2.5-fast") == "cursor"
 
 
-def test_cursor_native_grok46_effort_slugs() -> None:
-    assert CURSOR_GROK46_MODELS == (
+def test_retired_grok46_slugs_are_refused() -> None:
+    assert CURSOR_GROK46_RETIRED_MODELS == (
         "cursor-grok-4.6-low",
         "cursor-grok-4.6-low-fast",
         "cursor-grok-4.6-medium",
@@ -36,8 +36,8 @@ def test_cursor_native_grok46_effort_slugs() -> None:
         "cursor-grok-4.6-xhigh",
         "cursor-grok-4.6-xhigh-fast",
     )
-    for model in CURSOR_GROK46_MODELS:
-        assert infer(model) == "cursor", f"{model} must route to cursor"
+    for model in CURSOR_GROK46_RETIRED_MODELS:
+        assert not lite_model_allowed(model), f"{model} is retired"
 
 
 def test_cursor_native_grok47_effort_slugs() -> None:
@@ -70,14 +70,15 @@ def test_unprefixed_grok_slugs_are_gated_exactly() -> None:
     assert not lite_model_allowed("grok-4.7-build-fast", transport="cursor-cli")
 
 
-def test_subscription_allowlist_is_exact_for_cursor_grok46() -> None:
-    for model in (*CURSOR_GROK46_MODELS, *CURSOR_GROK47_MODELS):
+def test_subscription_allowlist_is_exact_for_cursor_grok() -> None:
+    for model in CURSOR_GROK47_MODELS:
         assert lite_model_allowed(model)
     for retired_or_invented in (
         "grok-4.7",
         "grok-4.6",
         "grok-4.6-high",
         "grok-4.6-fast-high",
+        "cursor-grok-4.6-high",
         "cursor-grok-4.6-ultra",
         "cursor-grok-4.6-high-preview",
     ):
@@ -93,9 +94,9 @@ def test_non_cursor_models_keep_native_routes() -> None:
         "grok-4.7": "xai",
         "minimax-m3": "minimax",
         "qwen-3": "cerebras",
-        "gpt-5.6-sol": "openai",
+        "gpt-6-sol": "openai",
         "gpt-6-astra": "openai",
-        "claude-opus-4-8": "anthropic",
+        "claude-opus-5-5": "anthropic",
         "deepseek-v3": "deepseek",
         "openrouter/x": "openrouter",
     }

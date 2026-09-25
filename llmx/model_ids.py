@@ -6,8 +6,8 @@ from typing import Optional
 # Requested model IDs accepted by the Grok Build subscription transport.
 # The CLI may report a distinct served model (4.6 smoke: grok-4.6-build).
 # grok 1.0.41 `models` (2026-09-23): grok-4.7 (default), grok-4.7-build-fast,
-# grok-4.6, grok-4.5. 1.0.13 did not list 4.7.
-GROK_BUILD_MODELS = ("grok-4.7", "grok-4.7-build-fast", "grok-4.6")
+# grok-4.6, grok-4.5. 1.0.13 did not list 4.7. 4.6 retired from routing 2026-09-25.
+GROK_BUILD_MODELS = ("grok-4.7", "grok-4.7-build-fast")
 
 # Grok 4.7 lanes, verified live via `cursor-agent models` on 2026-09-23. Unlike
 # 4.6, Cursor lists them WITHOUT the `cursor-` prefix; `cursor-grok-4.7-*`
@@ -23,9 +23,10 @@ CURSOR_GROK47_MODELS: tuple[str, ...] = (
     "grok-4.7-xhigh-fast",
 )
 
-# Grok 4.6 lanes, verified live via `cursor-agent models` on 2026-09-05.
-# Still admitted: this Cursor session's catalog still lists a 4.6 slug.
-CURSOR_GROK46_MODELS: tuple[str, ...] = (
+# Grok 4.6 lanes (verified 2026-09-05). RETIRED from routing 2026-09-25 (Pareto
+# frontier prune; successor grok-4.7-X). Kept only so usage_report can price
+# historical llmx-usage.jsonl rows — never admit these for dispatch.
+CURSOR_GROK46_RETIRED_MODELS: tuple[str, ...] = (
     "cursor-grok-4.6-low",
     "cursor-grok-4.6-low-fast",
     "cursor-grok-4.6-medium",
@@ -38,15 +39,13 @@ CURSOR_GROK46_MODELS: tuple[str, ...] = (
 
 # Every exact Cursor Grok subscription slug. Consumers that gate by prefix must
 # check membership here; retired or invented versions must fail closed.
-CURSOR_GROK_MODELS: tuple[str, ...] = CURSOR_GROK47_MODELS + CURSOR_GROK46_MODELS
+CURSOR_GROK_MODELS: tuple[str, ...] = CURSOR_GROK47_MODELS
 
 GROK47_SUBSCRIPTION_DEFAULT = "grok-4.7-high"
-GROK46_SUBSCRIPTION_DEFAULT = "cursor-grok-4.6-high"
 GROK_SUBSCRIPTION_DEFAULT = GROK47_SUBSCRIPTION_DEFAULT
 
 _GROK_BARE_TO_SUBSCRIPTION = {
     "grok-4.7": GROK47_SUBSCRIPTION_DEFAULT,
-    "grok-4.6": GROK46_SUBSCRIPTION_DEFAULT,
 }
 
 
@@ -61,9 +60,9 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
     if not model:
         return None
     normalized = model.strip().lower().removeprefix("xai/")
-    if normalized == "grok-4.5":
+    if normalized in ("grok-4.5", "grok-4.6"):
         raise ValueError(
-            "grok-4.5 is no longer the current subscription model; use -m grok-4.7 "
+            f"{normalized} is no longer the current subscription model; use -m grok-4.7 "
             "(Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
         )
     return _GROK_BARE_TO_SUBSCRIPTION.get(normalized)

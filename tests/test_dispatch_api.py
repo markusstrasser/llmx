@@ -66,7 +66,7 @@ class DispatchApiTest(unittest.TestCase):
     def test_subscription_dry_run_claude(self) -> None:
         result = dispatch(
             "hello",
-            model="claude-opus-4-8",
+            model="claude-opus-5-5",
             subscription=True,
             dry_run=True,
         )

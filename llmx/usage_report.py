@@ -14,7 +14,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .model_ids import CURSOR_GROK_MODELS
+from .model_ids import CURSOR_GROK46_RETIRED_MODELS, CURSOR_GROK_MODELS
 
 DEFAULT_LOG = Path(
     os.environ.get("LLMX_USAGE_LOG", str(Path.home() / ".claude" / "llmx-usage.jsonl"))
@@ -28,7 +28,7 @@ PRICING: dict[str, tuple[float, float]] = {
     # UNDERSTATED 6.7-10x and 5-7.5x respectively — a cost estimator that lowballs the
     # provider behind June's ~EUR700 Gemini bill is the wrong direction to be wrong in.
     # Audio input is priced higher for the 3.x flash tiers; text rate registered.
-    "gemini-3-flash-preview": (0.50, 3.00),
+    "gemini-3-flash-preview": (0.50, 3.00),  # retired 2026-09-25: accounting only
     "gemini-3-flash": (0.50, 3.00),
     "gemini-3.1-flash-lite-preview": (0.25, 1.50),
     "gemini-3.1-flash-lite": (0.25, 1.50),
@@ -58,6 +58,7 @@ PRICING: dict[str, tuple[float, float]] = {
     # Sol cut 2026-08-21 to $4/$20 (from $5/$30), promotional "at least through 2026-11-21"
     # per developers.openai.com/api/docs/pricing.md — re-verify after that date)
     # Alias gpt-5.6 → sol. Pro mode bills at same model rates (more tokens).
+    # retired 2026-09-25: accounting only (gpt-5.6 suite)
     "gpt-5.6-sol": (4.0, 20.0),
     "gpt-5.6": (4.0, 20.0),
     "gpt-5.6-terra": (2.0, 12.0),
@@ -65,8 +66,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-5.3-chat-latest": (1.75, 14.0),
     "gpt-5.3-codex": (1.25, 10.0),
     "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),  # cyber fallback + legacy pin
-    "claude-fable-5": (10.0, 50.0),
+    "claude-opus-4-8": (5.0, 25.0),  # retired 2026-09-25: accounting only
+    "claude-fable-5": (10.0, 50.0),  # retired 2026-09-25: accounting only
     # Fable 5.1 (2026-09-01): same $10/$50; cache read $0.25 vs $1.00 on Fable 5
     # (platform.claude.com/docs/en/models/fable-5-1/overview).
     "claude-fable-5-1": (10.0, 50.0),
@@ -80,7 +81,7 @@ PRICING: dict[str, tuple[float, float]] = {
     # Grok 4.7 launch page (x.ai/news/grok-4-7, 2026-09-21): from $2/$6.
     # Fast tier is 2×. Long-context cliff not restated on that page.
     "grok-4.7": (2.0, 6.0),
-    "grok-4.6": (2.0, 6.0),
+    "grok-4.6": (2.0, 6.0),  # retired 2026-09-25: accounting only
     # Kimi K3 (kimi.com research announcement 2026-07-16): $3.00/MTok cache-miss
     # input, $15.00/MTok output; cache-hit input $0.30/MTok (>90% hit rate claimed
     # in coding workloads — priced here at the conservative cache-miss rate).
@@ -110,7 +111,8 @@ PRICING: dict[str, tuple[float, float]] = {
 # Shadow prices for the Cursor subscription lanes ($0 billed).
 # 4.7 fast is 2× list ($4/$12) per the 2026-09-21 launch page.
 # 4.6 fast stays at the prior $4/$18 shadow until that lane is re-priced.
-for cursor_model in CURSOR_GROK_MODELS:
+# retired 2026-09-25: accounting only — CURSOR_GROK46_RETIRED_MODELS priced for history.
+for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
     if "grok-4.7" in cursor_model and cursor_model.endswith("-fast"):
         PRICING[cursor_model] = (4.0, 12.0)
     elif cursor_model.endswith("-fast"):
@@ -121,7 +123,7 @@ for cursor_model in CURSOR_GROK_MODELS:
 # Context-window limit (max input tokens) per model. Static capability, not from the
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
 CONTEXT_WINDOW: dict[str, int] = {
-    "gemini-3-flash-preview": 1_000_000,
+    "gemini-3-flash-preview": 1_000_000,  # retired 2026-09-25: accounting only
     "gemini-3-flash": 1_000_000,
     "gemini-3.1-flash-lite-preview": 1_000_000,
     "gemini-3.1-flash-lite": 1_000_000,
@@ -135,6 +137,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-6": 1_050_000,
     "gpt-6-sol": 1_050_000,
     "gpt-6-luna": 1_050_000,
+    # retired 2026-09-25: accounting only (gpt-5.6 suite)
     "gpt-5.6-sol": 1_050_000,
     "gpt-5.6": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
@@ -142,8 +145,8 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5.3-chat-latest": 400_000,
     "gpt-5.3-codex": 400_000,
     "claude-opus-5": 1_000_000,
-    "claude-opus-4-8": 1_000_000,
-    "claude-fable-5": 1_000_000,
+    "claude-opus-4-8": 1_000_000,  # retired 2026-09-25: accounting only
+    "claude-fable-5": 1_000_000,  # retired 2026-09-25: accounting only
     "claude-fable-5-1": 1_000_000,
     "claude-opus-5-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
@@ -156,7 +159,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     # docs.x.ai Chat API Pricing table (2026-07-09): grok-4.5 context 500k.
     # 4.6/4.7 carry the same window; the 4.7 news post did not restate it.
     "grok-4.5": 500_000,
-    "grok-4.6": 500_000,
+    "grok-4.6": 500_000,  # retired 2026-09-25: accounting only
     "grok-4.7": 500_000,
     # Kimi K3 (2026-07-16): 1M-token context window
     "kimi-k3": 1_048_576,
@@ -164,7 +167,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "qwen-3.8-27b": 131_072,
     "gpt-oss-120b": 131_072,
 }
-for cursor_model in CURSOR_GROK_MODELS:
+for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
     CONTEXT_WINDOW[cursor_model] = 500_000
 
 

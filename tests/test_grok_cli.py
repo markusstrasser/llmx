@@ -23,7 +23,6 @@ from llmx.cli_backends import (
     resolve_cli_api_fallback,
 )
 from llmx.dispatch_plan import build_dispatch_plan, resolve_effort
-from llmx.model_ids import GROK46_SUBSCRIPTION_DEFAULT
 from llmx.providers import LlmxError, infer_provider_from_model
 
 
@@ -67,7 +66,7 @@ def _success_process() -> Mock:
 def _plan(**overrides):
     kwargs = {
         "provider": "grok",
-        "model": "grok-4.6",
+        "model": "grok-4.7",
         "reasoning_effort": None,
         "timeout": 300,
         "lite": None,
@@ -86,8 +85,8 @@ def test_provider_aliases_and_prefix_are_explicit() -> None:
     assert CLI_PROVIDERS["grok-cli"] == {"binary": "grok", "api_fallback": None}
     assert CLI_PROVIDER_ALIASES["grok"] == "grok-cli"
     assert CLI_PROVIDER_ALIASES_LITE["grok"] == "grok-cli"
-    assert infer_provider_from_model("grok/grok-4.6") == "grok"
-    assert infer_provider_from_model("grok-4.6") == "xai"
+    assert infer_provider_from_model("grok/grok-4.7") == "grok"
+    assert infer_provider_from_model("grok-4.7") == "xai"
 
 
 def test_grok_defaults_to_subscription_and_api_auth_is_rejected() -> None:
@@ -109,10 +108,11 @@ def test_grok_and_grok_cli_default_model_and_transport() -> None:
 
 def test_grok_allowlist_is_transport_scoped() -> None:
     assert lite_model_allowed("grok-4.7", transport="grok-cli")
-    assert lite_model_allowed("grok-4.6", transport="grok-cli")
     assert not lite_model_allowed("grok-4.7")
+    assert not lite_model_allowed("grok-4.7", transport="cursor-cli")
+    # grok-4.6 retired 2026-09-25: refused on every transport.
+    assert not lite_model_allowed("grok-4.6", transport="grok-cli")
     assert not lite_model_allowed("grok-4.6")
-    assert not lite_model_allowed("grok-4.6", transport="cursor-cli")
 
 
 def test_bare_grok_subscription_still_rewrites_to_cursor() -> None:
@@ -120,8 +120,8 @@ def test_bare_grok_subscription_still_rewrites_to_cursor() -> None:
     assert plan.provider == "cursor"
     assert plan.transport == "cursor-cli"
     assert plan.model == "grok-4.7-high"
-    legacy = _plan(provider=None, model="grok-4.6", subscription=True)
-    assert legacy.model == GROK46_SUBSCRIPTION_DEFAULT
+    with pytest.raises(ValueError, match="grok-4.6 is no longer"):
+        _plan(provider=None, model="grok-4.6", subscription=True)
 
 
 def test_effort_mapping_table() -> None:
@@ -139,7 +139,7 @@ def test_effort_mapping_table() -> None:
             requested,
             transport="grok-cli",
             provider="grok",
-            model="grok-4.6",
+            model="grok-4.7",
         )
         assert actual == applied
         assert bool(warnings) is (actual != requested or requested == "max")
@@ -185,7 +185,7 @@ def test_chat_command_is_read_only_neutral_and_subscription_authenticated() -> N
             {"XAI_API_KEY": "must-not-leak", "GROK_API_KEY": "must-not-leak"},
         ),
     ):
-        result = cli_chat("grok-cli", "hi", "grok-4.6", 30, reasoning_effort="high")
+        result = cli_chat("grok-cli", "hi", "grok-4.7", 30, reasoning_effort="high")
 
     assert result == "OK"
     command = popen.call_args.args[0]
@@ -200,7 +200,7 @@ def test_chat_command_is_read_only_neutral_and_subscription_authenticated() -> N
         "--permission-mode",
         "plan",
         "-m",
-        "grok-4.6",
+        "grok-4.7",
         "--reasoning-effort",
         "high",
     ]
@@ -208,7 +208,7 @@ def test_chat_command_is_read_only_neutral_and_subscription_authenticated() -> N
     assert "XAI_API_KEY" not in invocation["env"]
     assert "GROK_API_KEY" not in invocation["env"]
     logged = log_usage.call_args.kwargs
-    assert logged["model"] == "grok-4.6"
+    assert logged["model"] == "grok-4.7"
     assert logged["served_model"] == "grok-4.6-build"
     assert logged["billing"] == "subscription"
     assert logged["reported_cost_usd"] == 0.00890392
@@ -220,7 +220,7 @@ def test_agent_command_uses_caller_cwd_and_bypass_permissions() -> None:
         patch("llmx.cli_backends.subprocess.Popen", return_value=process) as popen,
         patch("llmx.usage_log.log_usage"),
     ):
-        result = cli_chat("grok-cli", "inspect", "grok-4.6", 30, mode="agent")
+        result = cli_chat("grok-cli", "inspect", "grok-4.7", 30, mode="agent")
 
     assert result == "OK"
     command = popen.call_args.args[0]
@@ -244,7 +244,7 @@ def test_long_prompt_uses_deleted_prompt_file() -> None:
         patch("llmx.cli_backends._grok_cwd", return_value="/tmp/neutral-grok"),
         patch("llmx.usage_log.log_usage"),
     ):
-        result = cli_chat("grok-cli", prompt, "grok-4.6", 30)
+        result = cli_chat("grok-cli", prompt, "grok-4.7", 30)
 
     assert result == "OK"
     command = popen.call_args.args[0]

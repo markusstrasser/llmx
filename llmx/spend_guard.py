@@ -64,7 +64,7 @@ def enforce_gemini_policy(model: str) -> None:
         f"gemini model {model!r} refused: Gemini is critique-only by operator "
         f"policy (2026-07-14). The /critique engine sets {_GEMINI_ALLOW_ENV}=1 "
         f"for its dispatches; export it yourself only for a deliberately-intended "
-        f"one-off. Otherwise use the default routing (GPT-5.6 / subscription lanes).",
+        f"one-off. Otherwise use the default routing (GPT-6 / subscription lanes).",
         model=model,
     )
 

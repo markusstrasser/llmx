@@ -119,7 +119,7 @@ class TestClaudeCliFailureParsing(unittest.TestCase):
         result = cli_chat(
             "claude-cli",
             "hi",
-            "claude-opus-4-8",
+            "claude-opus-5-5",
             30,
             mode="agent",
         )
@@ -235,7 +235,7 @@ class TestLlmSubscriptionFallback(unittest.TestCase):
         expected = Response(
             content="api response",
             provider="anthropic",
-            model="claude-opus-4-8",
+            model="claude-opus-5-5",
             usage={},
             latency=0.1,
             raw=None,
@@ -247,7 +247,7 @@ class TestLlmSubscriptionFallback(unittest.TestCase):
         ):
             llm = LLM(
                 provider="claude-cli",
-                model="claude-opus-4-8",
+                model="claude-opus-5-5",
                 auth="subscription",
             )
             with patch("llmx.api.LLM") as fallback_class:
@@ -282,7 +282,7 @@ class TestCliExitCode(unittest.TestCase):
         quota_error = QuotaError(
             MONTHLY_SPEND_DETAIL,
             provider="claude-cli",
-            model="claude-opus-4-8",
+            model="claude-opus-5-5",
             status_code=429,
         )
         with (
@@ -297,7 +297,7 @@ class TestCliExitCode(unittest.TestCase):
                     "--provider",
                     "anthropic",
                     "--model",
-                    "claude-opus-4-8",
+                    "claude-opus-5-5",
                     "hi",
                 ],
             )
@@ -330,7 +330,7 @@ class TestCliExitCode(unittest.TestCase):
                     "--provider",
                     "anthropic",
                     "--model",
-                    "claude-opus-4-8",
+                    "claude-opus-5-5",
                     "--output",
                     str(output_path),
                     "hi",
@@ -384,7 +384,7 @@ class TestProviderSubscriptionFallback(unittest.TestCase):
             chat(
                 "hi",
                 provider="anthropic",
-                model="claude-fable-5",
+                model="claude-fable-5-1",
                 temperature=0.7,
                 reasoning_effort="medium",
                 stream=False,
@@ -417,7 +417,7 @@ class TestProviderSubscriptionFallback(unittest.TestCase):
                 chat(
                     "hi",
                     provider="anthropic",
-                    model="claude-opus-4-8",
+                    model="claude-opus-5-5",
                     temperature=0.7,
                     reasoning_effort="medium",
                     stream=False,
