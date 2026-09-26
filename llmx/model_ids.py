@@ -96,4 +96,13 @@ RETIRED_API_MODELS: dict[str, str] = {
     "gemini-3.7-flash": "gemini-3.8-flash",
     "gemini-3.6-flash": "gemini-3.8-flash",
     "gemini-3.5-flash": "gemini-3.8-flash",
+    # Pass-1 ids: pass 1 only dropped them from the subscription allowlist, so the API
+    # lane still dispatched them (model-guide known-issues 2026-09-25).
+    "gpt-5.6": "gpt-6-sol",
+    "gpt-5.6-sol": "gpt-6-sol",
+    "gpt-5.6-terra": "gpt-6-sol",
+    "gpt-5.6-luna": "gpt-6-luna",
+    "claude-fable-5": "claude-fable-5-1",
+    "claude-opus-4-8": "claude-opus-5-5",
+    "gemini-3-flash-preview": "gemini-3.8-flash",
 }
