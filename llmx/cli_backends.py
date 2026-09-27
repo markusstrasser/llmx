@@ -764,8 +764,39 @@ def _claude_final_assistant_text(
     return "".join(text_parts), None
 
 
+def _claude_injected_turn(events: list) -> Optional[str]:
+    """Text of the first user turn injected after the model had answered, if any.
+
+    After the first assistant event, a one-shot call only sees tool results. A
+    text turn means something forced a continuation, such as a blocking Stop
+    hook ("Stop hook feedback: ..."), and the final message then answers that
+    turn instead of the caller's prompt.
+    """
+    answered = False
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "assistant":
+            answered = True
+            continue
+        if not answered or event.get("type") != "user":
+            continue
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str) and content.strip():
+            return content
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text
+    return None
+
+
 def _parse_claude_json(
     stdout: str,
+    *,
+    allow_continuation: bool = False,
 ) -> tuple[CliBackendResult, Optional[dict]]:
     """Unwrap verbose Claude JSON into text or a typed integrity failure.
 
@@ -773,6 +804,8 @@ def _parse_claude_json(
     the final assistant message reconstructed from verbose content blocks.
     usage = real tokens + API-equivalent total_cost_usd (present even on subscription).
     Structured errors preserve their kind, API status, and exact result detail.
+    Unless `allow_continuation` (workspace agent mode, where hooks legitimately
+    steer the run), a turn injected after the answer refuses the response.
     """
     try:
         events = json.loads(stdout)
@@ -820,6 +853,20 @@ def _parse_claude_json(
                     kind=LlmxError,
                     status=0,
                     detail=assistant_error,
+                ),
+                None,
+            )
+        injected = None if allow_continuation else _claude_injected_turn(events)
+        if injected is not None:
+            return (
+                CliBackendFailure(
+                    kind=LlmxError,
+                    status=0,
+                    detail=(
+                        "Claude CLI was forced to continue after answering "
+                        f"(injected turn: {injected[:160]!r}); the final text answers "
+                        "that turn, not the prompt; refusing response"
+                    ),
                 ),
                 None,
             )
@@ -1105,6 +1152,13 @@ def cli_chat(
                         "",
                     ]
                 )
+            if not (mode == "agent" and not lite):
+                # The empty cwd skips project settings, but user-level hooks still
+                # ran (40 events per call). A blocking Stop hook makes the model
+                # answer the hook, and that reply became the result: a 2026-09-27
+                # extraction returned "the stop hook flagged a false positive".
+                # Other user settings (env, effort) keep loading.
+                cmd.extend(["--settings", json.dumps({"disableAllHooks": True})])
             if model:
                 cmd.extend(["--model", model])
             if reasoning_effort:
@@ -1381,7 +1435,9 @@ def cli_chat(
 
         if proc.returncode != 0:
             if binary == "claude" and _claude_payload_reports_error(stdout):
-                parsed_result, _ = _parse_claude_json(stdout)
+                parsed_result, _ = _parse_claude_json(
+                    stdout, allow_continuation=(mode == "agent" and not lite)
+                )
                 if isinstance(parsed_result, CliBackendFailure):
                     logger.info(f"[cli] claude failed: {parsed_result.fallback_reason()}")
                     return parsed_result
@@ -1407,7 +1463,9 @@ def cli_chat(
         # subscription calls never reached log_usage. Best-effort: a log failure never
         # breaks the call; typed parse failures are returned to the policy boundary.
         if binary == "claude":
-            parsed_result, usage = _parse_claude_json(text)
+            parsed_result, usage = _parse_claude_json(
+                text, allow_continuation=(mode == "agent" and not lite)
+            )
             if isinstance(parsed_result, CliBackendFailure):
                 logger.info(f"[cli] claude failed: {parsed_result.fallback_reason()}")
                 return parsed_result
