@@ -1242,6 +1242,8 @@ _REASONING_HEADROOM = {
     "xhigh": 64_000,
     "max": 96_000,  # GPT-5.6+ beyond-xhigh effort
 }
+# Opus 5.5 output limit (thinking + reply); a larger request returns 400.
+_ANTHROPIC_MAX_OUTPUT = 128_000
 
 # OpenRouter takes reasoning controls as a top-level `reasoning` OBJECT, not the
 # OpenAI-style top-level `reasoning_effort` string, and its effort ceiling is
@@ -1388,14 +1390,23 @@ def _openai_chat(
     # finish_reason="length" — the "returns nothing" fault. So treat --max-tokens
     # as the VISIBLE-OUTPUT budget and add effort-scaled reasoning headroom on
     # top; cost on a reasoning model is governed by effort, not this ceiling.
-    _is_reasoning = bool(reasoning_effort) and reasoning_effort in _REASONING_HEADROOM
+    # Current Claude models think on every request (Opus 5.5 cannot disable it)
+    # and thinking counts toward the token ceiling, so an unset effort still
+    # needs headroom: reserve for the vendor default, `medium`.
+    headroom_effort = reasoning_effort
+    if provider == "anthropic-direct" and not headroom_effort:
+        headroom_effort = "medium"
+    _is_reasoning = bool(headroom_effort) and headroom_effort in _REASONING_HEADROOM
     if max_tokens:
         if _is_reasoning:
-            headroom = _REASONING_HEADROOM[reasoning_effort]
-            kwargs["max_completion_tokens"] = max_tokens + headroom
+            headroom = _REASONING_HEADROOM[headroom_effort]
+            ceiling = max_tokens + headroom
+            if provider == "anthropic-direct":
+                ceiling = min(ceiling, _ANTHROPIC_MAX_OUTPUT)
+            kwargs["max_completion_tokens"] = ceiling
             logger.info(
-                f"reasoning headroom: max_completion_tokens={max_tokens}+{headroom} "
-                f"(visible-output budget + {reasoning_effort} reasoning reserve)"
+                f"reasoning headroom: max_completion_tokens={ceiling} "
+                f"({max_tokens} visible-output budget + {headroom_effort} reasoning reserve)"
             )
         else:
             kwargs["max_completion_tokens"] = max_tokens
@@ -1768,10 +1779,17 @@ def chat(
         table_governs_effort = provider != "openrouter"
         if reasoning_effort and table_governs_effort:
             if not restriction or not restriction.get("reasoning_effort"):
-                logger.warn(
-                    f"Model {model_name} does not support --reasoning-effort parameter (ignoring)",
-                    {"model": model_name, "provider": provider},
-                )
+                if provider == "anthropic-direct":
+                    # Anthropic's OpenAI-compatible endpoint documents
+                    # `reasoning_effort` as ignored; the model runs at its default.
+                    message = (
+                        f"anthropic-direct ignores --reasoning-effort; {model_name} runs at its "
+                        "default effort (medium on Opus 5.5). Use the subscription lane "
+                        "(claude-cli --effort) to set effort."
+                    )
+                else:
+                    message = f"Model {model_name} does not support --reasoning-effort parameter (ignoring)"
+                logger.warn(message, {"model": model_name, "provider": provider})
                 reasoning_effort = None
             elif restriction.get("reasoning_effort_levels"):
                 valid_levels = restriction["reasoning_effort_levels"]

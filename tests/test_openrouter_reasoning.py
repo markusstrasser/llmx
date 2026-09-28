@@ -404,3 +404,42 @@ class TestPlanReportsWhatTheWireCarries(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnthropicDirectThinkingHeadroom(unittest.TestCase):
+    """Opus 5.5 always thinks and thinking counts toward the ceiling (vendor
+    prompting guide, 2026-09). Every request must reserve thinking headroom,
+    and the ceiling must stay within the 128K output limit."""
+
+    def _ceiling(self, effort, max_tokens):
+        from llmx import providers
+
+        with _Capture() as cap:
+            providers.chat(
+                prompt="hi", provider="anthropic-direct", model="claude-opus-5-5",
+                temperature=0.7, reasoning_effort=effort, stream=False,
+                debug=False, json_output=False, timeout=30, max_tokens=max_tokens,
+            )
+        return cap.body.get("max_completion_tokens")
+
+    def test_unset_effort_reserves_medium_headroom(self):
+        self.assertEqual(self._ceiling(None, 4_000), 4_000 + 16_000)
+
+    def test_explicit_effort_still_reserves_medium(self):
+        # The compat endpoint ignores reasoning_effort, so the model runs at
+        # its default and the reserve must match that, not the request.
+        self.assertEqual(self._ceiling("high", 4_000), 4_000 + 16_000)
+
+    def test_ceiling_clamped_to_output_limit(self):
+        self.assertEqual(self._ceiling(None, 120_000), 128_000)
+
+    def test_non_anthropic_unset_effort_is_unchanged(self):
+        from llmx import providers
+
+        with _Capture() as cap:
+            providers.chat(
+                prompt="hi", provider="openai", model="gpt-6-astra",
+                temperature=0.7, reasoning_effort=None, stream=False,
+                debug=False, json_output=False, timeout=30, max_tokens=4_000,
+            )
+        self.assertEqual(cap.body.get("max_completion_tokens"), 4_000)
