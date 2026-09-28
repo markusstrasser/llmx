@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ from unittest.mock import patch
 
 from llmx.cli_backends import (
     CliBackendFailure,
+    _codex_session_id,
     _latest_codex_rollout_usage,
     _parse_claude_json,
 )
@@ -42,47 +44,118 @@ def _claude_verbose_stdout(
     )
 
 
+def _write_rollout(path: Path, input_tokens: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"type": "event_msg", "payload": {"type": "irrelevant"}})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": input_tokens,
+                            "cached_input_tokens": 3,
+                            "output_tokens": 5,
+                            "reasoning_output_tokens": 2,
+                            "total_tokens": input_tokens + 5,
+                        }
+                    },
+                },
+            }
+        )
+        + "\n"
+    )
+
+
+_OURS = "01a0e8c2-1c3c-7cf3-814f-a9ba9ee4657e"
+_OTHER = "01a0e8c2-1c3c-78d3-826a-e70715a36db1"
+
+
 class TestCodexRolloutUsage(unittest.TestCase):
-    def test_reads_latest_new_rollout_token_count(self):
+    def test_reads_rollout_named_by_session_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            day = root / "2026" / "07" / "06"
-            day.mkdir(parents=True)
-            rollout = day / "rollout-test.jsonl"
-            rollout.write_text(
-                json.dumps({"type": "event_msg", "payload": {"type": "irrelevant"}})
-                + "\n"
-                + json.dumps(
-                    {
-                        "type": "event_msg",
-                        "payload": {
-                            "type": "token_count",
-                            "info": {
-                                "last_token_usage": {
-                                    "input_tokens": 11,
-                                    "cached_input_tokens": 3,
-                                    "output_tokens": 5,
-                                    "reasoning_output_tokens": 2,
-                                    "total_tokens": 16,
-                                }
-                            },
-                        },
-                    }
-                )
-                + "\n"
-            )
+            _write_rollout(root / "2026" / "07" / "06" / f"rollout-2026-07-06T01-03-50-{_OURS}.jsonl", 11)
 
-            usage, note = _latest_codex_rollout_usage(
-                {},
-                started_at=0,
-                root=root,
-            )
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, session_id=_OURS, root=root)
 
         self.assertIsNone(note)
         self.assertEqual(usage["prompt_tokens"], 11)
         self.assertEqual(usage["cached_tokens"], 3)
         self.assertEqual(usage["completion_tokens"], 5)
         self.assertEqual(usage["reasoning_tokens"], 2)
+
+    def test_parallel_calls_each_read_their_own_rollout(self):
+        # 2026-09-29: parallel codex calls logged the newest rollout, which belonged to
+        # another call (still running, so sometimes null tokens).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            day = root / "2026" / "09" / "29"
+            ours = day / f"rollout-2026-09-29T01-03-50-{_OURS}.jsonl"
+            other = day / f"rollout-2026-09-29T01-03-50-{_OTHER}.jsonl"
+            _write_rollout(ours, 11)
+            _write_rollout(other, 99)
+            later = ours.stat().st_mtime_ns + 1_000_000_000
+            os.utime(other, ns=(later, later))
+
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, session_id=_OURS, root=root)
+
+        self.assertIsNone(note)
+        self.assertEqual(usage["prompt_tokens"], 11)
+
+    def test_without_session_id_several_new_rollouts_leave_usage_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            day = root / "2026" / "09" / "29"
+            _write_rollout(day / f"rollout-2026-09-29T01-03-50-{_OURS}.jsonl", 11)
+            _write_rollout(day / f"rollout-2026-09-29T01-03-50-{_OTHER}.jsonl", 99)
+
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, root=root)
+
+        self.assertIsNone(usage["prompt_tokens"])
+        self.assertIn("2 new codex rollouts", note)
+
+    def test_without_session_id_single_new_rollout_is_attributed_by_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_rollout(root / "2026" / "09" / "29" / f"rollout-2026-09-29T01-03-50-{_OURS}.jsonl", 11)
+
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, root=root)
+
+        self.assertEqual(usage["prompt_tokens"], 11)
+        self.assertIn("attributed by time", note)
+
+    def test_changed_parent_rollout_is_never_attributed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent = root / "2026" / "09" / "29" / f"rollout-2026-09-29T00-00-00-{_OTHER}.jsonl"
+            _write_rollout(parent, 99)
+            before = {parent: parent.stat().st_mtime_ns - 1}
+
+            usage, note = _latest_codex_rollout_usage(before, started_at=0, root=root)
+
+        self.assertIsNone(usage["prompt_tokens"])
+        self.assertIn("0 new codex rollouts", note)
+
+    def test_session_id_without_rollout_leaves_usage_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, session_id=_OURS, root=Path(tmp))
+
+        self.assertIsNone(usage["prompt_tokens"])
+        self.assertIn(f"0 codex rollouts match session {_OURS}", note)
+
+    def test_session_id_parsed_from_stderr_header(self):
+        stderr = (
+            "Reading additional input from stdin...\n"
+            "OpenAI Codex v0.156.1\n--------\nworkdir: /tmp/x\nmodel: gpt-6-astra\n"
+            "session id: 01A0E8D3-D4D8-7530-8ACC-D342521484F1\n--------\nuser\nhi\n"
+        )
+        self.assertEqual(_codex_session_id(stderr), "01a0e8d3-d4d8-7530-8acc-d342521484f1")
+        self.assertIsNone(_codex_session_id("user\nsession id: not-an-id\n"))
+        self.assertIsNone(_codex_session_id(None))
 
     def test_missing_rollout_returns_null_usage_with_note(self):
         with tempfile.TemporaryDirectory() as tmp:

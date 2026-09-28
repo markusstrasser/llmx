@@ -16,6 +16,7 @@ CLI flag reference (verified 2026-03):
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -223,6 +224,9 @@ def lite_model_allowed(model: Optional[str], *, transport: Optional[str] = None)
 # macOS ARG_MAX is ~260KB but shells/tools choke earlier.
 _ARG_MAX_BYTES = 100_000
 _CODEX_SESSIONS_DIR = Path(os.path.expanduser("~/.codex/sessions"))
+# `codex exec` prints this line in its stderr header (observed v0.156.1); the id also
+# ends the rollout's filename, rollout-<timestamp>-<id>.jsonl.
+_CODEX_SESSION_ID_RE = re.compile(r"^session id:\s*([0-9a-fA-F-]{36})\s*$", re.MULTILINE)
 
 
 def configured_cli_provider(provider: str, lite: Optional[str] = None) -> Optional[str]:
@@ -534,23 +538,43 @@ def _null_codex_usage() -> dict[str, Optional[int]]:
     }
 
 
+def _codex_session_id(stderr: Optional[str]) -> Optional[str]:
+    """Return the session id from the `codex exec` stderr header, if printed."""
+    if not stderr:
+        return None
+    match = _CODEX_SESSION_ID_RE.search(stderr)
+    return match.group(1).lower() if match else None
+
+
 def _latest_codex_rollout_usage(
     before: dict[Path, int],
     *,
     started_at: float,
+    session_id: Optional[str] = None,
     root: Path = _CODEX_SESSIONS_DIR,
 ) -> tuple[dict[str, Optional[int]], Optional[str]]:
-    """Find the rollout created/updated by this codex-cli call and parse tokens.
+    """Find this codex-cli call's rollout and parse its tokens.
 
-    `codex exec` creates a fresh rollout in ~/.codex/sessions. In agent-driven
-    runs the parent Codex session is also being updated, so prefer newly created
-    files and use changed files only as a fallback.
+    The session id from the stderr header names the rollout exactly. Without it,
+    time is the only clue, and it is safe only when a single rollout appeared
+    since launch: parallel calls each create one (the newest file can be another
+    call's, still running), and a parent Codex session keeps updating its own.
+    Otherwise usage stays unknown, with a note, rather than taking another
+    call's tokens.
     """
     if not root.exists():
         return _null_codex_usage(), f"codex sessions dir not found: {root}"
 
-    new_files: list[tuple[int, Path]] = []
-    changed_files: list[tuple[int, Path]] = []
+    if session_id:
+        try:
+            matches = sorted(root.glob(f"*/*/*/rollout-*-{session_id}.jsonl"))
+        except OSError as exc:
+            return _null_codex_usage(), f"could not list codex rollouts: {exc}"
+        if len(matches) != 1:
+            return _null_codex_usage(), f"{len(matches)} codex rollouts match session {session_id}"
+        return _read_codex_rollout_usage(matches[0])
+
+    new_files: list[Path] = []
     cutoff_ns = int((started_at - 2.0) * 1_000_000_000)
     try:
         paths = list(root.glob("*/*/*/rollout-*.jsonl"))
@@ -562,20 +586,16 @@ def _latest_codex_rollout_usage(
             mtime_ns = path.stat().st_mtime_ns
         except OSError:
             continue
-        if mtime_ns < cutoff_ns:
-            continue
-        previous = before.get(path)
-        if previous is None:
-            new_files.append((mtime_ns, path))
-        elif previous != mtime_ns:
-            changed_files.append((mtime_ns, path))
+        if mtime_ns >= cutoff_ns and path not in before:
+            new_files.append(path)
 
-    candidates = sorted(new_files or changed_files, reverse=True)
-    if not candidates:
-        return _null_codex_usage(), "no codex rollout changed after cli invocation"
-
-    usage, note = _read_codex_rollout_usage(candidates[0][1])
-    return usage, note
+    if len(new_files) != 1:
+        return _null_codex_usage(), (
+            f"no session id in codex stderr and {len(new_files)} new codex rollouts "
+            "since launch; usage unknown rather than guessed"
+        )
+    usage, note = _read_codex_rollout_usage(new_files[0])
+    return usage, note or "attributed by time: no session id in codex stderr"
 
 
 _QUOTA_MARKERS = (
@@ -1399,6 +1419,7 @@ def cli_chat(
                 usage, note = _latest_codex_rollout_usage(
                     codex_rollouts_before,
                     started_at=start,
+                    session_id=_codex_session_id(stderr),
                 )
                 if note_prefix and note:
                     note = f"{note_prefix}; {note}"
