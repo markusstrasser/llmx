@@ -1320,6 +1320,33 @@ def _openai_request_parameters(
     return parameters
 
 
+def _openai_rate_limit_error(e: Exception, provider: str, model_name: str) -> LlmxError:
+    """Map an OpenAI 429 to QuotaError (billing exhausted) or RateLimitError (transient).
+
+    The SDK passes the inner error object as `body` (`body.get("error", body)`) and
+    copies its `code` and `type` onto the exception, so look there first; a raw
+    wrapped body is still accepted.
+    """
+    body = getattr(e, "body", None)
+    inner = body.get("error", body) if isinstance(body, dict) else None
+    if not isinstance(inner, dict):
+        inner = {}
+    markers = {getattr(e, "code", None), getattr(e, "type", None), inner.get("code"), inner.get("type")}
+    if "insufficient_quota" in markers:
+        return QuotaError(
+            f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",
+            provider=provider,
+            model=model_name,
+            status_code=429,
+        )
+    return RateLimitError(
+        f"Rate limit exceeded for {provider}/{model_name}. Wait and retry.",
+        provider=provider,
+        model=model_name,
+        status_code=429,
+    )
+
+
 def _openai_chat(
     prompt,
     model,
@@ -1956,23 +1983,7 @@ def chat(
             ) from e
         raise LlmxError(str(e), provider="google", model=model_name) from e
     except openai_module.RateLimitError as e:
-        # OpenAI throws RateLimitError for both transient 429s AND permanent quota exhaustion.
-        # Parse the error body to distinguish them.
-        err_body = getattr(e, "body", {}) or {}
-        err_code = err_body.get("error", {}).get("code", "") if isinstance(err_body, dict) else ""
-        if err_code == "insufficient_quota":
-            raise QuotaError(
-                f"BILLING EXHAUSTED for {provider}/{model_name}. Top up at https://platform.openai.com/settings/organization/billing",
-                provider=provider,
-                model=model_name,
-                status_code=429,
-            ) from e
-        raise RateLimitError(
-            f"Rate limit exceeded for {provider}/{model_name}. Wait and retry.",
-            provider=provider,
-            model=model_name,
-            status_code=429,
-        ) from e
+        raise _openai_rate_limit_error(e, provider, model_name) from e
     except openai_module.APITimeoutError as e:
         raise TimeoutError_(
             f"Request timed out for {provider}/{model_name}.",
