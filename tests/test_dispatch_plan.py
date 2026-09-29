@@ -25,6 +25,14 @@ class TestEffortNormalize(unittest.TestCase):
         applied, _ = map_effort_for_backend("max", transport="claude-cli", provider="anthropic")
         self.assertEqual(applied, "max")
 
+    def test_claude_xhigh_is_native(self):
+        # 2026-09-30: stale mapping silently raised requested xhigh to max.
+        applied, warns = resolve_effort(
+            "xhigh", transport="claude-cli", provider="anthropic"
+        )
+        self.assertEqual(applied, "xhigh")
+        self.assertEqual(warns, [])
+
     def test_api_max_maps_xhigh_pre_56(self):
         applied, warns = map_effort_for_backend(
             "max", transport="openai-api", provider="openai", model="gpt-5.4"

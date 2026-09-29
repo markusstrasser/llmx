@@ -10,6 +10,7 @@ from llmx.cli_backends import (
     _codex_session_id,
     _latest_codex_rollout_usage,
     _parse_claude_json,
+    cli_chat,
 )
 from llmx.providers import LlmxError, _normalize_usage
 
@@ -187,7 +188,48 @@ class TestClaudeCliUsage(unittest.TestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(usage["model"], "claude-fable-5")
+        self.assertEqual(usage["served_model"], "claude-fable-5")
         self.assertIsNone(usage["reasoning_tokens"])
+
+    def test_claude_log_receipt_never_falls_back_to_requested_model(self):
+        # 2026-09-30: model mixed requested/provider values and served_model
+        # stayed null, so the old telemetry could not verify model provenance.
+        for model_usage, expected in (
+            ({"claude-opus-5-5[1m]": {}}, "claude-opus-5-5"),
+            ({}, None),
+            ({"claude-opus-5-5": {}, "claude-haiku-4-5": {}}, None),
+        ):
+            with self.subTest(model_usage=model_usage), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "usage.jsonl"
+                with (
+                    patch("llmx.cli_backends.subprocess.Popen") as popen,
+                    patch("llmx.usage_log._LOG_PATH", path),
+                    patch("llmx.usage_log._resolve_caller", return_value="offline-test"),
+                ):
+                    process = popen.return_value
+                    process.pid = 123
+                    process.returncode = 0
+                    process.communicate.return_value = (
+                        _claude_verbose_stdout("ok", model_usage=model_usage), ""
+                    )
+                    result = cli_chat(
+                        "claude-cli", "hi", "requested-alias", 30,
+                        reasoning_effort="xhigh",
+                    )
+                row = json.loads(path.read_text())
+                command = next(
+                    c.args[0] for c in popen.call_args_list
+                    if c.args and c.args[0][0] == "claude"
+                )
+                self.assertEqual(result, "ok")
+                self.assertEqual(command[command.index("--effort") + 1], "xhigh")
+                self.assertEqual(row["reasoning_effort"], "xhigh")
+                self.assertEqual(row["served_model"], expected)
+                self.assertEqual(row["source"], "claude-cli-json")
+                if expected is None:
+                    self.assertIn("served_model unknown", row["note"])
+                if not model_usage:
+                    self.assertEqual(row["model"], "requested-alias")
 
     def test_parse_claude_json_reads_reasoning_when_exposed(self):
         stdout = _claude_verbose_stdout(

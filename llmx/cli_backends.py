@@ -913,6 +913,16 @@ def _parse_claude_json(
         raw_usage = event.get("usage") or {}
         model_usage = event.get("modelUsage") or {}
         model_key = next(iter(model_usage), None)
+        # Preserve the existing pricing model, but a served-model receipt must
+        # be unambiguous provider evidence, never the requested-model fallback.
+        served_model = (
+            model_key.split("[")[0]
+            if isinstance(model_usage, dict)
+            and len(model_usage) == 1
+            and isinstance(model_key, str)
+            and model_key
+            else None
+        )
         details = (
             raw_usage.get("output_tokens_details")
             or raw_usage.get("completion_tokens_details")
@@ -933,6 +943,7 @@ def _parse_claude_json(
         # Some versions/models may add thinking/reasoning tokens; if absent,
         # keep null rather than writing 0, which would falsely claim measurement.
         usage = {
+            "served_model": served_model,
             "model": model_key.split("[")[0]
             if isinstance(model_key, str)
             else None,  # strip [1m] etc → PRICING key
@@ -1498,6 +1509,12 @@ def cli_chat(
                     log_usage(
                         provider=provider,
                         model=usage.get("model") or model or "?",
+                        served_model=usage.get("served_model"),
+                        source="claude-cli-json",
+                        note=(
+                            "Claude CLI modelUsage missing or ambiguous; served_model unknown"
+                            if usage.get("served_model") is None else None
+                        ),
                         transport="claude-cli",  # subscription/CLI — cost is API-EQUIVALENT, not spend
                         reasoning_effort=reasoning_effort,
                         prompt_tokens=usage.get("input_tokens"),

@@ -101,18 +101,18 @@ def map_effort_for_backend(
             return "xhigh", ["effort max mapped to xhigh for API transport"]
         return e, warnings
     if transport == "claude-cli":
-        # Claude Code headless --effort: low|medium|high|max
+        # Claude Code headless --effort: low|medium|high|xhigh|max
         mapping = {
             "none": "low",
             "minimal": "low",
             "low": "low",
             "medium": "medium",
             "high": "high",
-            "xhigh": "max",
+            "xhigh": "xhigh",
             "max": "max",
         }
         applied = mapping.get(e, "high")
-        if e in {"none", "minimal", "xhigh"}:
+        if e in {"none", "minimal"}:
             warnings.append(f"effort {e} mapped to {applied} for claude-cli")
         return applied, warnings
     if transport == "grok-cli":
