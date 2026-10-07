@@ -482,3 +482,17 @@ class TestAstraCost(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_client_rejected_call_costs_zero_not_unknown() -> None:
+    from llmx.usage_report import cost_for_usage
+
+    rejected = {
+        "model": "gpt-6-astra",
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "error": "RateLimitError: Error code: 429 - {'error': {'code': 'credit_balance_exhausted'}}",
+    }
+    assert cost_for_usage(rejected, conservative=True) == 0.0
+    timed_out = {**rejected, "error": "APITimeoutError: Request timed out."}
+    assert cost_for_usage(timed_out, conservative=True) is None

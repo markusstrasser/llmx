@@ -11,6 +11,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -223,9 +224,21 @@ def output_tokens(row: dict) -> int:
     return completion if included else completion + (row.get("reasoning_tokens") or 0)
 
 
+# SDK errors carry the HTTP status ("RateLimitError: Error code: 429 - ..."). A 4xx means
+# the provider refused the request before generating, so nothing was billed.
+_CLIENT_REJECTION = re.compile(r"\bError code: 4\d\d\b")
+
+
 def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:
-    """Price reported totals; absent input/output totals leave cost unknown."""
+    """Price reported totals; absent input/output totals leave cost unknown.
+
+    A request refused with a 4xx and no reported usage costs $0, not unknown: an
+    exhausted-credit 429 otherwise left the doctor's daily total permanently
+    [DEGRADED] (2026-10-07).
+    """
     if row.get("prompt_tokens") is None or row.get("completion_tokens") is None:
+        if _CLIENT_REJECTION.search(row.get("error") or ""):
+            return 0.0
         return None
     return est_cost(
         row.get("model") or "",
