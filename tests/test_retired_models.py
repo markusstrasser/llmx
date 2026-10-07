@@ -72,3 +72,15 @@ def test_composer_retired_to_astra_low(model: str) -> None:
 def test_pass2_successors_route() -> None:
     for model in ("gpt-6-luna", "gpt-6-sol", "grok-4.7", "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"):
         assert _auto_upgrade_model(model) == model
+
+
+@pytest.mark.parametrize("model", ["composer-2.5", "gpt-5.3"])
+def test_cli_refuses_retired_id_with_exit_2(model: str) -> None:
+    # A retired id is a usage error (exit 2) naming the successor, never untyped exit 1.
+    from click.testing import CliRunner
+
+    from llmx.cli import cli
+
+    result = CliRunner().invoke(cli, ["chat", "-m", model, "hi"])
+    assert result.exit_code == 2, result.output
+    assert f"use -m {RETIRED_API_MODELS[model]}" in result.output

@@ -35,7 +35,7 @@ from .providers import (
 from .cli_backends import (
     lite_model_allowed, LITE_ALLOWED_MODELS, LITE_PROMPT_PREFIX,
 )
-from .model_ids import GROK_BUILD_MODELS
+from .model_ids import GROK_BUILD_MODELS, RetiredModelError
 from .info_cmd import info_cmd
 from .logger import configure_logger, logger
 
@@ -938,6 +938,17 @@ def chat_cmd(
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(130)
+    except RetiredModelError as error:
+        # Usage error like the allowlist gate (exit 2), not an untyped failure (exit 1):
+        # callers branch on the code, and the message names the successor.
+        click.echo("[llmx:ERROR] type=retired_model exit=2", err=True)
+        if json_output:
+            click.echo(json.dumps({
+                "error": "retired_model", "message": str(error), "exit_code": 2,
+            }, indent=2), err=True)
+        else:
+            click.echo(f"Error: {error}", err=True)
+        sys.exit(2)
     except SearchUnavailableError as error:
         click.echo(f"⚠ {error}", err=True)
         sys.exit(5)  # exit 5 = model-error (search not available for this model)

@@ -49,6 +49,10 @@ _GROK_BARE_TO_SUBSCRIPTION = {
 }
 
 
+class RetiredModelError(ValueError):
+    """A retired id was requested. The CLI exits 2 (usage error) and names the successor."""
+
+
 def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
     """Resolve a supported bare Grok subscription id, rejecting retired 4.5.
 
@@ -61,7 +65,7 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
         return None
     normalized = model.strip().lower().removeprefix("xai/")
     if normalized in ("grok-4.5", "grok-4.6"):
-        raise ValueError(
+        raise RetiredModelError(
             f"{normalized} is no longer the current subscription model; use -m grok-4.7 "
             "(Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
         )

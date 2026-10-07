@@ -21,6 +21,7 @@ from .model_ids import (
     CURSOR_GROK_MODELS,
     GROK_BUILD_MODELS,
     RETIRED_API_MODELS,
+    RetiredModelError,
     resolve_grok_subscription_slug,
     retired_on,
 )
@@ -575,7 +576,7 @@ def _auto_upgrade_model(model: str) -> str:
     key = model.removeprefix("cursor/")
     successor = RETIRED_API_MODELS.get(key)
     if successor:
-        raise ValueError(f"{model} was retired {retired_on(key)}; use -m {successor}")
+        raise RetiredModelError(f"{model} was retired {retired_on(key)}; use -m {successor}")
     upgraded = _MODEL_UPGRADES.get(model)
     if upgraded:
         logger.warn(f"Model '{model}' is deprecated — auto-upgrading to '{upgraded}'")

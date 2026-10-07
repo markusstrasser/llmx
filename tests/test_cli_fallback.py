@@ -274,7 +274,7 @@ class TestCliExitCode(unittest.TestCase):
             ["chat", "--dry-run", "--subscription", "--model", "grok-4.5", "hi"],
         )
 
-        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertEqual(result.exit_code, 2, result.output)  # retired id = usage error
         self.assertIn("grok-4.7-high", result.output)
         self.assertIn("-p grok -m grok-4.7", result.output)
 
