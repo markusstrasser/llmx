@@ -57,7 +57,7 @@ def resolve_auth(
     if prov in ("anthropic-direct",):
         return _finalize("api", "explicit_provider", lite, False, warnings)
 
-    if prov in ("cursor", "cursor-cli", "composer", "grok", "grok-cli"):
+    if prov in ("cursor", "cursor-cli", "grok", "grok-cli"):
         return _finalize("subscription", "default_policy", lite, False, warnings)
 
     if prov in ("anthropic", "claude-cli"):

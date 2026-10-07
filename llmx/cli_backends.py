@@ -64,8 +64,8 @@ CLI_PROVIDERS = {
         "api_fallback": "anthropic",
     },
     # Cursor CLI (cursor-agent) in headless `-p` mode with the user's Cursor
-    # app subscription auth. NO api_fallback: composer-2.5 is Cursor-exclusive
-    # (no public API), and proxied models (claude/gpt/gemini via the sub) have
+    # app subscription auth. NO api_fallback: Cursor-native slugs (grok-4.7-*)
+    # have no $0 API path, and proxied models (claude/gpt/gemini via the sub) have
     # no $0 API path either — a feature the CLI can't do raises, never silently
     # routes to a paid API. Always-on (not lite-gated): cursor-agent --mode ask
     # is already lightweight (~1s startup, no MCP).
@@ -176,7 +176,7 @@ def _research_mcp_args() -> list[str]:
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
 # research-mcp only); gpt-6-* route via codex-cli. Allowlist = Pareto frontier
 # only (2026-09-25 prune retired gpt-5.6-*, claude-fable-5, claude-opus-4-8,
-# gemini-3-flash-preview, grok-4.6 lanes).
+# gemini-3-flash-preview, grok-4.6 lanes; 2026-10-07 retired composer-2.5*).
 LITE_ALLOWED_MODELS = {
     "gpt-6-astra",
     "gpt-6",  # alias → astra
@@ -192,8 +192,7 @@ LITE_ALLOWED_MODELS = {
     # 2026-09-22: Opus 5.5 (same transport; Claude Code 2.1.280's default Opus).
     # Thinking can't be disabled — effort is the only control (API default medium).
     "claude-opus-5-5",
-    # Cursor subscription pool: composer plus exact Grok 4.7 slugs.
-    "composer-2.5",
+    # Cursor subscription pool: exact Grok 4.7 slugs (composer-2.5 retired 2026-10-07).
     *CURSOR_GROK_MODELS,
 }
 

@@ -22,6 +22,7 @@ from .model_ids import (
     GROK_BUILD_MODELS,
     RETIRED_API_MODELS,
     resolve_grok_subscription_slug,
+    retired_on,
 )
 
 if TYPE_CHECKING:
@@ -407,11 +408,11 @@ PROVIDER_CONFIGS = {
         "supports_streaming": False,
         "api_fallback": "anthropic",
     },
-    # Cursor app subscription via cursor-agent. composer-2.5 is the default
-    # (Cursor-exclusive); proxied models reachable as cursor/<model> or
-    # -p cursor -m <model>. No api_fallback — subscription-only transport.
+    # Cursor app subscription via cursor-agent. Default is the cheapest pool slug,
+    # grok-4.7-low (composer-2.5 retired 2026-10-07); proxied models reachable as
+    # cursor/<model> or -p cursor -m <model>. No api_fallback — subscription-only.
     "cursor": {
-        "model": "composer-2.5",
+        "model": "grok-4.7-low",
         "env_var": None,  # Cursor app login (cursor-agent status)
         "temperature_range": (0.0, 1.0),
         "supports_streaming": False,
@@ -515,8 +516,6 @@ _KNOWN_MODELS = {
         "grok-4.7",
     ],
     "cursor": [
-        "composer-2.5",
-        "composer-2.5-fast",
         *CURSOR_GROK_MODELS,
     ],
     "grok": [*GROK_BUILD_MODELS],
@@ -572,11 +571,11 @@ _MODEL_UPGRADES = {
 
 def _auto_upgrade_model(model: str) -> str:
     """Auto-upgrade deprecated model names. Returns upgraded name or original."""
-    successor = RETIRED_API_MODELS.get(model)
+    # cursor/<id> reaches cursor-agent with the prefix stripped, so check the bare id too.
+    key = model.removeprefix("cursor/")
+    successor = RETIRED_API_MODELS.get(key)
     if successor:
-        raise ValueError(
-            f"{model} was retired 2026-09-25 (Pareto-frontier prune); use -m {successor}"
-        )
+        raise ValueError(f"{model} was retired {retired_on(key)}; use -m {successor}")
     upgraded = _MODEL_UPGRADES.get(model)
     if upgraded:
         logger.warn(f"Model '{model}' is deprecated — auto-upgrading to '{upgraded}'")
@@ -603,8 +602,9 @@ def infer_provider_from_model(model: str) -> Optional[str]:
     # Cursor subscription transport — the `cursor/` prefix is an explicit override that MUST
     # win over every substring check below: cursor/gemini-..., cursor/kimi-..., cursor/grok-...
     # proxy THROUGH the Cursor subscription, not the paid Google/Kimi/xAI APIs. Placing this
-    # after the substring checks silently billed those families (and 404'd). composer-* and
-    # Exact Cursor-native Grok 4.7 slugs are Cursor-exclusive. Bare `grok-4.x`
+    # after the substring checks silently billed those families (and 404'd). Exact
+    # Cursor-native Grok 4.7 slugs are Cursor-exclusive; composer-* (retired 2026-10-07)
+    # stays on cursor so a stray id never infers a paid API. Bare `grok-4.x`
     # remains the xAI API model; do not infer it as a subscription route. Any
     # `cursor-grok-*` id (incl. retired 4.6 slugs) stays on cursor so it fails
     # closed at the exact-slug gate instead of falling through to paid xAI.

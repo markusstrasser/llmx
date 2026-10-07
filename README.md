@@ -240,7 +240,7 @@ def expensive(code):
 | `anthropic` | Claude Opus 5 | **claude-cli subscription by default**; keys stripped |
 | `anthropic-direct` | Claude Opus 5 | Metered Anthropic API (explicit opt-in) |
 | `xai` | Grok 4.7 | Metered xAI API; bare `grok-4.7` under `--subscription` routes to Cursor `grok-4.7-high` |
-| `cursor` / `cursor-cli` | Composer / pool models | Subscription / Cursor pool |
+| `cursor` / `cursor-cli` | `grok-4.7-low` / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
 | `cerebras` | Qwen 3.8 27B | Fast coding and agent loops; set `-e none` for minimum latency |
 | `deepseek` | DeepSeek Chat | |
@@ -271,7 +271,7 @@ llmx chat --subscription -m claude-opus-5-5 …
 - GPT-6 Astra (`gpt-6-astra`, alias `gpt-6`): default OpenAI / Codex subscription model. Effort `low`…`max`; `none`/`minimal` map to `low`.
 - GPT-6 cost tiers: `gpt-6-sol`, `gpt-6-luna` (alias `gpt-6` → `gpt-6-astra`).
 - Claude Fable 5.1 (`claude-fable-5-1`): current Fable slug on claude-cli.
-- Routing allowlists hold the Pareto frontier only. Retired 2026-09-25 (refused, priced for history only): `gpt-5.6*`, `claude-fable-5`, `claude-opus-4-8`, `gemini-3-flash-preview`, `cursor-grok-4.6-*`, `grok-4.6`. Pass 2 (API ids, refused with a successor): `gpt-5`/`5.1`/`5.2`/`5.4`/`-pro`/`-codex` → `gpt-6-sol`/`gpt-6-luna`; `gpt-5.3`/`5.3-chat-latest`/`5.3-codex` → `gpt-6-luna` (operator ruling "6 luna wins"); `grok-4.5`, `grok-4`, `grok-4-1-fast-*`, `grok-4.20-*`, `grok-beta` → `grok-4.7`; `gemini-3-pro-preview` → `gemini-3.1-pro-preview`; `gemini-3.5/3.6/3.7-flash` → `gemini-3.8-flash`.
+- Routing allowlists hold the Pareto frontier only. Retired 2026-09-25 (refused, priced for history only): `gpt-5.6*`, `claude-fable-5`, `claude-opus-4-8`, `gemini-3-flash-preview`, `cursor-grok-4.6-*`, `grok-4.6`. Pass 2 (API ids, refused with a successor): `gpt-5`/`5.1`/`5.2`/`5.4`/`-pro`/`-codex` → `gpt-6-sol`/`gpt-6-luna`; `gpt-5.3`/`5.3-chat-latest`/`5.3-codex` → `gpt-6-luna` (operator ruling "6 luna wins"); `grok-4.5`, `grok-4`, `grok-4-1-fast-*`, `grok-4.20-*`, `grok-beta` → `grok-4.7`; `gemini-3-pro-preview` → `gemini-3.1-pro-preview`; `gemini-3.5/3.6/3.7-flash` → `gemini-3.8-flash`. Retired 2026-10-07 (refused, operator: "outdated"): `composer-2.5`, `composer-2.5-fast` → `gpt-6-astra --subscription -e low`; the `cursor` provider default is now `grok-4.7-low`.
 - Claude Opus 5.5 (`claude-opus-5-5`): claude-cli and anthropic-direct, $4/$20, 1M context. Thinking is always on, so effort is the only control (API default `medium`); current Opus default. `claude-opus-5` stays an explicit pin for the biology-fallback lane (Opus 5.5 declines dual-use biology).
 - Grok 4.7 via Cursor subscription: use an exact live slug such as
   `grok-4.7-high` or `grok-4.7-high-fast` (effort `low`/`medium`/`high`/`xhigh`).

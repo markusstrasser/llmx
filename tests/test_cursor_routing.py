@@ -20,9 +20,15 @@ def test_cursor_prefix_overrides_substring_families() -> None:
         assert infer(model) == "cursor", f"{model} must route to cursor"
 
 
-def test_bare_composer_is_cursor() -> None:
-    assert infer("composer-2.5") == "cursor"
-    assert infer("composer-2.5-fast") == "cursor"
+def test_retired_composer_stays_on_cursor_and_off_allowlists() -> None:
+    # Retired 2026-10-07: still infers cursor (never a paid API), never allowlisted.
+    from llmx.providers import _KNOWN_MODELS, PROVIDER_CONFIGS
+
+    for model in ("composer-2.5", "composer-2.5-fast"):
+        assert infer(model) == "cursor"
+        assert not lite_model_allowed(model)
+        assert model not in _KNOWN_MODELS["cursor"]
+    assert PROVIDER_CONFIGS["cursor"]["model"] == "grok-4.7-low"
 
 
 def test_retired_grok46_slugs_are_refused() -> None:

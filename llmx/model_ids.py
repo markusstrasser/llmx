@@ -106,3 +106,20 @@ RETIRED_API_MODELS: dict[str, str] = {
     "claude-opus-4-8": "claude-opus-5-5",
     "gemini-3-flash-preview": "gemini-3.8-flash",
 }
+
+# Cursor Composer retired 2026-10-07 (operator: "outdated"; `cursor-agent models` lists no
+# newer Composer). Successor by operator choice: GPT-6 Astra at low effort on the $0 codex
+# subscription. Never priced in usage_report (Cursor pool, no list price), so no history row.
+COMPOSER_RETIRED_MODELS: tuple[str, ...] = ("composer-2.5", "composer-2.5-fast")
+COMPOSER_SUCCESSOR = "gpt-6-astra --subscription -e low"
+RETIRED_API_MODELS.update({model: COMPOSER_SUCCESSOR for model in COMPOSER_RETIRED_MODELS})
+
+# Retirement date and reason per id; ids absent here retired in the 2026-09-25 prune.
+_PRUNE_2026_09_25 = "2026-09-25 (Pareto-frontier prune)"
+RETIRED_ON: dict[str, str] = {
+    model: "2026-10-07 (Composer outdated)" for model in COMPOSER_RETIRED_MODELS
+}
+
+
+def retired_on(model: str) -> str:
+    return RETIRED_ON.get(model, _PRUNE_2026_09_25)

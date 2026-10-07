@@ -23,12 +23,12 @@ def test_cursor_registry_parser_is_hermetic() -> None:
 
 cursor-grok-4.6-high - Cursor Grok 4.6
 cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
-composer-2.5 - Composer 2.5 (current)
+grok-4.7-low - Grok 4.7 Low
 """
     assert parse_cursor_model_ids(output) == {
         "cursor-grok-4.6-high",
         "cursor-grok-4.6-high-fast",
-        "composer-2.5",
+        "grok-4.7-low",
     }
 
 

@@ -1,4 +1,4 @@
-"""Retired model ids (2026-09-25 Pareto-frontier prune) must fail closed."""
+"""Retired model ids (2026-09-25 Pareto-frontier prune, 2026-10-07 Composer) fail closed."""
 
 import pytest
 
@@ -16,6 +16,8 @@ RETIRED = (
     "gemini-3-flash-preview",
     "grok-4.6",
     *CURSOR_GROK46_RETIRED_MODELS,
+    "composer-2.5",
+    "composer-2.5-fast",
 )
 
 
@@ -43,7 +45,7 @@ from llmx.providers import _KNOWN_MODELS, _auto_upgrade_model  # noqa: E402
 
 @pytest.mark.parametrize("model", sorted(RETIRED_API_MODELS))
 def test_retired_api_ids_refuse_with_successor(model: str) -> None:
-    with pytest.raises(ValueError, match="retired 2026-09-25"):
+    with pytest.raises(ValueError, match=r"retired 2026-(09-25|10-07)"):
         _auto_upgrade_model(model)
     assert all(model not in ids for ids in _KNOWN_MODELS.values())
 
@@ -54,6 +56,17 @@ def test_gpt53_retired_to_luna() -> None:
         assert RETIRED_API_MODELS[model] == "gpt-6-luna"
         with pytest.raises(ValueError, match="use -m gpt-6-luna"):
             _auto_upgrade_model(model)
+
+
+@pytest.mark.parametrize(
+    "model", ["composer-2.5", "composer-2.5-fast", "cursor/composer-2.5", "cursor/composer-2.5-fast"]
+)
+def test_composer_retired_to_astra_low(model: str) -> None:
+    # Operator 2026-10-07: "llmx shouldn't use composer 2.5 anymore ... it's outdated".
+    with pytest.raises(
+        ValueError, match=r"retired 2026-10-07 .*use -m gpt-6-astra --subscription -e low"
+    ):
+        _auto_upgrade_model(model)
 
 
 def test_pass2_successors_route() -> None:
