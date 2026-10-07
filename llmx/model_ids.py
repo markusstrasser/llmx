@@ -79,6 +79,7 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
 _GROK_SUCCESSOR = "grok-4.7 (Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
 
 RETIRED_API_MODELS: dict[str, str] = {
+    "gpt-5.5": "gpt-6-sol",
     "gpt-5.4": "gpt-6-sol",
     "gpt-5.3": "gpt-6-luna",
     "gpt-5.3-chat-latest": "gpt-6-luna",
