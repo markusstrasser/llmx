@@ -1245,6 +1245,14 @@ _REASONING_HEADROOM = {
 }
 # Opus 5.5 output limit (thinking + reply); a larger request returns 400.
 _ANTHROPIC_MAX_OUTPUT = 128_000
+# Output ceilings of the subscription Claude models (model-guide specs: 128K each).
+# Claude Code caps output below them by default, and an answer that crosses the cap
+# fails instead of finishing, so claude-cli calls raise the cap to the model's ceiling.
+CLAUDE_CLI_MAX_OUTPUT_TOKENS = {
+    "claude-opus-5-5": 128_000,
+    "claude-fable-5-1": 128_000,
+    "claude-opus-5": 128_000,
+}
 
 # OpenRouter takes reasoning controls as a top-level `reasoning` OBJECT, not the
 # OpenAI-style top-level `reasoning_effort` string, and its effort ceiling is

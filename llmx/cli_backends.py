@@ -28,6 +28,7 @@ from typing import Optional, TypeAlias
 from .logger import logger
 from .model_ids import CURSOR_GROK_MODELS, GROK_BUILD_MODELS
 from .providers import (
+    CLAUDE_CLI_MAX_OUTPUT_TOKENS,
     ApiKeyError,
     LlmxError,
     ModelError,
@@ -1314,6 +1315,12 @@ def cli_chat(
                 env.pop("ANTHROPIC_API_KEY", None)
                 env.pop("CLAUDE_API_KEY", None)
                 logger.debug("[cli] claude-cli OAuth (API keys stripped)")
+                # A caller's explicit cap wins. 2026-10-08: two Opus 5.5 max-effort judge
+                # calls stopped at the CLI cap and left 0-byte answers.
+                model_id = (model or "").removesuffix("[1m]")
+                output_ceiling = CLAUDE_CLI_MAX_OUTPUT_TOKENS.get(model_id)
+                if output_ceiling and "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in env:
+                    env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(output_ceiling)
 
         # When the CLI runs from llmx's cache cwd, record durable attribution
         # (cwd marker + sidecar). Child env does NOT survive into transcripts.
