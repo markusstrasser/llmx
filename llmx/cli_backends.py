@@ -483,8 +483,17 @@ def _codex_rollout_snapshot(root: Path = _CODEX_SESSIONS_DIR) -> dict[Path, int]
 def _read_codex_rollout_usage(
     path: Path,
 ) -> tuple[dict[str, Optional[int]], Optional[str]]:
-    """Read the last token_count event from a Codex rollout JSONL file."""
-    last_usage = None
+    """Read a Codex call's cumulative usage from its rollout JSONL file.
+
+    The last token_count event's `total_token_usage` covers every turn of the call.
+    `last_token_usage` covers only the final turn; an agent-mode call spans many turns,
+    so reading it logged a whole review as its closing message (2026-10-08: diff hunts
+    logged ~450 output tokens each). Only a rollout without totals falls back to it, and
+    a multi-turn one then carries a note saying the counts are the last turn's.
+    """
+    total_usage = None
+    last_turn_usage = None
+    token_count_events = 0
     try:
         with path.open() as fh:
             for line in fh:
@@ -495,22 +504,31 @@ def _read_codex_rollout_usage(
                 payload = event.get("payload") if isinstance(event, dict) else None
                 if not isinstance(payload, dict) or payload.get("type") != "token_count":
                     continue
+                token_count_events += 1
                 info = payload.get("info") or {}
-                usage = info.get("last_token_usage") or info.get("total_token_usage")
-                if isinstance(usage, dict):
-                    last_usage = usage
+                if isinstance(info.get("total_token_usage"), dict):
+                    total_usage = info["total_token_usage"]
+                if isinstance(info.get("last_token_usage"), dict):
+                    last_turn_usage = info["last_token_usage"]
     except OSError as exc:
         return _null_codex_usage(), f"could not read codex rollout {path}: {exc}"
 
-    if not last_usage:
+    usage = total_usage or last_turn_usage
+    if not usage:
         return _null_codex_usage(), f"codex rollout had no token_count event: {path}"
 
+    note = None
+    if total_usage is None and token_count_events > 1:
+        note = (
+            f"codex rollout has no total_token_usage across {token_count_events} turns; "
+            f"counts are the last turn's only: {path}"
+        )
     return {
-        "prompt_tokens": _int_or_none(last_usage.get("input_tokens")),
-        "completion_tokens": _int_or_none(last_usage.get("output_tokens")),
-        "reasoning_tokens": _int_or_none(last_usage.get("reasoning_output_tokens")),
-        "cached_tokens": _int_or_none(last_usage.get("cached_input_tokens")),
-    }, None
+        "prompt_tokens": _int_or_none(usage.get("input_tokens")),
+        "completion_tokens": _int_or_none(usage.get("output_tokens")),
+        "reasoning_tokens": _int_or_none(usage.get("reasoning_output_tokens")),
+        "cached_tokens": _int_or_none(usage.get("cached_input_tokens")),
+    }, note
 
 
 def _int_or_none(value) -> Optional[int]:

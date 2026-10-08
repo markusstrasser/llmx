@@ -71,6 +71,29 @@ def _write_rollout(path: Path, input_tokens: int) -> None:
     )
 
 
+def _write_turns(
+    path: Path, turns: list[tuple[int, int, int]], *, with_totals: bool = True
+) -> None:
+    """One token_count event per (input, output, reasoning) turn, with running totals."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    totals = {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}
+    lines = []
+    for input_tokens, output_tokens, reasoning_tokens in turns:
+        turn = {
+            "input_tokens": input_tokens,
+            "cached_input_tokens": 0,
+            "output_tokens": output_tokens,
+            "reasoning_output_tokens": reasoning_tokens,
+        }
+        for key, value in turn.items():
+            totals[key] += value
+        info = {"last_token_usage": turn}
+        if with_totals:
+            info["total_token_usage"] = dict(totals)
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}}))
+    path.write_text("\n".join(lines) + "\n")
+
+
 _OURS = "01a0e8c2-1c3c-7cf3-814f-a9ba9ee4657e"
 _OTHER = "01a0e8c2-1c3c-78d3-826a-e70715a36db1"
 
@@ -88,6 +111,32 @@ class TestCodexRolloutUsage(unittest.TestCase):
         self.assertEqual(usage["cached_tokens"], 3)
         self.assertEqual(usage["completion_tokens"], 5)
         self.assertEqual(usage["reasoning_tokens"], 2)
+
+    def test_multi_turn_rollout_reports_the_call_total(self):
+        # 2026-10-08: agent-mode diff hunts logged only their closing turn (~450 output
+        # tokens each) because the reader preferred last_token_usage to the running total.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "2026" / "10" / "08" / f"rollout-2026-10-08T01-03-50-{_OURS}.jsonl"
+            _write_turns(path, [(100, 40, 30), (150, 10, 5)])
+
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, session_id=_OURS, root=root)
+
+        self.assertIsNone(note)
+        self.assertEqual(usage["prompt_tokens"], 250)
+        self.assertEqual(usage["completion_tokens"], 50)
+        self.assertEqual(usage["reasoning_tokens"], 35)
+
+    def test_multi_turn_rollout_without_totals_says_counts_are_the_last_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "2026" / "10" / "08" / f"rollout-2026-10-08T01-03-50-{_OURS}.jsonl"
+            _write_turns(path, [(100, 40, 30), (150, 10, 5)], with_totals=False)
+
+            usage, note = _latest_codex_rollout_usage({}, started_at=0, session_id=_OURS, root=root)
+
+        self.assertEqual(usage["prompt_tokens"], 150)
+        self.assertIn("last turn's only", note)
 
     def test_parallel_calls_each_read_their_own_rollout(self):
         # 2026-09-29: parallel codex calls logged the newest rollout, which belonged to
