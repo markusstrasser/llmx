@@ -182,6 +182,9 @@ LITE_ALLOWED_MODELS = {
     "gpt-6-astra",
     "gpt-6",  # alias → astra
     # 2026-09-25: codex-cli subscription serves both (live `codex exec -m` probe).
+    # 2026-10-09: gpt-6.1-sol served on codex-cli >= 0.162 (0.156 rejected it);
+    # gpt-6-sol stays listed for callers that check before the upgrade alias.
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     # Opus 5: cyber / dual-use-bio fallback niche.

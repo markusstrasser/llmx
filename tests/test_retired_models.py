@@ -34,7 +34,7 @@ def test_retired_cursor_grok_never_routes_to_paid_xai(model: str) -> None:
 
 
 def test_frontier_successors_stay_allowed() -> None:
-    for model in ("gpt-6-sol", "gpt-6-luna", "claude-fable-5-1", "claude-opus-5-5", "grok-4.7-high"):
+    for model in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5-1", "claude-opus-5-5", "grok-4.7-high"):
         assert lite_model_allowed(model)
 
 
@@ -69,8 +69,13 @@ def test_composer_retired_to_astra_low(model: str) -> None:
         _auto_upgrade_model(model)
 
 
+def test_gpt6_sol_upgrades_to_gpt61_sol() -> None:
+    # Operator 2026-10-09: move to the newer model; alias, so pinned callers keep working.
+    assert _auto_upgrade_model("gpt-6-sol") == "gpt-6.1-sol"
+
+
 def test_pass2_successors_route() -> None:
-    for model in ("gpt-6-luna", "gpt-6-sol", "grok-4.7", "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"):
+    for model in ("gpt-6-luna", "gpt-6.1-sol", "grok-4.7", "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"):
         assert _auto_upgrade_model(model) == model
 
 

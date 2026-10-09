@@ -79,17 +79,17 @@ def resolve_grok_subscription_slug(model: Optional[str]) -> Optional[str]:
 _GROK_SUCCESSOR = "grok-4.7 (Cursor grok-4.7-high) or -p grok -m grok-4.7 (Grok Build)"
 
 RETIRED_API_MODELS: dict[str, str] = {
-    "gpt-5.5": "gpt-6-sol",
-    "gpt-5.4": "gpt-6-sol",
+    "gpt-5.5": "gpt-6.1-sol",
+    "gpt-5.4": "gpt-6.1-sol",
     "gpt-5.3": "gpt-6-luna",
     "gpt-5.3-chat-latest": "gpt-6-luna",
     "gpt-5.3-codex": "gpt-6-luna",
-    "gpt-5.2": "gpt-6-sol",
-    "gpt-5.1": "gpt-6-sol",
+    "gpt-5.2": "gpt-6.1-sol",
+    "gpt-5.1": "gpt-6.1-sol",
     "gpt-5.1-mini": "gpt-6-luna",
-    "gpt-5": "gpt-6-sol",
-    "gpt-5-pro": "gpt-6-sol",
-    "gpt-5-codex": "gpt-6-sol",
+    "gpt-5": "gpt-6.1-sol",
+    "gpt-5-pro": "gpt-6.1-sol",
+    "gpt-5-codex": "gpt-6.1-sol",
     "grok-4.5": _GROK_SUCCESSOR,
     "grok-4": _GROK_SUCCESSOR,
     "grok-4-1-fast-reasoning": _GROK_SUCCESSOR,
@@ -103,9 +103,9 @@ RETIRED_API_MODELS: dict[str, str] = {
     "gemini-3.5-flash": "gemini-3.8-flash",
     # Pass-1 ids: pass 1 only dropped them from the subscription allowlist, so the API
     # lane still dispatched them (model-guide known-issues 2026-09-25).
-    "gpt-5.6": "gpt-6-sol",
-    "gpt-5.6-sol": "gpt-6-sol",
-    "gpt-5.6-terra": "gpt-6-sol",
+    "gpt-5.6": "gpt-6.1-sol",
+    "gpt-5.6-sol": "gpt-6.1-sol",
+    "gpt-5.6-terra": "gpt-6.1-sol",
     "gpt-5.6-luna": "gpt-6-luna",
     "claude-fable-5": "claude-fable-5-1",
     "claude-opus-4-8": "claude-opus-5-5",

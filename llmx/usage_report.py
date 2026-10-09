@@ -51,7 +51,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-6": (10.0, 50.0),
     # GPT-6 Sol / Luna (developers.openai.com/api/docs/models/gpt-6-sol, gpt-6-luna,
     # 2026-09-22): same cache and >272K structure as Astra.
-    "gpt-6-sol": (2.0, 10.0),
+    "gpt-6-sol": (2.0, 10.0),  # alias → gpt-6.1-sol since 2026-10-09: accounting only
+    # GPT-6.1 Sol (developers.openai.com/api/docs/models/gpt-6.1-sol, read 2026-10-09):
+    # $2/$10, cached $0.10, same cache-write and >272K structure.
+    "gpt-6.1-sol": (2.0, 10.0),
     "gpt-6-luna": (0.10, 0.50),
     # GPT-5.6 suite (developers.openai.com/api/docs/pricing, GA 2026-07-09;
     # price cut 2026-07-30: Luna -80% to $0.20/$1.20, Terra -20% to $2/$12, Sol unchanged —
@@ -137,6 +140,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gpt-6-astra": 1_050_000,
     "gpt-6": 1_050_000,
     "gpt-6-sol": 1_050_000,
+    "gpt-6.1-sol": 1_050_000,
     "gpt-6-luna": 1_050_000,
     # retired 2026-09-25: accounting only (gpt-5.6 suite)
     "gpt-5.6-sol": 1_050_000,
@@ -191,7 +195,7 @@ def est_cost(
     if rate is None:
         return None
     input_rate, output_rate = rate
-    if model not in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6-luna"}:
+    if model not in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"}:
         return (prompt * input_rate + out * output_rate) / 1_000_000
 
     # developers.openai.com/api/docs/models/gpt-6-{astra,sol,luna}: cached reads 10%,

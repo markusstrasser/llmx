@@ -189,15 +189,17 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
         "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
     },
-    # GPT-6 Sol / Luna (2026-09-22, openai.com/index/introducing-gpt-6-sol-and-luna):
-    # cost tiers of the Astra generation. Unlike Astra, effort includes `none`
-    # (developers.openai.com/api/docs/models/gpt-6-sol, gpt-6-luna).
-    "gpt-6-sol": {
+    # GPT-6.1 Sol (developers.openai.com/api/docs/models/gpt-6.1-sol, read 2026-10-09):
+    # same price and context as GPT-6 Sol, but "The `none` and `minimal` reasoning
+    # efforts are not supported". gpt-6-sol auto-upgrades to it (_MODEL_UPGRADES).
+    "gpt-6.1-sol": {
         "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
         "reasoning_effort": True,
-        "reasoning_effort_levels": ["none", "low", "medium", "high", "xhigh", "max"],
-        "reasoning_effort_aliases": {"minimal": "low"},
+        "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
+        "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
     },
+    # GPT-6 Luna (2026-09-22, openai.com/index/introducing-gpt-6-sol-and-luna): cost
+    # tier of the Astra generation; effort includes `none` (…/models/gpt-6-luna).
     "gpt-6-luna": {
         "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
         "reasoning_effort": True,
@@ -510,7 +512,7 @@ _KNOWN_MODELS = {
     "openai": [
         "gpt-6-astra",
         "gpt-6",  # alias → astra
-        "gpt-6-sol",
+        "gpt-6.1-sol",
         "gpt-6-luna",
     ],
     "xai": [
@@ -563,6 +565,9 @@ _MODEL_UPGRADES = {
     # GPT-6 Astra (2026-09): bare alias → Astra. The 5.6 suite was retired
     # 2026-09-25 (no upgrade alias: retired ids fail closed; successor gpt-6-sol/luna).
     "gpt-6": "gpt-6-astra",
+    # 2026-10-09 (operator: move to the newer model): GPT-6.1 Sol supersedes GPT-6 Sol at
+    # the same price. An alias, not a retirement, so pinned callers keep working.
+    "gpt-6-sol": "gpt-6.1-sol",
     "claude-3.5-sonnet": "claude-sonnet-5",
     "claude-3-opus": "claude-opus-5-5",
     # Do NOT auto-upgrade claude-opus-5 → 5-5 either: Opus 5 is the biology
