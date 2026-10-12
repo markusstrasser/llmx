@@ -1684,7 +1684,24 @@ def chat(
             lite=lite,
             subscription=auth == "subscription",
         )
-        if cli_provider and media:
+        cli_media: Optional[list[str]] = None
+        if cli_provider == "codex-cli" and media:
+            # codex exec carries images via `-i FILE` (subscription, $0). It has
+            # no video channel: refuse rather than silently fall back to the API.
+            from .vision import resolve_media
+
+            resolved = resolve_media(media)
+            videos = [str(p) for p, _, cat, _ in resolved if cat != "image"]
+            if videos:
+                raise ModelError(
+                    f"codex-cli (GPT subscription) accepts images only; got video: "
+                    f"{', '.join(videos)}. Extract frames (ffmpeg) and pass images, "
+                    f"use a Gemini model for video, or pass --auth api for the metered OpenAI API.",
+                    provider=cli_provider,
+                    model=model or "default",
+                )
+            cli_media = [str(p.resolve()) for p, _, _, _ in resolved]
+        elif cli_provider and media:
             # CLI backends take a text prompt on argv/stdin — there is nowhere to
             # put an image. Refuse rather than dispatch text-only: a model asked
             # "what does this figure show" with the figure silently dropped will
@@ -1737,6 +1754,7 @@ def chat(
                     lite=lite,
                     mode=mode,
                     reasoning_effort=reasoning_effort,
+                    images=cli_media,
                 )
                 if isinstance(cli_result, str):
                     print(cli_result)

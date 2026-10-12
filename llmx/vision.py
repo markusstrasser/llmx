@@ -146,6 +146,21 @@ def build_openai_content(media: list, prompt: str) -> list:
     return content
 
 
+def default_vision_auth(provider: str, model: str) -> Optional[str]:
+    """GPT models served by codex-cli default to the subscription (`-i`) route.
+
+    The set is the codex-cli lite allowlist (no second list). Metered OpenAI
+    stays reachable only via explicit auth='api'.
+    """
+    from .cli_backends import lite_model_allowed
+
+    if provider == "openai" and model.startswith("gpt-") and lite_model_allowed(
+        model, transport="codex-cli"
+    ):
+        return "subscription"
+    return None
+
+
 def analyze_media(
     file_paths: list[str],
     prompt: str,
@@ -154,6 +169,7 @@ def analyze_media(
     provider: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
     timeout: int = 300,
+    auth: Optional[str] = None,
 ) -> str:
     """Analyze images or videos with any vision-capable model.
 
@@ -163,6 +179,8 @@ def analyze_media(
     from .providers import chat, infer_provider_from_model
 
     resolved_provider = provider or infer_provider_from_model(model) or "google"
+    if auth is None:
+        auth = default_vision_auth(resolved_provider, model)
     logger.info(f"Using model: {model} (provider: {resolved_provider})")
 
     # The provider functions print to stdout as a side effect (that is how
@@ -181,6 +199,7 @@ def analyze_media(
             json_output=json_output,
             timeout=timeout,
             media=list(file_paths),
+            auth=auth,
         )
     text = text or buf.getvalue().strip()
     # chat() is Optional[str]; an empty vision result is a failure, not "".

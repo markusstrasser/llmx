@@ -260,17 +260,30 @@ def svg_cmd(prompt, output, model, debug):
 @click.option("--sample", type=int, help="Sample N frames evenly (for many images)")
 @click.option("--json", "json_output", is_flag=True, help="Request JSON output")
 @click.option("-o", "--output", type=click.Path(), help="Write result to FILE instead of stdout")
+@click.option(
+    "--auth",
+    type=click.Choice(["api", "subscription"]),
+    default=None,
+    help="Billing route. Default: subscription for codex-served GPT models "
+         "(gpt-6-luna/astra/6.1-sol), API otherwise. --auth api = metered OpenAI.",
+)
 @click.option("--debug", is_flag=True, help="Debug logging")
-def vision_cmd(files, prompt, model, provider, reasoning_effort, sample, json_output, output, debug):
+def vision_cmd(files, prompt, model, provider, reasoning_effort, sample, json_output, output, auth, debug):
     """Analyze images or videos with any vision-capable model.
 
     Routes through the normal llmx dispatch path, so it is spend-guarded,
     policy-gated and usage-logged like `llmx chat`. NOTE: `-p` here is the
     PROMPT (not --provider, as in `llmx chat`); use --provider to override.
 
+    GPT models on the codex-cli allowlist (gpt-6-luna, gpt-6-astra,
+    gpt-6.1-sol) default to the subscription route: images attach via
+    `codex exec -i` ($0, no OpenAI API key). That route is images only;
+    a video fails loud. Pass --auth api for the metered OpenAI API.
+
     Examples:
         llmx vision screenshot.png -p "What UI issues do you see?"
         llmx vision figure.png -m gpt-6.1-sol -p "Read the axis labels"
+        llmx vision a.jpg b.png -m gpt-6-luna -e low -p "Compare"  # codex subscription
         llmx vision figure.png -m gemini-3.8-flash -e low -p "Extract the table"
         llmx vision frame*.png -p "Summarize gameplay" --sample 5
         llmx vision gameplay.mp4 -p "List all UI elements visible"
@@ -306,6 +319,7 @@ def vision_cmd(files, prompt, model, provider, reasoning_effort, sample, json_ou
             "provider": provider,
             "reasoning_effort": reasoning_effort,
             "json_output": json_output,
+            "auth": auth,
         }
 
         # Use analyze_frames if multiple images and sample requested

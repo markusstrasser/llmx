@@ -1117,8 +1117,11 @@ def cli_chat(
     lite: Optional[str] = None,
     mode: str = "chat",
     reasoning_effort: Optional[str] = None,
+    images: Optional[list[str]] = None,
 ) -> CliBackendResult:
     """Execute one-shot chat via CLI binary.
+
+    `images` (absolute image paths) attach via codex `-i FILE`; other CLIs refuse.
 
     Returns response text on success or a typed failure for caller policy handling.
     For long prompts (>100KB), pipes via stdin to avoid ARG_MAX limits.
@@ -1141,6 +1144,8 @@ def cli_chat(
 
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
+    if images and binary != "codex":
+        raise ValueError(f"{provider} CLI transport cannot carry image attachments")
     stdin_input = None
     use_stdin = len(prompt.encode()) > _ARG_MAX_BYTES
     temp_schema_path = None
@@ -1152,6 +1157,10 @@ def cli_chat(
             codex_rollouts_before = _codex_rollout_snapshot()
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
             cmd = ["codex", "exec", "--skip-git-repo-check"]
+            # `-i` is multi-value in codex's clap parser: keep it ahead of other
+            # flags so it can never swallow the positional prompt.
+            for image in images or []:
+                cmd.extend(["-i", image])
             if mode == "agent" and not lite:
                 cmd.extend(["-s", "workspace-write"])
             else:
