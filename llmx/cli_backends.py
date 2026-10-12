@@ -550,6 +550,70 @@ def _first_present(mapping: dict, *keys):
     return None
 
 
+# Token-bearing keys of the Anthropic-shaped usage object that Claude Code and
+# Grok Build print. Non-token metadata (service_tier, iterations, ...) is ignored.
+_ANTHROPIC_USAGE_TOKEN_KEYS = frozenset({
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "output_tokens_details",
+    "reasoning_tokens",
+    "thinking_tokens",
+    "total_tokens",
+})
+_warned_usage_shapes: set[str] = set()
+
+
+def _anthropic_shaped_usage(raw_usage: dict, transport: str) -> dict:
+    """Map Anthropic-shaped usage onto the ledger's total-input contract.
+
+    Anthropic's input_tokens excludes cache reads and writes; the ledger's
+    prompt_tokens is total input, partitioned by cached/cache_write tokens.
+    2026-10-12: rows logged only input_tokens (2 of ~25k) and dropped
+    cache_creation_input_tokens. A shape change that could under-report input
+    is logged loudly and noted on the row, never written silently.
+    """
+    fresh = _int_or_none(raw_usage.get("input_tokens"))
+    read = _int_or_none(raw_usage.get("cache_read_input_tokens"))
+    write = _int_or_none(raw_usage.get("cache_creation_input_tokens"))
+    completion = _int_or_none(raw_usage.get("output_tokens"))
+    prompt = None if fresh is None else fresh + (read or 0) + (write or 0)
+
+    problems = []
+    unknown = sorted(
+        k for k in raw_usage if "token" in k and k not in _ANTHROPIC_USAGE_TOKEN_KEYS
+    )
+    if unknown:
+        problems.append(f"unrecognized usage token fields {unknown}")
+    if fresh is not None and (read is None or write is None):
+        missing = [
+            name for name, value in (
+                ("cache_read_input_tokens", read),
+                ("cache_creation_input_tokens", write),
+            ) if value is None
+        ]
+        problems.append(f"usage lacks {missing}; prompt_tokens={prompt} may under-report input")
+    total = _int_or_none(raw_usage.get("total_tokens"))
+    if total is not None and prompt is not None and total != prompt + (completion or 0):
+        problems.append(
+            f"total_tokens={total} != prompt {prompt} + completion {completion}"
+        )
+    note = None
+    if problems:
+        note = f"[DEGRADED] {transport} usage: " + "; ".join(problems)
+        if note not in _warned_usage_shapes:
+            _warned_usage_shapes.add(note)
+            logger.warn(note)
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "cached_tokens": read,
+        "cache_write_tokens": write,
+        "usage_note": note,
+    }
+
+
 def _null_codex_usage() -> dict[str, Optional[int]]:
     return {
         "prompt_tokens": None,
@@ -963,15 +1027,14 @@ def _parse_claude_json(
         # Claude Code's current result JSON exposes input/output/cache tokens.
         # Some versions/models may add thinking/reasoning tokens; if absent,
         # keep null rather than writing 0, which would falsely claim measurement.
+        # output_tokens includes thinking (live 2026-10-12: 110 out, 107 thinking).
         usage = {
             "served_model": served_model,
             "model": model_key.split("[")[0]
             if isinstance(model_key, str)
             else None,  # strip [1m] etc → PRICING key
-            "input_tokens": raw_usage.get("input_tokens"),
-            "output_tokens": raw_usage.get("output_tokens"),
+            **_anthropic_shaped_usage(raw_usage, "claude-cli"),
             "reasoning_tokens": reasoning_tokens,
-            "cache_read_input_tokens": raw_usage.get("cache_read_input_tokens"),
             "total_cost_usd": event.get("total_cost_usd"),
         }
         return result, usage
@@ -1032,11 +1095,11 @@ def _parse_grok_json(stdout: str) -> tuple[CliBackendResult, Optional[dict]]:
         raw_usage = {}
     model_usage = event.get("modelUsage")
     served_model = next(iter(model_usage), None) if isinstance(model_usage, dict) else None
+    # Anthropic-shaped: total_tokens = input + cache read/write + output, so
+    # input excludes cache and output already includes reasoning_tokens.
     usage = {
-        "prompt_tokens": raw_usage.get("input_tokens"),
-        "completion_tokens": raw_usage.get("output_tokens"),
+        **_anthropic_shaped_usage(raw_usage, "grok-cli"),
         "reasoning_tokens": raw_usage.get("reasoning_tokens"),
-        "cached_tokens": raw_usage.get("cache_read_input_tokens"),
         "total_cost_usd": event.get("total_cost_usd"),
         "served_model": served_model,
     }
@@ -1538,16 +1601,22 @@ def cli_chat(
                         model=usage.get("model") or model or "?",
                         served_model=usage.get("served_model"),
                         source="claude-cli-json",
-                        note=(
-                            "Claude CLI modelUsage missing or ambiguous; served_model unknown"
-                            if usage.get("served_model") is None else None
-                        ),
+                        note="; ".join(
+                            part for part in (
+                                "Claude CLI modelUsage missing or ambiguous; served_model unknown"
+                                if usage.get("served_model") is None else None,
+                                usage.get("usage_note"),
+                            ) if part
+                        ) or None,
                         transport="claude-cli",  # subscription/CLI — cost is API-EQUIVALENT, not spend
                         reasoning_effort=reasoning_effort,
-                        prompt_tokens=usage.get("input_tokens"),
-                        completion_tokens=usage.get("output_tokens"),
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        completion_tokens=usage.get("completion_tokens"),
                         reasoning_tokens=usage.get("reasoning_tokens"),
-                        cached_tokens=usage.get("cache_read_input_tokens"),
+                        cached_tokens=usage.get("cached_tokens"),
+                        cache_write_tokens=usage.get("cache_write_tokens"),
+                        completion_includes_reasoning=True,
+                        reported_cost_usd=usage.get("total_cost_usd"),
                         latency_s=elapsed,
                     )
                 except Exception as exc:
@@ -1569,6 +1638,8 @@ def cli_chat(
                         note_parts.append(
                             f"reported_total_cost_usd={usage['total_cost_usd']}"
                         )
+                    if usage.get("usage_note"):
+                        note_parts.append(usage["usage_note"])
                     log_usage(
                         provider=provider,
                         model=model or GROK_BUILD_MODELS[0],
@@ -1580,6 +1651,8 @@ def cli_chat(
                         completion_tokens=usage.get("completion_tokens"),
                         reasoning_tokens=usage.get("reasoning_tokens"),
                         cached_tokens=usage.get("cached_tokens"),
+                        cache_write_tokens=usage.get("cache_write_tokens"),
+                        completion_includes_reasoning=True,
                         latency_s=elapsed,
                         reported_cost_usd=usage.get("total_cost_usd"),
                         source="grok-json",

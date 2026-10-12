@@ -148,11 +148,15 @@ def test_effort_mapping_table() -> None:
 def test_parse_smoke_json_preserves_requested_and_served_usage() -> None:
     result, usage = _parse_grok_json(json.dumps(SMOKE_PAYLOAD))
     assert result == "OK"
+    # Anthropic-shaped: total_tokens 26334 = input 26055 + cache 256 + output 23,
+    # so prompt_tokens is total input and output already holds the 18 reasoning.
     assert usage == {
-        "prompt_tokens": 26055,
+        "prompt_tokens": 26311,
         "completion_tokens": 23,
         "reasoning_tokens": 18,
         "cached_tokens": 256,
+        "cache_write_tokens": 0,
+        "usage_note": None,
         "total_cost_usd": 0.00890392,
         "served_model": "grok-4.6-build",
     }

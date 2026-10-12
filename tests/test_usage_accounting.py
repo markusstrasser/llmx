@@ -13,6 +13,9 @@ from llmx.cli_backends import (
     cli_chat,
 )
 from llmx.providers import LlmxError, _normalize_usage
+from llmx.usage_report import output_tokens
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _claude_verbose_stdout(
@@ -361,6 +364,55 @@ class TestClaudeCliUsage(unittest.TestCase):
 
         self.assertEqual(result, "complete response")
         self.assertIsInstance(usage, dict)
+
+    def test_live_payload_logs_total_input_and_cache_write(self):
+        # 2026-10-12: rows logged prompt_tokens=2 (Anthropic input_tokens, which
+        # excludes cache) and dropped cache_creation_input_tokens. Fixture is a
+        # real `claude -p --output-format json --verbose` opus-5-5 result.
+        stdout = (FIXTURES / "claude_cli_usage_2026-10-12.json").read_text()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usage.jsonl"
+            with (
+                patch("llmx.cli_backends.subprocess.Popen") as popen,
+                patch("llmx.usage_log._LOG_PATH", path),
+                patch("llmx.usage_log._resolve_caller", return_value="offline-test"),
+            ):
+                process = popen.return_value
+                process.pid = 123
+                process.returncode = 0
+                process.communicate.return_value = (stdout, "")
+                cli_chat("claude-cli", "hi", "claude-opus-5-5", 30)
+            row = json.loads(path.read_text())
+
+        self.assertEqual(row["prompt_tokens"], 2 + 9738 + 15550)
+        self.assertEqual(row["cached_tokens"], 9738)
+        self.assertEqual(row["cache_write_tokens"], 15550)
+        self.assertEqual(row["completion_tokens"], 110)
+        self.assertEqual(row["reasoning_tokens"], 107)
+        # Claude output_tokens already includes thinking; never add it twice.
+        self.assertTrue(row["completion_includes_reasoning"])
+        self.assertEqual(output_tokens(row), 110)
+        self.assertEqual(row["reported_cost_usd"], 0.1285556)
+        self.assertIsNone(row["note"])
+
+    def test_usage_shape_drift_is_noted_not_silent(self):
+        for usage, expected in (
+            ({"input_tokens": 2, "output_tokens": 4}, "cache_creation_input_tokens"),
+            (
+                {
+                    "input_tokens": 2, "output_tokens": 4,
+                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+                    "cache_storage_tokens": 9,
+                },
+                "unrecognized usage token fields ['cache_storage_tokens']",
+            ),
+        ):
+            with self.subTest(usage=usage):
+                _, parsed = _parse_claude_json(
+                    _claude_verbose_stdout("ok", usage=usage, model_usage={"m": {}})
+                )
+                self.assertIn("[DEGRADED] claude-cli usage", parsed["usage_note"])
+                self.assertIn(expected, parsed["usage_note"])
 
 
 class TestOpenRouterUsage(unittest.TestCase):
