@@ -80,6 +80,9 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-5-5": (4.0, 20.0),
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
+    # Haiku 4.5: $1/$5. claude-cli logs the dated id.
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-haiku-4-5-20251001": (1.0, 5.0),
     # SpaceXAI Grok 4.5 API (docs.x.ai 2026-07-08): base $2/$6.
     "grok-4.5": (2.0, 6.0),  # retired 2026-09-25: accounting only
     # Grok 4.7 launch page (x.ai/news/grok-4-7, 2026-09-21): from $2/$6.
@@ -175,6 +178,10 @@ CONTEXT_WINDOW: dict[str, int] = {
 for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
     CONTEXT_WINDOW[cursor_model] = 500_000
 
+# Claude cache-read rate as a fraction of the input rate where it is not the usual 10%
+# (sources in the PRICING comments).
+_CLAUDE_CACHE_READ = {"claude-opus-5-5": 0.05, "claude-fable-5-1": 0.025}
+
 
 def est_cost(
     model: str,
@@ -195,21 +202,27 @@ def est_cost(
     if rate is None:
         return None
     input_rate, output_rate = rate
-    if model not in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"}:
+    if model in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"}:
+        # developers.openai.com/api/docs/models/gpt-6-{astra,sol,luna}: cached reads 10%,
+        # cache writes 1.25x of the uncached input rate.
+        read_rate, write_rate = input_rate * 0.10, input_rate * 1.25
+        if prompt > 272_000:
+            input_rate *= 2
+            read_rate *= 2
+            write_rate *= 2
+            output_rate *= 1.5
+        ordinary_rate = write_rate if conservative and cache_write_tokens is None else input_rate
+    elif model.startswith("claude-"):
+        # Anthropic prompt caching: reads 10% of input (Opus 5.5 5%, Fable 5.1 2.5%; see
+        # PRICING), writes 1.25x for 5-minute entries and 2x for 1-hour ones. claude-cli
+        # writes 1-hour entries and llmx's API path sets no cache_control, so writes are 2x.
+        read_rate = input_rate * _CLAUDE_CACHE_READ.get(model, 0.10)
+        write_rate, ordinary_rate = input_rate * 2, input_rate
+    else:
         return (prompt * input_rate + out * output_rate) / 1_000_000
-
-    # developers.openai.com/api/docs/models/gpt-6-{astra,sol,luna}: cached reads 10%,
-    # cache writes 1.25x of the uncached input rate.
-    read_rate, write_rate = input_rate * 0.10, input_rate * 1.25
-    if prompt > 272_000:
-        input_rate *= 2
-        read_rate *= 2
-        write_rate *= 2
-        output_rate *= 1.5
     read = max(0, min(cached_tokens or 0, prompt))
     written = max(0, min(cache_write_tokens or 0, prompt - read))
     ordinary = prompt - read - written
-    ordinary_rate = write_rate if conservative and cache_write_tokens is None else input_rate
     return (
         ordinary * ordinary_rate + read * read_rate + written * write_rate + out * output_rate
     ) / 1_000_000
@@ -236,10 +249,13 @@ _CLIENT_REJECTION = re.compile(r"\bError code: 4\d\d\b")
 def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:
     """Price reported totals; absent input/output totals leave cost unknown.
 
+    A cost the CLI reports itself (claude-cli, grok-cli) wins over the estimate.
     A request refused with a 4xx and no reported usage costs $0, not unknown: an
     exhausted-credit 429 otherwise left the doctor's daily total permanently
     [DEGRADED] (2026-10-07).
     """
+    if row.get("reported_cost_usd") is not None:
+        return float(row["reported_cost_usd"])
     if row.get("prompt_tokens") is None or row.get("completion_tokens") is None:
         if _CLIENT_REJECTION.search(row.get("error") or ""):
             return 0.0
@@ -359,7 +375,8 @@ def summarize(
         f"{'':>9}  {total_cost:>9}"
     )
     out_lines.append(
-        "\n  (cost = conservative estimate from PRICING; unknown Astra input is charged "
+        "\n  (cost = the CLI's own figure when it reports one, else a conservative "
+        "estimate from PRICING; unknown Astra input is charged "
         "at the cache-write rate. '+?' = unpriced model or unreported usage. "
         "Token sums include reported counts. "
         "max_in = biggest single call's input; %used vs ctx_win.)"

@@ -394,6 +394,10 @@ class TestClaudeCliUsage(unittest.TestCase):
         self.assertEqual(output_tokens(row), 110)
         self.assertEqual(row["reported_cost_usd"], 0.1285556)
         self.assertIsNone(row["note"])
+        # Without the CLI's figure, Anthropic's cache rates reproduce it from the counts.
+        from llmx.usage_report import cost_for_usage
+
+        self.assertAlmostEqual(cost_for_usage({**row, "reported_cost_usd": None}), 0.1285556)
 
     def test_usage_shape_drift_is_noted_not_silent(self):
         for usage, expected in (
@@ -551,6 +555,32 @@ class TestAstraCost(unittest.TestCase):
                     ), expected)
         self.assertEqual(est_cost("gpt-5.6-luna", 1_000_000, 1_000_000), 1.40)
         self.assertIsNone(est_cost("unknown", 1, 1))
+
+    def test_claude_cache_rates_and_reported_cost(self):
+        from llmx.usage_report import cost_for_usage, est_cost
+
+        # Reads cost 10% of input, except Opus 5.5 (5%) and Fable 5.1 (2.5%).
+        for model, expected in (
+            ("claude-fable-5-1", 0.25), ("claude-opus-5-5", 0.20), ("claude-sonnet-5", 0.20),
+        ):
+            with self.subTest(model=model):
+                self.assertAlmostEqual(est_cost(
+                    model, 1_000_000, 0, cached_tokens=1_000_000, cache_write_tokens=0,
+                ), expected)
+        # Writes are 1-hour entries (claude-cli), 2x input.
+        self.assertAlmostEqual(est_cost(
+            "claude-opus-5-5", 1_000_000, 0, cached_tokens=0, cache_write_tokens=1_000_000,
+        ), 8.0)
+        self.assertAlmostEqual(est_cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000), 6.0)
+        # A live claude-cli row (2026-10-12): the estimate matches the CLI's own figure.
+        row = {
+            "model": "claude-opus-5-5", "prompt_tokens": 25_181, "completion_tokens": 4,
+            "cached_tokens": 7_944, "cache_write_tokens": 17_235,
+        }
+        self.assertAlmostEqual(cost_for_usage(row), 0.1395568)
+        self.assertEqual(cost_for_usage({**row, "reported_cost_usd": 0.5}), 0.5)
+        unreported = {"model": "?", "prompt_tokens": None, "completion_tokens": None}
+        self.assertEqual(cost_for_usage({**unreported, "reported_cost_usd": 0.01}), 0.01)
 
     def test_reasoning_subset_is_not_added_twice(self):
         from llmx.usage_report import cost_for_usage, output_tokens
