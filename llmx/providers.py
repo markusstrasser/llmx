@@ -241,6 +241,16 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high"],
         "default_effort": "medium",
     },
+    # Gemini 4 Argon (stable, 2026-10-13). Probed live 2026-10-14: thinkingLevel
+    # low/medium/high accepted; minimal → 400 "not supported", none/xhigh/max → 400
+    # invalid enum. Unset level returned no thought tokens on a trivial prompt.
+    "gemini-4-argon": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+        "default_effort": "medium",
+    },
     "gemini-3.5-flash-lite": {
         "temperature": 1.0,
         "fixed": True,
@@ -503,6 +513,7 @@ def _normalize_model(provider: str, model: str) -> str:
 # Known models for typo detection
 _KNOWN_MODELS = {
     "google": [
+        "gemini-4-argon",
         "gemini-3.1-pro-preview",
         "gemini-3.8-flash",
         "gemini-3.5-flash-lite",

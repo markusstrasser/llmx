@@ -44,6 +44,10 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-3.6-flash": (1.50, 7.50),  # retired 2026-09-25: accounting only
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-pro-preview": (1.25, 10.0),
+    # Gemini 4 Argon (ai.google.dev/gemini-api/docs/pricing, 2026-10-14): intro $2/$10
+    # through 2026-11-30; standard $4/$20 from 2026-12-01 — bump this entry then.
+    # No prompt-length tiers; not on the free tier.
+    "gemini-4-argon": (2.0, 10.0),
     # GPT-6 Astra (developers.openai.com/api/docs/models/gpt-6-astra, 2026-09-05):
     # $10/$50 short context; 2x/1.5x above 272K input. Fast mode is 2x Standard.
     # Alias gpt-6 → astra. Subscription (codex-cli) remains $0 against the ChatGPT plan.
@@ -140,6 +144,7 @@ CONTEXT_WINDOW: dict[str, int] = {
     "gemini-3.6-flash": 1_000_000,  # retired 2026-09-25: accounting only
     "gemini-3.5-flash-lite": 1_000_000,
     "gemini-3.1-pro-preview": 1_000_000,
+    "gemini-4-argon": 1_048_576,
     "gpt-6-astra": 1_050_000,
     "gpt-6": 1_050_000,
     "gpt-6-sol": 1_050_000,
