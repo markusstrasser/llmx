@@ -61,6 +61,58 @@ class TestParserRefusesInjectedTurns(unittest.TestCase):
         self.assertEqual(result, "Confirmed: I made no commits.")
 
 
+OUTPUT_LIMIT_TURN = {
+    "type": "user",
+    "message": {"role": "user", "content": [{"type": "text", "text": (
+        "Output token limit hit. Resume directly — no apology, no recap of what you were doing. "
+        "Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.")}]},
+}
+
+
+def _cut_reply(*, first_stop: str | None = "max_tokens", then: dict | None = None) -> str:
+    """A reply cut at the output cap and resumed (2026-10-14, Claude Code 2.1.299)."""
+    first = {"type": "assistant", "message": {"id": "msg-1", "stop_reason": first_stop, "content": [
+        {"type": "thinking", "thinking": "..."}, {"type": "text", "text": "## Findings\n1. The rate is sta"}]}}
+    if first_stop is None:
+        del first["message"]["stop_reason"]
+    second = {"type": "assistant", "message": {"id": "msg-2", "stop_reason": "end_turn", "content": [
+        {"type": "text", "text": "le.\n2. The cap is stated."}]}}
+    events = [first, OUTPUT_LIMIT_TURN, second]
+    final = "le.\n2. The cap is stated."
+    if then is not None:
+        third = {"type": "assistant", "message": {"id": "msg-3", "content": [{"type": "text", "text": "Done."}]}}
+        events += [then, third]
+        final = "Done."
+    return json.dumps(events + [{"type": "result", "is_error": False, "result": final, "num_turns": len(events)}])
+
+
+class TestOutputLimitContinuation(unittest.TestCase):
+    def test_reply_cut_at_the_cap_is_stitched(self) -> None:
+        result, usage = _parse_claude_json(_cut_reply())
+        self.assertEqual(result, "## Findings\n1. The rate is stale.\n2. The cap is stated.")
+        self.assertEqual(usage["output_limit_continuations"], 1)
+
+    def test_event_without_stop_reason_is_stitched(self) -> None:
+        result, _ = _parse_claude_json(_cut_reply(first_stop=None))
+        self.assertEqual(result, "## Findings\n1. The rate is stale.\n2. The cap is stated.")
+
+    def test_recovery_after_a_finished_message_is_refused(self) -> None:
+        result, usage = _parse_claude_json(_cut_reply(first_stop="end_turn"))
+        assert isinstance(result, CliBackendFailure)
+        self.assertIn("max_tokens", result.detail)
+        self.assertIsNone(usage)
+
+    def test_stop_hook_after_a_recovery_is_still_refused(self) -> None:
+        result, _ = _parse_claude_json(_cut_reply(then=STOP_HOOK_TURN))
+        assert isinstance(result, CliBackendFailure)
+        self.assertIn("Stop hook feedback", result.detail)
+
+    def test_agent_mode_keeps_the_final_message(self) -> None:
+        result, usage = _parse_claude_json(_cut_reply(), allow_continuation=True)
+        self.assertEqual(result, "le.\n2. The cap is stated.")
+        self.assertNotIn("output_limit_continuations", usage)
+
+
 class TestChatDisablesHooks(unittest.TestCase):
     def _command(self, **kwargs) -> list[str]:
         with patch("llmx.cli_backends.subprocess.Popen") as popen:

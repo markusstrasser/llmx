@@ -869,16 +869,22 @@ def _claude_final_assistant_text(
     return "".join(text_parts), None
 
 
-def _claude_injected_turn(events: list) -> Optional[str]:
-    """Text of the first user turn injected after the model had answered, if any.
+# Claude Code's own turn after a reply reaches CLAUDE_CODE_MAX_OUTPUT_TOKENS (2.1.299,
+# 2026-10-14: an Opus 5.5 max-effort review passed the 128k cap after 41 minutes). The
+# model resumes mid-thought, so the answer is the text of every message in order.
+CLAUDE_OUTPUT_LIMIT_TURN = "Output token limit hit."
+
+
+def _claude_injected_turns(events: list) -> list[tuple[int, str]]:
+    """(event index, text) of every user text turn injected after the model had answered.
 
     After the first assistant event, a one-shot call only sees tool results. A
-    text turn means something forced a continuation, such as a blocking Stop
-    hook ("Stop hook feedback: ..."), and the final message then answers that
-    turn instead of the caller's prompt.
+    text turn means something forced a continuation: a blocking Stop hook
+    ("Stop hook feedback: ...") or Claude Code's output-limit recovery.
     """
     answered = False
-    for event in events:
+    turns: list[tuple[int, str]] = []
+    for index, event in enumerate(events):
         if not isinstance(event, dict):
             continue
         if event.get("type") == "assistant":
@@ -889,13 +895,66 @@ def _claude_injected_turn(events: list) -> Optional[str]:
         message = event.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, str) and content.strip():
-            return content
+            turns.append((index, content))
+            continue
         for block in content if isinstance(content, list) else []:
             if isinstance(block, dict) and block.get("type") == "text":
                 text = block.get("text")
                 if isinstance(text, str) and text.strip():
-                    return text
+                    turns.append((index, text))
+                    break
+    return turns
+
+
+def _claude_injected_turn(events: list) -> Optional[str]:
+    """Text of the first injected turn other than the output-limit recovery, if any.
+
+    Such a turn means the final message answers it instead of the caller's prompt.
+    """
+    for _, text in _claude_injected_turns(events):
+        if not text.startswith(CLAUDE_OUTPUT_LIMIT_TURN):
+            return text
     return None
+
+
+def _claude_output_limit_text(events: list) -> tuple[Optional[str], int, Optional[str]]:
+    """(stitched text, continuations, error) when the reply resumed after the output cap.
+
+    Returns (None, 0, None) when no recovery turn was injected. Each recovery turn
+    must follow a message that stopped at max_tokens, when the event records why.
+    """
+    recoveries = [i for i, text in _claude_injected_turns(events)
+                  if text.startswith(CLAUDE_OUTPUT_LIMIT_TURN)]
+    if not recoveries:
+        return None, 0, None
+    order: list[str] = []
+    texts: dict[str, list[str]] = {}
+    stops: dict[str, object] = {}
+    last_before: dict[int, str] = {}
+    for index, event in enumerate(events):
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        message = event.get("message") or {}
+        message_id = message.get("id")
+        if message_id not in texts:
+            order.append(message_id)
+            texts[message_id] = []
+        if message.get("stop_reason") is not None:
+            stops[message_id] = message.get("stop_reason")
+        for block in message.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+                texts[message_id].append(block["text"])
+        for recovery in recoveries:
+            if index < recovery:
+                last_before[recovery] = message_id
+    for recovery in recoveries:
+        cut = last_before.get(recovery)
+        if cut is None or stops.get(cut, "max_tokens") != "max_tokens":
+            return None, 0, (
+                f"Claude CLI output-limit turn at event {recovery} does not follow a "
+                f"message that stopped at max_tokens (stop_reason={stops.get(cut)!r}); refusing response"
+            )
+    return "".join("".join(texts[m]) for m in order), len(recoveries), None
 
 
 def _parse_claude_json(
@@ -976,6 +1035,11 @@ def _parse_claude_json(
                 None,
             )
         assert assistant_text is not None
+        stitched, continuations, stitch_error = (
+            (None, 0, None) if allow_continuation else _claude_output_limit_text(events)
+        )
+        if stitch_error is not None:
+            return CliBackendFailure(kind=LlmxError, status=0, detail=stitch_error), None
         if result != assistant_text:
             omitted_chars = max(len(assistant_text) - len(result), 0)
             if omitted_chars and assistant_text.endswith(result):
@@ -1037,6 +1101,14 @@ def _parse_claude_json(
             "reasoning_tokens": reasoning_tokens,
             "total_cost_usd": event.get("total_cost_usd"),
         }
+        if continuations:
+            # The result event carries only the last message; the answer began before the cap.
+            usage["output_limit_continuations"] = continuations
+            logger.warn(
+                f"[cli] Claude reply reached the output cap {continuations} time(s); "
+                f"returning {len(stitched)} chars stitched across messages"
+            )
+            return stitched, usage
         return result, usage
     return (
         CliBackendFailure(
