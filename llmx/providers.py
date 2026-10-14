@@ -129,20 +129,6 @@ class SpendCapError(LlmxError):
         super().__init__(message, **kwargs)
 
 
-class GeminiPolicyError(SpendCapError):
-    """Gemini is critique-only (operator policy 2026-07-14): a metered gemini-*
-    dispatch without LLMX_GEMINI_OK=1 is refused at the funnel. The /critique
-    engine (skills/critique/scripts/model-review.py) sets the env for its axis
-    dispatches; export it manually only for a deliberately-intended one-off.
-    Subclass of SpendCapError (same exit 7 — a policy refusal, not a provider
-    failure) with its own error_type so callers can tell "cap hit, retry
-    tomorrow" from "provider disallowed, don't retry"."""
-
-    def __init__(self, message: str, **kwargs):
-        kwargs["error_type"] = "gemini_policy"
-        super().__init__(message, **kwargs)
-
-
 class TimeoutError_(LlmxError):
     exit_code = EXIT_TIMEOUT
 
@@ -322,7 +308,7 @@ PROVIDER_CONFIGS = {
     "google": {
         "model": "gemini-3.8-flash",
         "legacy_model": "gemini-3.1-pro-preview",
-        "env_var": "GEMINI_API_KEY or GOOGLE_API_KEY or GEMINI_API_KEY_CRITIQUE_ONLY",
+        "env_var": "GEMINI_API_KEY or GOOGLE_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
         "flash_model": "gemini-3.8-flash",
@@ -878,19 +864,6 @@ def _keychain_list() -> list:
         return []
 
 
-def _promote_scoped_key(var: str, val: str) -> None:
-    """Bridge a policy-scoped key name to the var the SDK reads in-process.
-
-    ~/.env stores the Gemini key ONLY as GEMINI_API_KEY_CRITIQUE_ONLY (operator
-    policy 2026-07-14: direct-SDK consumers must fail loud). genai.Client()
-    reads GEMINI_API_KEY from env, so the allowed lane (gated by
-    spend_guard.enforce_gemini_policy, which runs before any dispatch) promotes
-    it here for this process only.
-    """
-    if var == "GEMINI_API_KEY_CRITIQUE_ONLY":
-        os.environ.setdefault("GEMINI_API_KEY", val)
-
-
 METERED_SUFFIX = "_METERED"
 
 
@@ -930,7 +903,6 @@ def check_api_key(provider: str) -> None:
         var = var.strip()
         val = _env_key(var)
         if val:
-            _promote_scoped_key(var, val)
             logger.debug(f"Found API key: {var}")
             return
 
@@ -981,7 +953,6 @@ def _get_api_key(provider: str) -> Optional[str]:
         var = var.strip()
         val = _env_key(var)
         if val:
-            _promote_scoped_key(var, val)
             return val
     # Fallback: Keychain
     for var in key_vars:
@@ -1638,8 +1609,8 @@ def chat(
 
     `media` attaches image/video files to the prompt. It is a parameter of the
     ONE dispatch path on purpose: routing vision through here (rather than a
-    separate direct-SDK module) is what gives it the spend guard, the Gemini
-    critique-only gate, usage logging, and provider choice.
+    separate direct-SDK module) is what gives it the spend guard, usage logging,
+    and provider choice.
 
     `lite` ('bare' or 'research') routes via stripped-down CLI profile —
     no MCPs (bare) or research-MCP only (research). Cost-saving mode.
