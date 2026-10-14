@@ -21,7 +21,8 @@ from .providers import (
     get_model_name,
     raise_cli_backend_failure,
 )
-from .auth import auth_to_llmx_kwargs, resolve_auth
+from .auth import auth_to_llmx_kwargs
+from .mode import AGENT_IMPLIES_SUBSCRIPTION, resolve_auth_mode
 from .cli_backends import (
     CLI_LOGICAL_PROVIDERS,
     CLI_PROVIDERS,
@@ -113,16 +114,20 @@ class LLM:
         api_only = kwargs.pop("api_only", None)
         mode = kwargs.pop("mode", None)
         if auth is not None:
-            # Caller already resolved billing (e.g. llm_dispatch auth=).
+            # Caller already resolved billing (e.g. llm_dispatch auth=); an
+            # explicit api with mode=agent still raises in resolve_mode.
             api_only = None
             resolved_auth = auth  # type: ignore[assignment]
         else:
-            resolved_auth, _, _, _ = resolve_auth(
-                auth=auth,
-                provider=provider,
+            resolved = resolve_auth_mode(
+                mode=mode,
                 lite=kwargs.get("lite"),
+                provider=provider,
                 api_only=api_only,
             )
+            if resolved.auth_source == "mode_implied":
+                logger.info(f"[llmx] {AGENT_IMPLIES_SUBSCRIPTION}")
+            resolved_auth = resolved.auth
         kwargs.update(auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode))
         kwargs["auth"] = resolved_auth
         lite = kwargs.get("lite")
@@ -131,6 +136,12 @@ class LLM:
             lite=lite,
             subscription=resolved_auth == "subscription",
         )
+        if kwargs.get("mode") == "agent" and not lite and not self._cli_provider:
+            # The native SDK path ignores mode: it would run a one-shot chat.
+            raise ValueError(
+                f"mode=agent needs a subscription CLI, but provider {provider!r} has "
+                "no CLI backend installed; drop mode='agent' for an API chat"
+            )
         self.temperature = temperature
         self.search = search
         self.kwargs = kwargs
@@ -468,12 +479,16 @@ def chat(
     auth = kwargs.pop("auth", None)
     api_only = kwargs.pop("api_only", None)
     mode = kwargs.pop("mode", None)
-    resolved_auth, _, _, _ = resolve_auth(
+    resolved = resolve_auth_mode(
+        mode=mode,
+        lite=kwargs.get("lite"),
         auth=auth,
         provider=provider,
-        lite=kwargs.get("lite"),
         api_only=api_only,
     )
+    if resolved.auth_source == "mode_implied":
+        logger.info(f"[llmx] {AGENT_IMPLIES_SUBSCRIPTION}")
+    resolved_auth = resolved.auth
     kwargs.update(auth_to_llmx_kwargs(resolved_auth, lite=kwargs.get("lite"), mode=mode))
     kwargs["auth"] = resolved_auth
     # Pull init-time fields out so LLM.__init__ doesn't see them as **kwargs

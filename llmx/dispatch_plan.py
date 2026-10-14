@@ -6,8 +6,8 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
-from .auth import AuthKind, resolve_auth
-from .mode import ModeKind, resolve_mode
+from .auth import AuthKind
+from .mode import ModeKind, resolve_auth_mode
 from .cli_backends import (
     CLI_LOGICAL_PROVIDERS,
     CLI_PROVIDERS,
@@ -245,22 +245,20 @@ def build_dispatch_plan(
         if inferred:
             final_provider = inferred
 
-    effective_lite = lite
-    resolved_auth, auth_source, effective_lite, auth_warns = resolve_auth(
+    # One rule for auth + mode (CLI, dispatch API, probe): an explicit agent
+    # implies subscription and refuses explicit api; never a silent downgrade.
+    resolved = resolve_auth_mode(
+        mode=mode,
+        lite=lite,
         auth=auth,
         provider=final_provider,
         subscription_flag=subscription,
-        lite=effective_lite,
         api_only=api_only,
     )
-    warnings.extend(auth_warns)
-
-    resolved_mode, mode_source, effective_lite, mode_warns = resolve_mode(
-        mode=mode,
-        lite=effective_lite,
-        auth=resolved_auth,
-    )
-    warnings.extend(mode_warns)
+    warnings.extend(resolved.warnings)
+    resolved_auth, auth_source = resolved.auth, resolved.auth_source
+    resolved_mode, mode_source = resolved.mode, resolved.mode_source
+    effective_lite = resolved.lite
 
     # Bare Grok subscription aliases are centralized so planning and live dispatch
     # agree. Retired versions fail here before they can reach a metered API route.
@@ -306,6 +304,12 @@ def build_dispatch_plan(
         cli_fallback_reason = None
 
     if resolved_auth == "subscription" and planned_transport.endswith("-api"):
+        if auth_source == "mode_implied":
+            raise ValueError(
+                f"--mode agent needs a subscription CLI, but model {planned_model!r} "
+                f"resolves only to metered API transport {planned_transport!r}; "
+                "drop --mode agent for an API chat, or choose a subscription-backed model"
+            )
         raise ValueError(
             "auth=subscription cannot resolve to metered API transport "
             f"{planned_transport!r} for model {planned_model!r}; choose an exact "

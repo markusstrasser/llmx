@@ -577,7 +577,7 @@ def research_cmd(prompt, mini, max_tool_calls, code_interpreter, provider, prese
     default=None,
     help=(
         "Interaction shape: chat=isolated one-shot req/res; agent=caller-workspace "
-        "CLI tool loop (subscription only, non-interactive approvals). Default chat."
+        "CLI tool loop (implies --auth subscription; non-interactive approvals). Default chat."
     ),
 )
 @click.option(
@@ -652,6 +652,7 @@ def chat_cmd(
         default_timeout_for,
         normalize_effort_input,
     )
+    from .mode import AGENT_IMPLIES_SUBSCRIPTION
 
     configure_logger(debug=debug, json_mode=json_output)
 
@@ -840,23 +841,37 @@ def chat_cmd(
         # forcing streaming (which breaks reasoning models whose delta.content is
         # empty during the thinking phase) while still capturing output reliably.
 
-        dispatch_plan = build_dispatch_plan(
-            provider=final_provider,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout=timeout,
-            lite=lite,
-            mode=mode,
-            auth=auth,
-            subscription=subscription,
-            api_only=None,
-            use_old=use_old,
-            schema=schema,
-            system=system,
-            search=search,
-            stream=stream,
-            max_tokens=max_tokens,
-        )
+        try:
+            dispatch_plan = build_dispatch_plan(
+                provider=final_provider,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                timeout=timeout,
+                lite=lite,
+                mode=mode,
+                auth=auth,
+                subscription=subscription,
+                api_only=None,
+                use_old=use_old,
+                schema=schema,
+                system=system,
+                search=search,
+                stream=stream,
+                max_tokens=max_tokens,
+            )
+        except RetiredModelError:
+            raise
+        except ValueError as exc:
+            # Contradictory routing (e.g. --mode agent with --auth api) is a usage
+            # error: exit 2 like the allowlist and retired-model gates, never exit 1.
+            click.echo("[llmx:ERROR] type=usage_error exit=2", err=True)
+            if json_output:
+                click.echo(json.dumps({
+                    "error": "usage_error", "message": str(exc), "exit_code": 2,
+                }, indent=2), err=True)
+            else:
+                click.echo(f"Error: {exc}", err=True)
+            sys.exit(2)
 
         requested_reasoning_effort = dispatch_plan.requested_effort
         effective_reasoning_effort = dispatch_plan.effort_applied
@@ -918,6 +933,8 @@ def chat_cmd(
 
         for w in dispatch_plan.warnings:
             click.echo(f"[llmx:WARN] {w}", err=True)
+        if dispatch_plan.auth_source == "mode_implied":
+            click.echo(f"[llmx] {AGENT_IMPLIES_SUBSCRIPTION}", err=True)
         click.echo(dispatch_plan.stderr_line(), err=True)
         if dispatch_plan.lite:
             log_payload["lite"] = dispatch_plan.lite
