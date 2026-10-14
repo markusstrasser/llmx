@@ -122,6 +122,25 @@ def _write_openai_image_item(item, output_path: Optional[str], prompt: str, inde
 CODEX_GENERATED_DIR = Path.home() / ".codex" / "generated_images"
 
 
+def _log_codex_image_usage(proc, before, started: float) -> None:
+    """Log the codex call's tokens (image_gen bills to the plan; tokens still cost latency)."""
+    import time
+
+    from .cli_backends import _codex_session_id, _latest_codex_rollout_usage
+    from .usage_log import log_usage
+
+    usage, note = _latest_codex_rollout_usage(
+        before, started_at=started, session_id=_codex_session_id(proc.stderr or "")
+    )
+    log_usage(
+        provider="openai", model="codex-image_gen", transport="codex-cli", reasoning_effort=None,
+        prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"),
+        reasoning_tokens=usage.get("reasoning_tokens"), cached_tokens=usage.get("cached_tokens"),
+        latency_s=time.time() - started, source="llmx-image", note=note, billing="subscription",
+        error=None if proc.returncode == 0 else f"rc={proc.returncode}",
+    )
+
+
 def generate_codex_image(
     prompt: str,
     output_path: Optional[str] = None,
@@ -156,9 +175,13 @@ def generate_codex_image(
     for r in refs:
         cmd += ["-i", r]
     cmd += ["--", instruction]  # `-i` is multi-value in codex's parser; `--` ends it
+    from .cli_backends import _codex_rollout_snapshot
+
+    before = _codex_rollout_snapshot()
     started = time.time()
     logger.info("Generating image via codex image_gen (subscription)", {"refs": len(refs), "prompt_length": len(prompt)})
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    _log_codex_image_usage(proc, before, started)
     if out.is_file() and out.stat().st_mtime >= started:
         return [out]
     fresh = sorted(
