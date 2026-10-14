@@ -1,0 +1,17 @@
+claude-opus-5-5
+
+**Verdict:** FIXED (llmx 03972e2, catalog skills e917f9c). claude-cli and grok-cli rows under-reported input (Anthropic input_tokens excludes cache) and double-counted reasoning; both now log total input, cache_write_tokens, completion_includes_reasoning=True. Live e2e row: prompt 25181 = 2 + 7944 read + 17235 write.
+
+## Log
+- 2026-10-12: started. git status: peer deletions of .claude/plans/*.md (not touched).
+- Live probe (claude 2.x, `claude -p --output-format json --verbose`, opus-5-5): usage = input_tokens 2, cache_creation_input_tokens 16705 (all ephemeral_1h), cache_read_input_tokens 7944, output_tokens 4, output_tokens_details.thinking_tokens 0; plus server_tool_use, service_tier, cache_creation{}, inference_geo, iterations[], speed, fallback_credit. total_cost_usd 0.1353.
+- Thinking probe (-e high): output_tokens 110, thinking_tokens 107 → Claude output INCLUDES thinking. Ledger rows lacked completion_includes_reasoning, so usage_report.output_tokens() added reasoning again (double count).
+- Cause confirmed: cli_backends._parse_claude_json reads only input_tokens + cache_read; call site logs prompt_tokens=input_tokens (Anthropic semantics: excludes cache), while the ledger contract (usage_report.est_cost) treats prompt_tokens as TOTAL input partitioned by cache counts.
+- Same class in grok-cli (_parse_grok_json): Grok Build emits Anthropic-shaped usage; fixture total_tokens 26334 = input 26055 + cache_read 256 + output 23 → input excludes cache, output includes reasoning 18. Same under-count + double count, and cache_creation dropped.
+- codex-cli: rollout input_tokens includes cached_input_tokens (OpenAI semantics), no write field — OK. API paths (_normalize_usage) OpenAI/Gemini semantics — OK.
+- Fix: `_anthropic_shaped_usage()` in llmx/cli_backends.py, shared by `_parse_claude_json` and `_parse_grok_json`: prompt_tokens = input + cache_read + cache_write; cached_tokens = read; cache_write_tokens = write; completion_includes_reasoning=True; claude-cli also logs reported_cost_usd (API-equivalent total_cost_usd).
+- Fail loud: unknown token-bearing usage keys, a missing cache field, or grok total_tokens != prompt+completion → `[DEGRADED] <transport> usage: ...` in the row note + one stderr warning per distinct message per process. Real payloads trigger none (checked live).
+- Tests: tests/fixtures/claude_cli_usage_2026-10-12.json (real payload, thinking text redacted); 2 new tests in tests/test_usage_accounting.py; grok expectation updated. Full suite: 287 passed, 1 skipped. Ruff: 41 pre-existing errors in touched files (42 at HEAD), none new.
+- Live e2e: `llmx chat --subscription -m claude-opus-5-5 -e low` → row prompt_tokens 25181, cached 7944, cache_write 17235, completion_includes_reasoning true, reported_cost_usd 0.1396, note null.
+- Catalog: ~/Projects/skills/llmx-guide/SKILL.md footgun #12; stale "CLI transports log NULL tokens" caveat struck and corrected.
+- Deferred: (a) usage_report.est_cost prices non-GPT-6 input at a flat rate (no Claude cache-read discount / 1h-write premium); claude-cli est now ~0.10 vs reported 0.14 for the probe — reported_cost_usd on the row is authoritative; changing cost policy touches every report, lead's call. (b) Rows before 2026-10-12 not backfilled (append-only ledger). (c) anthropic-direct / OpenRouter OpenAI-compat usage not live-verified (paid lanes). (d) uv recreated llmx/.venv on first `uv run` (CPython 3.13.15).
