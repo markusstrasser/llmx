@@ -91,7 +91,7 @@ SUBCOMMANDS = {
 @click.option(
     "-m", "--model",
     default=None,
-    help="Model alias/name. OpenAI default: gpt-image-2. Google: flash/pro",
+    help="Model alias/name. OpenAI default: gpt-image-2.5-sunburst (aliases sunburst, flare). Google: flash/pro",
 )
 @click.option(
     "--aspect-ratio", "-a",
@@ -118,7 +118,7 @@ SUBCOMMANDS = {
 @click.option(
     "--quality",
     default="auto",
-    help="OpenAI quality: auto, low, medium, high",
+    help="OpenAI quality: auto, low, medium, high, xhigh, max (xhigh/max: 2.5 only)",
 )
 @click.option(
     "--format", "output_format",
@@ -138,27 +138,43 @@ SUBCOMMANDS = {
     default=1,
     help="Number of OpenAI output images",
 )
+@click.option(
+    "--auth",
+    type=click.Choice(["subscription", "api"]),
+    default="subscription",
+    help="OpenAI route. subscription (default): codex-cli image_gen on the ChatGPT plan, $0, "
+    "one image, plan's current model; size/quality/model ignored. api: metered Images API.",
+)
 @click.option("--debug", is_flag=True, help="Debug logging")
-def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_image, size, quality, output_format, input_fidelity, count, debug):
+def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_image, size, quality, output_format, input_fidelity, count, auth, debug):
     """Generate or edit images.
 
     Examples:
         llmx image "a cute robot mascot" -o robot.png
         llmx image -i photobooth.jpg -o beard.png "same person, short crop, trimmed beard"
         llmx image --provider google "game background forest" -m pro -r 2K
+        llmx image --auth api -m flare --quality high "..."   # metered API
     """
     configure_logger(debug=debug)
 
     prompt_text = " ".join(prompt)
 
     try:
+        if provider == "openai" and auth == "subscription":
+            from .image import generate_codex_image
+
+            if count > 1:
+                raise click.UsageError("--auth subscription makes one image per call; loop or use --auth api")
+            for result in generate_codex_image(prompt_text, output, list(input_image) or None):
+                click.echo(f"Image saved: {result}")
+            return
         if provider == "openai":
-            from .image import generate_openai_image
+            from .image import OPENAI_IMAGE_DEFAULT, generate_openai_image
 
             results = generate_openai_image(
                 prompt=prompt_text,
                 output_path=output,
-                model=model or "gpt-image-2",
+                model=model or OPENAI_IMAGE_DEFAULT,
                 input_images=list(input_image) or None,
                 size=size,
                 quality=quality,

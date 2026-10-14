@@ -44,12 +44,16 @@ ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"
 # Resolutions must be uppercase K
 RESOLUTIONS = ["1K", "2K", "4K"]
 OPENAI_IMAGE_MODELS = {
+    "sunburst": "gpt-image-2.5-sunburst",
+    "flare": "gpt-image-2.5-flare",
+    "gpt-image-2.5": "gpt-image-2.5-sunburst",
     "image2": "gpt-image-2",
     "gpt-image-2": "gpt-image-2",
     "gpt-image-2-2026-04-21": "gpt-image-2-2026-04-21",
 }
+OPENAI_IMAGE_DEFAULT = "gpt-image-2.5-sunburst"  # GPT Image 2.5, 2026-09-09
 OPENAI_IMAGE_SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"]
-OPENAI_IMAGE_QUALITIES = ["auto", "low", "medium", "high"]
+OPENAI_IMAGE_QUALITIES = ["auto", "low", "medium", "high", "xhigh", "max"]
 OPENAI_IMAGE_FORMATS = ["png", "jpeg", "webp"]
 
 
@@ -115,10 +119,63 @@ def _write_openai_image_item(item, output_path: Optional[str], prompt: str, inde
     return saved_path
 
 
+CODEX_GENERATED_DIR = Path.home() / ".codex" / "generated_images"
+
+
+def generate_codex_image(
+    prompt: str,
+    output_path: Optional[str] = None,
+    input_images: Optional[list[str]] = None,
+    timeout: int = 900,
+) -> list[Path]:
+    """Generate one image through codex-cli's built-in image_gen tool ($0, ChatGPT plan).
+
+    The codex tool does not expose its model id; it serves the plan's current GPT
+    Image model. codex is asked to copy the file to ``output_path``; if it doesn't,
+    the newest file under ~/.codex/generated_images written after launch is used.
+    """
+    import shutil
+    import subprocess
+    import time
+
+    if not shutil.which("codex"):
+        raise RuntimeError("codex CLI not found; install it or use --auth api")
+    out = Path(output_path or f"{_safe_stem(prompt)}.png").expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    refs = [str(Path(p).expanduser().resolve()) for p in (input_images or [])]
+    for r in refs:
+        if not Path(r).is_file():
+            raise FileNotFoundError(f"Input image not found: {r}")
+    ref_note = (" Use the attached image(s) as visual reference." if refs else "")
+    instruction = (
+        "Use your image generation tool to create exactly one image from the prompt below."
+        f"{ref_note} Do not alter the prompt's content. Copy the generated file to {out} "
+        "(convert to PNG if needed) and reply with only that path.\n\nPROMPT:\n" + prompt
+    )
+    cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "workspace-write", "-C", str(out.parent)]
+    for r in refs:
+        cmd += ["-i", r]
+    cmd += ["--", instruction]  # `-i` is multi-value in codex's parser; `--` ends it
+    started = time.time()
+    logger.info("Generating image via codex image_gen (subscription)", {"refs": len(refs), "prompt_length": len(prompt)})
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    if out.is_file() and out.stat().st_mtime >= started:
+        return [out]
+    fresh = sorted(
+        (p for p in CODEX_GENERATED_DIR.rglob("*") if p.is_file() and p.stat().st_mtime >= started),
+        key=lambda p: p.stat().st_mtime,
+    ) if CODEX_GENERATED_DIR.is_dir() else []
+    if fresh:
+        shutil.copyfile(fresh[-1], out)
+        return [out]
+    tail = (proc.stdout + proc.stderr)[-1500:]
+    raise RuntimeError(f"codex produced no image (rc={proc.returncode}). Output tail:\n{tail}")
+
+
 def generate_openai_image(
     prompt: str,
     output_path: Optional[str] = None,
-    model: str = "gpt-image-2",
+    model: str = OPENAI_IMAGE_DEFAULT,
     input_images: Optional[list[str]] = None,
     size: str = "auto",
     quality: str = "auto",
@@ -132,7 +189,7 @@ def generate_openai_image(
     Args:
         prompt: Text description of the image to generate or edit
         output_path: Path to save the image; for n>1, _1/_2 suffixes are added
-        model: OpenAI image model, default gpt-image-2
+        model: OpenAI image model, default gpt-image-2.5-sunburst
         input_images: Optional source images for edit/reference workflows
         size: auto, 1024x1024, 1536x1024, or 1024x1536
         quality: auto, low, medium, or high
