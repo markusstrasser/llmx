@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
@@ -319,10 +320,17 @@ def run_subscription_probe(
         )
 
     if cache_ttl_seconds > 0:
-        _write_cached_result(
-            result,
-            plan=plan,
-            cache_dir=resolved_cache_dir,
-            cache_ttl_seconds=cache_ttl_seconds,
-        )
+        try:
+            _write_cached_result(
+                result,
+                plan=plan,
+                cache_dir=resolved_cache_dir,
+                cache_ttl_seconds=cache_ttl_seconds,
+            )
+        except OSError as error:
+            # The live verdict stands; only reuse is lost. A crash here read as a dead transport.
+            print(
+                f"[DEGRADED] llmx probe: result not cached in {resolved_cache_dir}: {error}",
+                file=sys.stderr,
+            )
     return result

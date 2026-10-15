@@ -67,6 +67,27 @@ def test_success_is_typed_and_cached_without_second_call(tmp_path: Path) -> None
     )
 
 
+def test_unwritable_cache_keeps_the_live_verdict_and_says_degraded(tmp_path: Path, capsys) -> None:
+    cache_dir = tmp_path / "probes"
+    cache_dir.mkdir()
+    cache_dir.chmod(0o500)
+    try:
+        result = run_subscription_probe(
+            provider="anthropic",
+            model="claude-opus-5-5",
+            cache_dir=cache_dir,
+            now_fn=lambda: NOW,
+            client_factory=Mock(return_value=_client_factory()),
+        )
+    finally:
+        cache_dir.chmod(0o700)
+
+    assert result.verdict == "available"
+    assert result.exit_code == 0
+    assert list(cache_dir.iterdir()) == []
+    assert "[DEGRADED] llmx probe: result not cached" in capsys.readouterr().err
+
+
 def test_quota_failure_preserves_exit_six_and_never_falls_back(tmp_path: Path) -> None:
     client = Mock()
     client.chat.side_effect = QuotaError(
