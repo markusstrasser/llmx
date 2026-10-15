@@ -957,6 +957,118 @@ def _claude_output_limit_text(events: list) -> tuple[Optional[str], int, Optiona
     return "".join("".join(texts[m]) for m in order), len(recoveries), None
 
 
+# Diagnostics for refused Claude replies: the 2026-10-15 refusal (reconstructed 14,657 chars,
+# result 439) could not be explained because the event stream was not kept.
+CLAUDE_REFUSED_STREAM_DIR = Path.home() / ".cache" / "llmx" / "refused-claude-streams"
+_REFUSED_STREAM_TEXT_LIMIT = 2_000_000
+_INCOMPLETE_STOP_REASONS = frozenset({"max_tokens", "tool_use", "pause_turn", "refusal"})
+
+
+def _claude_recoverable_projection(
+    events: list, result_event: dict, result: str, reconstructed: str
+) -> Optional[str]:
+    """Name a lossy `result` projection whose complete answer is the reconstruction, else None.
+
+    Claude Code can project only a message's final text block into `result`, and it trims
+    surrounding whitespace. The verbose stream still holds every block. The reconstruction
+    is returned only for one completed single-turn assistant message: no tool turn or
+    continuation can have split the answer, and neither the result event nor the message
+    reports a length cap or a tool call. `result` must equal that message's last text
+    block, or the whole reconstruction, apart from surrounding whitespace.
+    """
+    if result_event.get("stop_reason") not in (None, "end_turn", "stop_sequence"):
+        return None
+    if result_event.get("terminal_reason") not in (None, "completed"):
+        return None
+    if result_event.get("num_turns") not in (None, 1):
+        return None
+    message_ids: list[object] = []
+    stop_reasons: set[object] = set()
+    blocks: list[str] = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        raw_message = event.get("message")
+        message = raw_message if isinstance(raw_message, dict) else {}
+        if message.get("id") not in message_ids:
+            message_ids.append(message.get("id"))
+        if message.get("stop_reason") is not None:
+            stop_reasons.add(message.get("stop_reason"))
+        blocks.extend(
+            block["text"]
+            for block in message.get("content") or []
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+    if len(message_ids) != 1 or stop_reasons & _INCOMPLETE_STOP_REASONS:
+        return None
+    if result.strip() == reconstructed.strip():
+        return "trimmed_whitespace"
+    if len(blocks) > 1 and result.strip() == blocks[-1].strip():
+        return "final_text_block"
+    return None
+
+
+def _save_refused_claude_stream(events: list, result: object) -> str:
+    """Save a refused reply's event shapes and return an error-detail suffix naming the file.
+
+    Text blocks are kept (up to a bound) so the refusal can be diagnosed from the file;
+    thinking and other non-text block contents are reduced to their type and length.
+    """
+    kept_chars = 0
+    shapes: list[dict] = []
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            shapes.append({"index": index, "type": type(event).__name__})
+            continue
+        raw_message = event.get("message")
+        message = raw_message if isinstance(raw_message, dict) else {}
+        content = message.get("content")
+        blocks: list[dict] = []
+        if isinstance(content, str):
+            blocks.append({"type": "string", "chars": len(content), "text": content[:2000]})
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                blocks.append({"type": type(block).__name__})
+                continue
+            entry: dict = {"type": block.get("type")}
+            for field in ("text", "thinking"):
+                if isinstance(block.get(field), str):
+                    entry["chars"] = len(block[field])
+            text = block.get("text")
+            if (
+                block.get("type") == "text"
+                and isinstance(text, str)
+                and kept_chars + len(text) <= _REFUSED_STREAM_TEXT_LIMIT
+            ):
+                entry["text"] = text
+                kept_chars += len(text)
+            blocks.append(entry)
+        shapes.append(
+            {
+                "index": index,
+                "type": event.get("type"),
+                "subtype": event.get("subtype"),
+                "message_id": message.get("id"),
+                "stop_reason": message.get("stop_reason"),
+                "blocks": blocks,
+            }
+        )
+    record = {
+        "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "result": result if isinstance(result, str) else None,
+        "events": shapes,
+    }
+    try:
+        CLAUDE_REFUSED_STREAM_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=CLAUDE_REFUSED_STREAM_DIR, prefix="claude-", suffix=".json", delete=False
+        ) as handle:
+            json.dump(record, handle)
+        return f"; stream shape saved to {handle.name}"
+    except OSError as error:
+        return f"; [DEGRADED] stream shape not saved: {error}"
+
+
 def _parse_claude_json(
     stdout: str,
     *,
@@ -1016,7 +1128,7 @@ def _parse_claude_json(
                 CliBackendFailure(
                     kind=LlmxError,
                     status=0,
-                    detail=assistant_error,
+                    detail=assistant_error + _save_refused_claude_stream(events, result),
                 ),
                 None,
             )
@@ -1030,6 +1142,7 @@ def _parse_claude_json(
                         "Claude CLI was forced to continue after answering "
                         f"(injected turn: {injected[:160]!r}); the final text answers "
                         "that turn, not the prompt; refusing response"
+                        + _save_refused_claude_stream(events, result)
                     ),
                 ),
                 None,
@@ -1039,26 +1152,39 @@ def _parse_claude_json(
             (None, 0, None) if allow_continuation else _claude_output_limit_text(events)
         )
         if stitch_error is not None:
-            return CliBackendFailure(kind=LlmxError, status=0, detail=stitch_error), None
-        if result != assistant_text:
-            omitted_chars = max(len(assistant_text) - len(result), 0)
-            if omitted_chars and assistant_text.endswith(result):
-                mismatch = "omitted assistant text blocks"
-            else:
-                mismatch = "disagreed with reconstructed assistant text"
             return (
                 CliBackendFailure(
                     kind=LlmxError,
                     status=0,
-                    detail=(
-                        f"Claude CLI result {mismatch}: "
-                        f"reconstructed_chars={len(assistant_text)} "
-                        f"result_chars={len(result)} "
-                        f"omitted_chars={omitted_chars}; refusing response"
-                    ),
+                    detail=stitch_error + _save_refused_claude_stream(events, result),
                 ),
                 None,
             )
+        response_text = result
+        projection = None
+        if result != assistant_text:
+            projection = _claude_recoverable_projection(events, event, result, assistant_text)
+            if projection is None:
+                omitted_chars = max(len(assistant_text) - len(result), 0)
+                if omitted_chars and assistant_text.endswith(result):
+                    mismatch = "omitted assistant text blocks"
+                else:
+                    mismatch = "disagreed with reconstructed assistant text"
+                return (
+                    CliBackendFailure(
+                        kind=LlmxError,
+                        status=0,
+                        detail=(
+                            f"Claude CLI result {mismatch}: "
+                            f"reconstructed_chars={len(assistant_text)} "
+                            f"result_chars={len(result)} "
+                            f"omitted_chars={omitted_chars}; refusing response"
+                            + _save_refused_claude_stream(events, result)
+                        ),
+                    ),
+                    None,
+                )
+            response_text = assistant_text
         raw_usage = event.get("usage") or {}
         model_usage = event.get("modelUsage") or {}
         model_key = next(iter(model_usage), None)
@@ -1109,7 +1235,14 @@ def _parse_claude_json(
                 f"returning {len(stitched)} chars stitched across messages"
             )
             return stitched, usage
-        return result, usage
+        if projection is not None:
+            usage["result_projection"] = projection
+            logger.warn(
+                f"[cli] Claude result kept only {projection.replace('_', ' ')} "
+                f"({len(result)} chars); returning the {len(response_text)}-char final "
+                "message reconstructed from its verbose text blocks"
+            )
+        return response_text, usage
     return (
         CliBackendFailure(
             kind=LlmxError,

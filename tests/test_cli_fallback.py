@@ -56,8 +56,14 @@ CODEX_USAGE_LIMIT_STDERR = (
     "session id: 01a0aa42-d56f-76e3-a082-beb6642205f7\n--------\nuser\nhi\n\n"
     f"{CODEX_USAGE_LIMIT_ERROR}\n{CODEX_USAGE_LIMIT_ERROR}\n"
 )
+# Two assistant messages: a single message is recovered from its blocks (2026-10-15), but a
+# second message means a tool turn or continuation may have split the answer, so it refuses.
 TRUNCATED_MULTIBLOCK_JSON = json.dumps(
     [
+        {
+            "type": "assistant",
+            "message": {"id": "msg-first", "content": [{"type": "text", "text": "FIRST"}]},
+        },
         {
             "type": "assistant",
             "message": {

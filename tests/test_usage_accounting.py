@@ -48,6 +48,39 @@ def _claude_verbose_stdout(
     )
 
 
+def _claude_events_stdout(
+    blocks: list[tuple[str, str, str]],
+    *,
+    result: str,
+    result_fields: dict | None = None,
+) -> str:
+    """Verbose Claude JSON in the live shape: one assistant event per content block."""
+    events: list[dict] = [
+        {
+            "type": "assistant",
+            "message": {
+                "id": message_id,
+                "stop_reason": None,
+                "content": [{"type": block_type, block_type: text}],
+            },
+        }
+        for message_id, block_type, text in blocks
+    ]
+    events.append(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": result,
+            "stop_reason": "end_turn",
+            "terminal_reason": "completed",
+            "num_turns": 1,
+            **(result_fields or {}),
+        }
+    )
+    return json.dumps(events)
+
+
 def _write_rollout(path: Path, input_tokens: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -311,29 +344,44 @@ class TestClaudeCliUsage(unittest.TestCase):
 
         self.assertEqual(usage["reasoning_tokens"], 0)
 
-    def test_parse_claude_json_rejects_last_block_only_projection(self):
-        stdout = json.dumps(
-            [
-                {
-                    "type": "assistant",
-                    "message": {
-                        "id": "msg-final",
-                        "content": [{"type": "text", "text": "PREFIX"}],
-                    },
-                },
-                {
-                    "type": "assistant",
-                    "message": {
-                        "id": "msg-final",
-                        "content": [{"type": "text", "text": "TAIL"}],
-                    },
-                },
-                {
-                    "type": "result",
-                    "is_error": False,
-                    "result": "TAIL",
-                },
-            ]
+    def test_parse_claude_json_returns_full_message_when_result_keeps_last_block(self):
+        # 2026-10-15: an Opus 5.5 review (14,657 chars) was refused because `result` held only
+        # its final block. The verbose events of a completed single-turn message hold the answer.
+        stdout = _claude_events_stdout(
+            [("msg-final", "thinking", "plan"), ("msg-final", "text", "PREFIX"),
+             ("msg-final", "thinking", "more"), ("msg-final", "text", "TAIL")],
+            result="TAIL",
+        )
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertEqual(result, "PREFIXTAIL")
+        self.assertEqual(usage["result_projection"], "final_text_block")
+
+    def test_parse_claude_json_compares_the_last_block_without_surrounding_whitespace(self):
+        stdout = _claude_events_stdout(
+            [("msg-final", "text", "PREFIX\n"), ("msg-final", "text", "\nTAIL\n")],
+            result="TAIL",
+        )
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertEqual(result, "PREFIX\n\nTAIL\n")
+        self.assertEqual(usage["result_projection"], "final_text_block")
+
+    def test_parse_claude_json_returns_untrimmed_text_when_result_was_trimmed(self):
+        stdout = _claude_events_stdout([("msg-final", "text", "answer\n")], result="answer")
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertEqual(result, "answer\n")
+        self.assertEqual(usage["result_projection"], "trimmed_whitespace")
+
+    def test_parse_claude_json_refuses_last_block_projection_across_messages(self):
+        # A second message means a tool turn or continuation may have split the answer.
+        stdout = _claude_events_stdout(
+            [("msg-a", "text", "FIRST HALF"), ("msg-b", "text", "PREFIX"), ("msg-b", "text", "TAIL")],
+            result="TAIL",
         )
 
         result, usage = _parse_claude_json(stdout)
@@ -345,6 +393,52 @@ class TestClaudeCliUsage(unittest.TestCase):
         self.assertIn("result_chars=4", result.detail)
         self.assertIn("omitted_chars=6", result.detail)
         self.assertIsNone(usage)
+
+    def test_parse_claude_json_refuses_last_block_projection_after_a_length_stop(self):
+        for result_fields in ({"stop_reason": "max_tokens"}, {"terminal_reason": "max_turns"}, {"num_turns": 2}):
+            with self.subTest(result_fields=result_fields):
+                stdout = _claude_events_stdout(
+                    [("msg-final", "text", "PREFIX"), ("msg-final", "text", "TAIL")],
+                    result="TAIL",
+                    result_fields=result_fields,
+                )
+
+                result, usage = _parse_claude_json(stdout)
+
+                self.assertIsInstance(result, CliBackendFailure)
+                self.assertIsNone(usage)
+
+    def test_parse_claude_json_refusal_saves_the_stream_shape(self):
+        stdout = _claude_events_stdout(
+            [("msg-final", "thinking", "secret plan"), ("msg-final", "text", "PREFIX"),
+             ("msg-final", "text", "TAIL")],
+            result="OTHER",
+        )
+
+        result, usage = _parse_claude_json(stdout)
+
+        self.assertIsInstance(result, CliBackendFailure)
+        self.assertIn("disagreed with reconstructed assistant text", result.detail)
+        saved = Path(result.detail.split("stream shape saved to ")[1])
+        record = json.loads(saved.read_text())
+        self.assertEqual(record["result"], "OTHER")
+        blocks = [block for event in record["events"] for block in event["blocks"]]
+        self.assertEqual([block.get("text") for block in blocks if block["type"] == "text"], ["PREFIX", "TAIL"])
+        thinking = [block for block in blocks if block["type"] == "thinking"]
+        self.assertEqual(thinking, [{"type": "thinking", "chars": len("secret plan")}])
+
+    def test_parse_claude_json_refusal_reports_an_unsaved_stream(self):
+        stdout = _claude_events_stdout(
+            [("msg-final", "text", "PREFIX"), ("msg-final", "text", "TAIL")], result="OTHER"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "file"
+            blocker.write_text("")
+            with patch("llmx.cli_backends.CLAUDE_REFUSED_STREAM_DIR", blocker / "dir"):
+                result, _ = _parse_claude_json(stdout)
+
+        self.assertIsInstance(result, CliBackendFailure)
+        self.assertIn("[DEGRADED] stream shape not saved", result.detail)
 
     def test_parse_claude_json_accepts_complete_multiblock_projection(self):
         stdout = _claude_verbose_stdout(
