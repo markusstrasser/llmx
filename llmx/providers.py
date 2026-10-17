@@ -1449,11 +1449,16 @@ def _openai_chat(
     error = None
     started = _time.time()
 
+    response_models: set[str] = set()
+
     try:
         if stream:
             for chunk in client.chat.completions.create(
                 **kwargs, stream=True, stream_options={"include_usage": True}
             ):
+                actual_model = getattr(chunk, "model", None)
+                if isinstance(actual_model, str) and actual_model.strip():
+                    response_models.add(actual_model)
                 # Final usage chunk has empty choices and a populated `usage` field.
                 if getattr(chunk, "usage", None) is not None:
                     usage = chunk.usage
@@ -1469,6 +1474,9 @@ def _openai_chat(
             sys.stdout.write("\n")
         else:
             response = client.chat.completions.create(**kwargs)
+            actual_model = getattr(response, "model", None)
+            if isinstance(actual_model, str) and actual_model.strip():
+                response_models.add(actual_model)
             usage = getattr(response, "usage", None)
             content = response.choices[0].message.content
             if content is None:
@@ -1493,9 +1501,13 @@ def _openai_chat(
         raise
     finally:
         cached = _usage_get(usage, "prompt_tokens_details", "input_tokens_details")
+        served_model = next(iter(response_models)) if len(response_models) == 1 else None
+        if served_model is None:
+            logger.warn("[DEGRADED] served_model unknown: response identity missing or ambiguous")
         log_usage(
             provider=provider,
             model=model,
+            served_model=served_model,
             transport="api",
             reasoning_effort=reasoning_effort,
             prompt_tokens=_usage_get(usage, "prompt_tokens", "input_tokens"),
@@ -1506,7 +1518,9 @@ def _openai_chat(
             completion_includes_reasoning=True,
             latency_s=_time.time() - started,
             error=error,
-            note="provider usage unreported" if usage is None else None,
+            note=("provider usage unreported" if usage is None else
+                  "[DEGRADED] served_model unknown: response identity missing or ambiguous"
+                  if served_model is None else None),
         )
 
     # Reasoning-starvation detection: finish_reason="length" with empty visible

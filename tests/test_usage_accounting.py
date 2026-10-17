@@ -3,7 +3,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from llmx.cli_backends import (
     CliBackendFailure,
@@ -16,6 +19,36 @@ from llmx.providers import LlmxError, _normalize_usage
 from llmx.usage_report import output_tokens
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize("stream,models,expected", [
+    (False, ["actual-model"], "actual-model"), (False, [None], None),
+    (True, ["actual-model", "actual-model"], "actual-model"),
+    (True, [None, None], None), (True, ["first-model", "second-model"], None),
+    (True, ["actual-model", None], "actual-model"),
+])
+def test_openai_api_records_response_model_not_request(tmp_path, stream, models, expected):
+    from llmx.providers import _openai_chat
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=3)
+    chunks = [SimpleNamespace(model=model, usage=usage, choices=[SimpleNamespace(
+        delta=SimpleNamespace(content="OK"), finish_reason="stop")]) for model in models]
+    response = SimpleNamespace(model=models[0], usage=usage, choices=[SimpleNamespace(
+        message=SimpleNamespace(content="OK"), finish_reason="stop")])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kwargs: iter(chunks) if stream else response)))
+    ledger = tmp_path / "usage.jsonl"
+    with patch("llmx.providers.OpenAI", return_value=client), patch(
+        "llmx.providers._get_api_key", return_value="fake-key"
+    ), patch("llmx.usage_log._LOG_PATH", ledger):
+        _openai_chat("hi", "requested-model", "openai", None, 0.7, 30,
+                     stream, None, None, None)
+    row = json.loads(ledger.read_text())
+    assert row["model"] == "requested-model"
+    assert row["served_model"] == expected
+    assert row["prompt_tokens"] == 10 and row["completion_tokens"] == 3
+    assert row["completion_includes_reasoning"] is True
+    if expected is None:
+        assert "[DEGRADED]" in row["note"] and "served_model" in row["note"]
 
 
 def _claude_verbose_stdout(
