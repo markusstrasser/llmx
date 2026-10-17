@@ -88,6 +88,11 @@ before transport. Transport failures retain canonical authentication/quota/rate-
 timeout classes; existing caller retry policy stays in charge, never a billing fallback.
 
 Chat, streaming, structured JSON and image inputs share the native Messages owner.
+The direct provider always requests wire SSE, including public nonstream chat.
+Nonstream callers buffer until valid terminal completion; the native JSON-response
+read path is retired. SSE heartbeats keep a long response active without exposing
+thinking. This follows Anthropic's long-request guidance; it does not establish the
+cause or billing outcome of any prior transport failure.
 Only `end_turn` with nonempty text completes successfully. Any other stop reason,
 including `max_tokens` with partial text, raises; stream chunks remain provisional
 until normal iterator completion. Usage is retained on failure, with native served
@@ -95,6 +100,12 @@ model and stop reason, requested visible budget and actual total ceiling. Python
 `Response`/`DispatchResult` expose `served_model` and `stop_reason`; the requested
 `model` stays separate. Missing model identity remains unknown. No raw thinking
 text is emitted or retained by this transport.
+Safe per-attempt diagnostics retain only the allowlisted `request-id` response
+header (otherwise null), transport exception class, numeric errno and phase
+(`connect`, `read`, `validate`, `complete`), with observed model/usage. They are
+available in the usage row, Response and failure usage/exception metadata; no raw
+headers, response error bodies, thinking or exception messages are recorded by
+this diagnostic addition. Stream text stays provisional even if a later read fails.
 
 Failure history (2026-10-18): the former compatibility route ignored direct Claude
 effort, omitted a ceiling when no visible budget was supplied, and could return

@@ -76,13 +76,12 @@ class _Capture:
             message = {"model": "claude-opus-5-5", "stop_reason": "end_turn",
                        "content": [{"type": "text", "text": "OK"}],
                        "usage": {"input_tokens": 10, "output_tokens": 5}}
-            if body.get("stream"):
-                events = [{"type": "message_start", "message": message},
-                          {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "OK"}},
-                          {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
-                          {"type": "message_stop"}]
-                return io.BytesIO("".join("data: " + json.dumps(event) + "\n\n" for event in events).encode())
-            return io.BytesIO(json.dumps(message).encode())
+            assert body["stream"] is True
+            events = [{"type": "message_start", "message": message},
+                      {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "OK"}},
+                      {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+                      {"type": "message_stop"}]
+            return io.BytesIO("".join("data: " + json.dumps(event) + "\n\n" for event in events).encode())
         self._patches = [
             patch("urllib.request.urlopen", side_effect=native),
             patch(

@@ -21,9 +21,64 @@ from llmx.usage_report import output_tokens
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _native_sse_response(message):
+    import io
+    events = [{"type": "message_start", "message": {"model": message["model"], "usage": message.get("usage", {})}}]
+    events.extend({"type": "content_block_delta", "delta": {"type": "text_delta", "text": block["text"]}}
+                  for block in message.get("content", []) if block["type"] == "text")
+    events.extend([{"type": "message_delta", "delta": {"stop_reason": message["stop_reason"]}}, {"type": "message_stop"}])
+    return io.BytesIO("".join("data: " + json.dumps(event) + "\n\n" for event in events).encode())
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("termination", ["end_turn", "max_tokens", "incomplete", "reset"])
+def test_native_wire_sse_for_both_modes_retains_safe_diagnostics(tmp_path, capsys, stream, termination):
+    import io
+    from llmx.providers import _openai_chat, ModelError, ServiceUnavailableError
+    events = [{"type": "message_start", "message": {"model": "served-opus", "usage": {"input_tokens": 10, "output_tokens": 1, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}},
+              {"type": "ping"},
+              {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "private-thinking-sentinel"}},
+              {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "provisional"}}]
+    if termination not in {"incomplete", "reset"}:
+        events.extend([{"type": "message_delta", "delta": {"stop_reason": termination}, "usage": {"output_tokens": 12}}, {"type": "message_stop"}])
+    class Response(io.BytesIO):
+        headers = {"request-id": "req_test-123", "authorization": "private-header-sentinel"}
+        def __iter__(self):
+            for event in events:
+                yield ("data: " + json.dumps(event) + "\n\n").encode()
+            if termination == "reset":
+                raise ConnectionResetError(54, "private-exception-sentinel")
+    # Real HTTP iteration yields separate lines, including the blank separator.
+    class Lines(Response):
+        def __iter__(self):
+            for payload in super().__iter__():
+                yield from payload.splitlines(keepends=True)
+    def respond(request, **kwargs):
+        assert json.loads(request.data)["stream"] is True
+        return Lines()
+    ledger = tmp_path / "usage.jsonl"
+    with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log._LOG_PATH", ledger):
+        if termination == "end_turn":
+            assert _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, stream, None, None, "max") == "provisional"
+        else:
+            with pytest.raises(ServiceUnavailableError if termination == "reset" else ModelError) as caught:
+                _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, stream, None, None, "max")
+            assert caught.value.request_id == "req_test-123"
+    captured = capsys.readouterr()
+    if not stream and termination != "end_turn":
+        assert captured.out == ""
+    row = json.loads(ledger.read_text())
+    assert row["request_id"] == "req_test-123" and row["served_model"] == "served-opus"
+    assert row["prompt_tokens"] == 10
+    assert bool(row["error"]) == (termination != "end_turn")
+    if termination == "reset":
+        assert row["transport_error_class"] == "ConnectionResetError"
+        assert row["transport_errno"] == 54 and row["transport_phase"] == "read"
+    assert "private-" not in ledger.read_text() + captured.out + captured.err
+
+
 @pytest.mark.parametrize("stop,text", [("end_turn", "verdict"), ("max_tokens", "partial"), ("max_tokens", "")])
 def test_native_claude_request_and_terminal_accounting(tmp_path, stop, text):
-    import io
     from llmx.providers import _openai_chat, ModelError
     payload = {"model": "served-opus", "stop_reason": stop,
                "content": [{"type": "text", "text": text}],
@@ -35,7 +90,7 @@ def test_native_claude_request_and_terminal_accounting(tmp_path, stop, text):
         assert body["output_config"]["effort"] == "max"
         assert body["max_tokens"] == 104192
         assert request.full_url == "https://api.anthropic.com/v1/messages"
-        return io.BytesIO(json.dumps(payload).encode())
+        return _native_sse_response(payload)
     with patch("urllib.request.urlopen", side_effect=respond), patch(
         "llmx.providers._get_api_key", return_value="fake-key"
     ), patch("llmx.providers.OpenAI", side_effect=AssertionError("compat route forbidden")), patch(
@@ -86,7 +141,6 @@ def test_native_claude_stream_preserves_partial_failure(tmp_path, stop, terminal
 
 
 def test_native_claude_structured_vision_and_explicit_budget(tmp_path):
-    import io
     from llmx.providers import _openai_chat
     picture = tmp_path / "sample.png"
     picture.write_bytes(b"test image bytes")
@@ -97,31 +151,46 @@ def test_native_claude_structured_vision_and_explicit_budget(tmp_path):
         assert body["output_config"] == {"effort": "max", "format": {"type": "json_schema", "schema": schema}}
         assert body["messages"][0]["content"][1]["source"]["media_type"] == "image/png"
         assert body["system"] == "system"
-        return io.BytesIO(json.dumps({"model": "served", "stop_reason": "end_turn", "usage": {},
-                                     "content": [{"type": "text", "text": '{"ok":true}'}]}).encode())
+        return _native_sse_response({"model": "served", "stop_reason": "end_turn", "usage": {},
+                                     "content": [{"type": "text", "text": '{"ok":true}'}]})
     with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage"):
         assert _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", "system", .7, 30,
                             False, 64000, schema, "max", media=[picture]) == '{"ok":true}'
 
 
-def test_native_claude_http_error_never_falls_back_or_retries():
+@pytest.mark.parametrize("request_id,expected", [("req_error-1", "req_error-1"), (None, None), ("private header\nvalue", None)])
+def test_native_claude_http_error_never_falls_back_or_retries(request_id, expected):
     import urllib.error
     from llmx.providers import _openai_chat, RateLimitError
-    with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("https://example.invalid", 429, "limit", {}, None)) as call, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.providers.OpenAI") as alternate, patch("llmx.usage_log.log_usage") as record:
-        with pytest.raises(RateLimitError):
+    with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("https://example.invalid", 429, "limit", {"request-id": request_id, "authorization": "private sentinel"}, None)) as call, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.providers.OpenAI") as alternate, patch("llmx.usage_log.log_usage") as record:
+        with pytest.raises(RateLimitError) as caught:
             _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, False, None, None, "max")
     assert call.call_count == 1
     alternate.assert_not_called()
     assert record.call_args.kwargs["error"] == "Anthropic HTTP 429"
+    assert caught.value.request_id == expected
+    assert record.call_args.kwargs["request_id"] == expected
+    assert record.call_args.kwargs["transport_error_class"] == "HTTPError"
+    assert "private" not in str(record.call_args)
+
+
+def test_native_public_response_retains_request_identity():
+    from llmx.api import LLM
+    response = _native_sse_response({"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]})
+    response.headers = {"request-id": "req_public-1"}
+    with patch("urllib.request.urlopen", return_value=response), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage"):
+        result = LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").chat("hi")
+    assert result.content == "ok"
+    assert result.request_id == "req_public-1" and result.transport_phase == "complete"
+    assert result.served_model == "served" and result.stop_reason == "end_turn"
 
 
 @pytest.mark.parametrize("stop", ["end_turn", "max_tokens"])
 def test_native_claude_structured_result_preserves_identity_on_failure(tmp_path, stop):
-    import io
     from llmx.dispatch_api import dispatch
     payload = {"model": "actual-opus", "stop_reason": stop, "content": [{"type": "text", "text": "answer"}],
                "usage": {"input_tokens": 5, "output_tokens": 7, "new_input_tokens": 2}}
-    with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage") as record:
+    with patch("urllib.request.urlopen", return_value=_native_sse_response(payload)), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage") as record:
         result = dispatch("hi", provider="anthropic-direct", model="claude-opus-5-5", auth="api", reasoning_effort="max")
     assert result.served_model == "actual-opus" and result.stop_reason == stop
     assert result.usage["completion_tokens"] == 7
@@ -145,7 +214,7 @@ def test_dispatch_result_additions_preserve_positional_text():
 def test_native_claude_read_errors_keep_transport_class(stream, failure_kind):
     import io
     import http.client
-    from llmx.providers import _anthropic_messages, ServiceUnavailableError
+    from llmx.providers import _openai_chat, ServiceUnavailableError
     error = {"reset": ConnectionResetError("private read detail"),
              "incomplete": http.client.IncompleteRead(b"private partial"),
              "disconnect": http.client.RemoteDisconnected("private read detail")}[failure_kind]
@@ -158,21 +227,21 @@ def test_native_claude_read_errors_keep_transport_class(stream, failure_kind):
             raise error
     with patch("urllib.request.urlopen", return_value=BrokenResponse()) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage") as record:
         with pytest.raises(ServiceUnavailableError) as caught:
-            list(_anthropic_messages("hi", "claude-opus-5-5", None, 30, stream, None, None, None))
+            _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, stream, None, None, None)
     assert native.call_count == 1
     assert "private" not in str(caught.value)
     assert record.call_args.kwargs["error"]
-    assert record.call_args.kwargs["served_model"] == ("served" if stream else None)
+    assert record.call_args.kwargs["served_model"] == "served"
 
 
 def test_native_claude_read_error_uses_existing_api_retry_owner():
     import io
     from llmx.api import LLM
     class BrokenResponse(io.BytesIO):
-        def read(self, *args):
+        def __iter__(self):
             raise ConnectionResetError("reset")
     success = {"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}
-    with patch.dict(os.environ, {"LLMX_MAX_RETRIES": "2"}), patch("urllib.request.urlopen", side_effect=[BrokenResponse(), io.BytesIO(json.dumps(success).encode())]) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.api.time.sleep") as sleep, patch("llmx.usage_log.log_usage") as record:
+    with patch.dict(os.environ, {"LLMX_MAX_RETRIES": "2"}), patch("urllib.request.urlopen", side_effect=[BrokenResponse(), _native_sse_response(success)]) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.api.time.sleep") as sleep, patch("llmx.usage_log.log_usage") as record:
         response = LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").chat("hi")
     assert response.content == "ok" and native.call_count == 2 and sleep.call_count == 1
     assert record.call_args_list[0].kwargs["error"]
@@ -183,7 +252,6 @@ def test_native_claude_read_error_uses_existing_api_retry_owner():
 @pytest.mark.parametrize("exists", [False, True])
 def test_public_native_claude_media_is_never_dropped(tmp_path, caller, exists):
     import base64
-    import io
     from llmx.api import LLM
     from llmx.dispatch_api import dispatch
     picture = tmp_path / "pixel.png"
@@ -193,7 +261,7 @@ def test_public_native_claude_media_is_never_dropped(tmp_path, caller, exists):
     def respond(request, **kwargs):
         blocks = json.loads(request.data)["messages"][0]["content"]
         assert base64.b64decode(blocks[1]["source"]["data"]) == pixels
-        return io.BytesIO(json.dumps({"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+        return _native_sse_response({"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]})
     with patch("urllib.request.urlopen", side_effect=respond) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage"):
         if caller == "dispatch":
             result = dispatch("image?", provider="anthropic-direct", model="claude-opus-5-5", auth="api", media=[picture])
@@ -215,7 +283,6 @@ def test_public_google_chat_forwards_supplied_media_to_existing_owner(tmp_path):
 
 
 def test_native_haiku_keeps_model_cap_without_unsupported_effort():
-    import io
     from llmx.providers import _openai_chat
     from llmx.dispatch_plan import resolve_effort
     with pytest.raises(ValueError, match="Unsupported native Claude effort"):
@@ -224,20 +291,19 @@ def test_native_haiku_keeps_model_cap_without_unsupported_effort():
         body = json.loads(request.data)
         assert body["max_tokens"] == 64000
         assert "output_config" not in body
-        return io.BytesIO(json.dumps({"model": "claude-haiku-4-5", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+        return _native_sse_response({"model": "claude-haiku-4-5", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]})
     with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage"):
         assert _openai_chat("hi", "claude-haiku-4-5", "anthropic-direct", None, .7, 30, False, 100000, None, None) == "ok"
 
 
 @pytest.mark.parametrize("model,total", [("claude-opus-5-5", 24192), ("claude-opus-5", 40192), ("claude-fable-5-1", 40192), ("claude-sonnet-5", 40192), ("claude-haiku-4-5", 8192)])
 def test_native_claude_default_reserve_is_model_scoped(model, total):
-    import io
     from llmx.providers import _openai_chat
     def respond(request, **kwargs):
         body = json.loads(request.data)
         assert body["max_tokens"] == total
         assert "output_config" not in body
-        return io.BytesIO(json.dumps({"model": model, "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+        return _native_sse_response({"model": model, "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]})
     with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage") as record:
         _openai_chat("hi", model, "anthropic-direct", None, .7, 30, False, None, None, None)
     assert record.call_args.kwargs["reasoning_effort"] is None

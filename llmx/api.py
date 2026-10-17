@@ -84,6 +84,10 @@ class Response:
     raw: Any
     served_model: Optional[str] = None
     stop_reason: Optional[str] = None
+    request_id: Optional[str] = None
+    transport_error_class: Optional[str] = None
+    transport_errno: Optional[int] = None
+    transport_phase: Optional[str] = None
 
     def __str__(self) -> str:
         return self.content
@@ -359,6 +363,10 @@ class LLM:
                     raw=None,
                     served_model=usage_out.get("served_model"),
                     stop_reason=usage_out.get("stop_reason"),
+                    request_id=usage_out.get("request_id"),
+                    transport_error_class=usage_out.get("transport_error_class"),
+                    transport_errno=usage_out.get("transport_errno"),
+                    transport_phase=usage_out.get("transport_phase"),
                 )
 
             except Exception as e:
@@ -382,7 +390,7 @@ class LLM:
 
         if self.provider == "anthropic-direct":
             yield from _anthropic_messages(
-                prompt, self.model, system, call_kwargs.get("timeout", 300), True,
+                prompt, self.model, system, call_kwargs.get("timeout", 300),
                 call_kwargs.get("max_tokens"), call_kwargs.get("response_format"),
                 call_kwargs.get("reasoning_effort"), media=call_kwargs.get("media"),
             )

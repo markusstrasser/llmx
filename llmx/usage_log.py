@@ -99,6 +99,10 @@ def log_usage(
     stop_reason: Optional[str] = None,
     visible_token_budget: Optional[int] = None,
     native_max_tokens: Optional[int] = None,
+    request_id: Optional[str] = None,
+    transport_error_class: Optional[str] = None,
+    transport_errno: Optional[int] = None,
+    transport_phase: Optional[str] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -110,6 +114,10 @@ def log_usage(
             "stop_reason": stop_reason,
             "visible_token_budget": visible_token_budget,
             "native_max_tokens": native_max_tokens,
+            "request_id": request_id,
+            "transport_error_class": transport_error_class,
+            "transport_errno": transport_errno,
+            "transport_phase": transport_phase,
             "transport": transport,
             "billing": billing,
             "reasoning_effort": reasoning_effort,

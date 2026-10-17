@@ -1343,10 +1343,11 @@ def _openai_rate_limit_error(e: Exception, provider: str, model_name: str) -> Ll
     )
 
 
-def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
+def _anthropic_messages(prompt, model, system, timeout, max_tokens,
                         schema, reasoning_effort, usage_out=None, media=None):
     """Native direct Messages iterator; yielded text is provisional until end_turn.
 
+    Wire SSE for all callers; nonstream callers buffer until validated completion.
     Uses existing key/spend callers, no retries or alternate billing transport.
     max_tokens is a visible budget; the native ceiling includes reasoning reserve.
     """
@@ -1375,7 +1376,7 @@ def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
             content.append({"type": "image", "source": {"type": "base64",
                             "media_type": header[5:].split(";")[0], "data": encoded}})
     body = {"model": model, "max_tokens": ceiling,
-            "messages": [{"role": "user", "content": content}], "stream": stream}
+            "messages": [{"role": "user", "content": content}], "stream": True}
     if system:
         body["system"] = system
     output_config = {}
@@ -1395,65 +1396,70 @@ def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
     normalized = {}
     complete = False
     message_started = False
+    request_id = None
+    transport_error_class = None
+    transport_errno = None
+    transport_phase = "connect"
+    def safe_request_id(headers):
+        value = headers.get("request-id") if headers is not None else None
+        if isinstance(value, str) and 0 < len(value) <= 256 and all(character.isascii() and (character.isalnum() or character in "-_") for character in value):
+            return value
+        return None
     try:
         with urllib.request.urlopen(request, timeout=timeout or 300) as response:
-            if stream:
+            request_id = safe_request_id(getattr(response, "headers", None))
+            event_lines = []
+            transport_phase = "read"
+            for raw_line in response:
+                line = raw_line.decode("utf-8").rstrip("\r\n")
+                if line:
+                    if line.startswith("data:"):
+                        event_lines.append(line[5:].lstrip())
+                    continue
+                if not event_lines:
+                    continue
+                event = json.loads("\n".join(event_lines))
                 event_lines = []
-                for raw_line in response:
-                    line = raw_line.decode("utf-8").rstrip("\r\n")
-                    if line:
-                        if line.startswith("data:"):
-                            event_lines.append(line[5:].lstrip())
-                        continue
-                    if not event_lines:
-                        continue
-                    event = json.loads("\n".join(event_lines))
-                    event_lines = []
-                    kind = event.get("type")
-                    if complete and kind != "ping":
-                        raise ModelError("Native Claude event after message_stop", provider="anthropic-direct", model=model)
-                    if kind == "error":
-                        error_kind = event.get("error", {}).get("type")
-                        exception_type = {
-                            "authentication_error": ApiKeyError,
-                            "permission_error": ApiKeyError,
-                            "rate_limit_error": RateLimitError,
-                            "overloaded_error": ServiceUnavailableError,
-                        }.get(error_kind, ModelError)
-                        raise exception_type("Native Claude stream error", provider="anthropic-direct", model=model)
-                    if kind == "message_start":
-                        if message_started:
-                            raise ModelError("Duplicate native Claude message_start", provider="anthropic-direct", model=model)
-                        message_started = True
-                        message = event["message"]
-                        served_model = message.get("model")
-                        usage.update(message.get("usage") or {})
-                    elif kind == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
-                        visible_text.append(event["delta"]["text"])
-                        yield event["delta"]["text"]
-                    elif kind == "message_delta":
-                        stop_reason = event.get("delta", {}).get("stop_reason")
-                        usage.update(event.get("usage") or {})
-                    elif kind == "message_stop":
-                        complete = True
-                if not complete or not message_started or event_lines:
-                    raise ModelError("Native Claude stream ended without message_stop", provider="anthropic-direct", model=model)
-            else:
-                message = json.loads(response.read())
-                served_model = message.get("model")
-                usage = message.get("usage") or {}
-                stop_reason = message.get("stop_reason")
-                if stop_reason == "end_turn":
-                    for block in message.get("content", []):
-                        if block.get("type") == "text":
-                            visible_text.append(block["text"])
-                            yield block["text"]
+                kind = event.get("type")
+                if complete and kind != "ping":
+                    raise ModelError("Native Claude event after message_stop", provider="anthropic-direct", model=model)
+                if kind == "error":
+                    error_kind = event.get("error", {}).get("type")
+                    exception_type = {
+                        "authentication_error": ApiKeyError,
+                        "permission_error": ApiKeyError,
+                        "rate_limit_error": RateLimitError,
+                        "overloaded_error": ServiceUnavailableError,
+                    }.get(error_kind, ModelError)
+                    raise exception_type("Native Claude stream error", provider="anthropic-direct", model=model)
+                if kind == "message_start":
+                    if message_started:
+                        raise ModelError("Duplicate native Claude message_start", provider="anthropic-direct", model=model)
+                    message_started = True
+                    message = event["message"]
+                    served_model = message.get("model")
+                    usage.update(message.get("usage") or {})
+                elif kind == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
+                    visible_text.append(event["delta"]["text"])
+                    yield event["delta"]["text"]
+                elif kind == "message_delta":
+                    stop_reason = event.get("delta", {}).get("stop_reason")
+                    usage.update(event.get("usage") or {})
+                elif kind == "message_stop":
+                    complete = True
+            transport_phase = "validate"
+            if not complete or not message_started or event_lines:
+                raise ModelError("Native Claude stream ended without message_stop", provider="anthropic-direct", model=model)
             if stop_reason != "end_turn":
                 raise ModelError(f"Native Claude incomplete response: stop_reason={stop_reason!r}",
                                  provider="anthropic-direct", model=model)
             if not "".join(visible_text).strip():
                 raise ModelError("Native Claude returned no visible text", provider="anthropic-direct", model=model)
+            transport_phase = "complete"
     except urllib.error.HTTPError as exc:
+        request_id = safe_request_id(exc.headers)
+        transport_error_class = type(exc).__name__
+        transport_errno = exc.errno if isinstance(exc.errno, int) else None
         error = f"Anthropic HTTP {exc.code}"
         kind = (ApiKeyError if exc.code in {401, 403} else QuotaError if exc.code == 402
                 else RateLimitError if exc.code == 429 else TimeoutError_ if exc.code == 408
@@ -1462,12 +1468,18 @@ def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
         raise failure from None
     except (TimeoutError, urllib.error.URLError, ConnectionError,
             http.client.IncompleteRead, http.client.RemoteDisconnected) as exc:
+        transport_error_class = type(exc).__name__
+        cause = getattr(exc, "reason", exc)
+        transport_errno = getattr(cause, "errno", None)
+        if not isinstance(transport_errno, int):
+            transport_errno = None
         kind = TimeoutError_ if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError) else ServiceUnavailableError
         error = "Native Claude transport timeout" if kind is TimeoutError_ else "Native Claude transport unavailable"
         failure = kind(error, provider="anthropic-direct", model=model)
         raise failure from None
     except BaseException as exc:
-        error = f"{type(exc).__name__}: {exc}"
+        transport_error_class = type(exc).__name__
+        error = f"{type(exc).__name__}: native Claude response failed during {transport_phase}"
         failure = exc
         raise
     finally:
@@ -1478,19 +1490,25 @@ def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
                           completion_includes_reasoning=True)
         normalized["total_tokens"] = (normalized["prompt_tokens"] + normalized["completion_tokens"]
             if normalized["prompt_tokens"] is not None and normalized["completion_tokens"] is not None else None)
+        diagnostics = {"request_id": request_id, "transport_error_class": transport_error_class,
+                       "transport_errno": transport_errno, "transport_phase": transport_phase}
         if usage_out is not None:
             usage_out.update(normalized)
+            usage_out.update(diagnostics)
             usage_out.update(served_model=served_model, stop_reason=stop_reason)
             if usage_note:
                 usage_out["usage_note"] = usage_note
         if failure is not None:
-            failure.usage = {**normalized, "usage_note": usage_note}
+            failure.usage = {**normalized, "usage_note": usage_note, **diagnostics}
             failure.served_model = served_model
             failure.stop_reason = stop_reason
+            for field, value in diagnostics.items():
+                setattr(failure, field, value)
         log_usage(provider="anthropic-direct", model=model, served_model=served_model,
             transport="api", billing="api", reasoning_effort=effort,
             latency_s=time.monotonic() - started, error=error, stop_reason=stop_reason,
             visible_token_budget=visible, native_max_tokens=ceiling,
+            **diagnostics,
             note="; ".join(note for note in (usage_note,
                 f"effort omitted; reserve uses declared model default {effective!r}" if effort is None else None,
                 None if served_model else "[DEGRADED] served_model unknown") if note) or None,
@@ -1525,7 +1543,7 @@ def _openai_chat(
 
     if provider == "anthropic-direct":
         text = []
-        for part in _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
+        for part in _anthropic_messages(prompt, model, system, timeout, max_tokens,
                                         schema, reasoning_effort, usage_out, media):
             text.append(part)
             if stream:
