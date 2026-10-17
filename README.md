@@ -72,7 +72,37 @@ llmx --compare "Tabs or spaces?"
 llmx -s "You are terse" "Reply with OK"
 ```
 
-### Timeouts
+### Direct Claude API completion contract
+
+Explicit `-p anthropic-direct` uses native Anthropic Messages with the existing API
+key and spend guard. Opus 5.5 effort is sent as `output_config.effort`; `max` remains
+`max`, distinct from `xhigh`. No billing-lane fallback occurs on failure.
+`--max-tokens` is a requested visible-output budget: omitted means **8192**. The
+existing effort reserve is added, capped at **128000 total native output tokens**
+(thinking plus text). Thus default visible8192 with max effort sends104192 total;
+unset effort reserves16000 and sends24192 total. This is a ceiling, not a guarantee
+of that much visible text. Explicit visible budgets override8192.
+Other admitted models use their declared native cap/default effort; Haiku4.5 has
+a64000 cap, no effort support and no adaptive reserve. Unsupported effort refuses
+before transport. Transport failures retain canonical authentication/quota/rate-limit/
+timeout classes; existing caller retry policy stays in charge, never a billing fallback.
+
+Chat, streaming, structured JSON and image inputs share the native Messages owner.
+Only `end_turn` with nonempty text completes successfully. Any other stop reason,
+including `max_tokens` with partial text, raises; stream chunks remain provisional
+until normal iterator completion. Usage is retained on failure, with native served
+model and stop reason, requested visible budget and actual total ceiling. Python
+`Response`/`DispatchResult` expose `served_model` and `stop_reason`; the requested
+`model` stays separate. Missing model identity remains unknown. No raw thinking
+text is emitted or retained by this transport.
+
+Failure history (2026-10-18): the former compatibility route ignored direct Claude
+effort, omitted a ceiling when no visible budget was supplied, and could return
+nonempty truncated text as success. Offline native request/stream/usage controls
+in `tests/test_usage_accounting.py` cover this class; no live entitlement or model
+quality claim follows from those controls.
+
+### Timeouts (all routes)
 
 Default wall-clock is **300s**. llmx auto-raises defaults for agent mode and
 high/max effort (up to **1800s** agent / **3600s** max). Ceiling is 3600s.

@@ -167,6 +167,13 @@ def raise_cli_backend_failure(
 
 # Model-specific parameter restrictions
 MODEL_RESTRICTIONS = {
+    # Native Messages contracts: platform.claude.com/docs/en/models and /effort.
+    # Provider-scoped so OpenRouter and subscription behavior stays unchanged.
+    "claude-opus-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "medium", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-opus-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-fable-5-1": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-sonnet-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-haiku-4-5": {"anthropic_messages": {"max_output": 64000, "default_effort": None, "efforts": ()}},
     # Astra plain-text Chat Completions contract; tool calls require Responses.
     # Pricing/admission remains governed independently by the spend guard.
     "gpt-6-astra": {
@@ -328,7 +335,7 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 1.0),
         "supports_streaming": True,
     },
-    # Direct Anthropic API via its OpenAI-compatible endpoint (api.anthropic.com/v1/).
+    # Direct Anthropic native Messages API.
     # Opt-in with `-p anthropic-direct` — never the default. claude-cli drops
     # ANTHROPIC_API_KEY for its OAuth path, so subscription transport is unaffected.
     "anthropic-direct": {
@@ -452,7 +459,6 @@ OPENAI_COMPAT_URLS = {
     "kimi": "https://api.moonshot.ai/v1",
     "minimax": "https://api.minimax.io/v1",  # international endpoint; M3 emits <think> blocks inline
     "anthropic": "https://openrouter.ai/api/v1",  # Anthropic via OpenRouter
-    "anthropic-direct": "https://api.anthropic.com/v1/",  # direct Anthropic OpenAI-compat
     "zai": "https://openrouter.ai/api/v1",  # GLM via OpenRouter (flip to api.z.ai when keyed)
 }
 
@@ -1230,8 +1236,6 @@ _REASONING_HEADROOM = {
     "xhigh": 64_000,
     "max": 96_000,  # GPT-5.6+ beyond-xhigh effort
 }
-# Opus 5.5 output limit (thinking + reply); a larger request returns 400.
-_ANTHROPIC_MAX_OUTPUT = 128_000
 # Output ceilings of the subscription Claude models (model-guide specs: 128K each).
 # Claude Code caps output below them by default, and an answer that crosses the cap
 # fails instead of finishing, so claude-cli calls raise the cap to the model's ceiling.
@@ -1297,9 +1301,7 @@ def _openai_request_parameters(
             logger.warn(warning)
 
     parameters = {}
-    # Anthropic's compatibility endpoint also rejects temperature.
-    if provider != "anthropic-direct":
-        parameters["temperature"] = temperature
+    parameters["temperature"] = temperature
     if reasoning_effort:
         if provider == "openrouter":
             body = openrouter_reasoning_body(reasoning_effort)
@@ -1341,6 +1343,160 @@ def _openai_rate_limit_error(e: Exception, provider: str, model_name: str) -> Ll
     )
 
 
+def _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
+                        schema, reasoning_effort, usage_out=None, media=None):
+    """Native direct Messages iterator; yielded text is provisional until end_turn.
+
+    Uses existing key/spend callers, no retries or alternate billing transport.
+    max_tokens is a visible budget; the native ceiling includes reasoning reserve.
+    """
+    import urllib.error
+    import urllib.request
+    import http.client
+    from .dispatch_plan import resolve_effort
+    from .usage_log import log_usage
+    from .cli_backends import _anthropic_shaped_usage
+
+    effort, _ = resolve_effort(reasoning_effort, transport="anthropic-direct-api",
+                              provider="anthropic-direct", model=model)
+    contract = (get_model_restriction(model) or {}).get("anthropic_messages")
+    if contract is None:
+        raise ValueError(f"No native Messages output contract for {model}")
+    effective = effort or contract["default_effort"]
+    visible = 8192 if max_tokens is None else max_tokens
+    if isinstance(visible, bool) or not isinstance(visible, int) or visible <= 0:
+        raise ValueError("max_tokens must be a positive visible-token budget")
+    ceiling = min(visible + _REASONING_HEADROOM.get(effective, 0), contract["max_output"])
+    content = [{"type": "text", "text": prompt}]
+    if media:
+        from .vision import build_openai_content
+        for block in build_openai_content(media, prompt)[1:]:
+            header, encoded = block["image_url"]["url"].split(",", 1)
+            content.append({"type": "image", "source": {"type": "base64",
+                            "media_type": header[5:].split(";")[0], "data": encoded}})
+    body = {"model": model, "max_tokens": ceiling,
+            "messages": [{"role": "user", "content": content}], "stream": stream}
+    if system:
+        body["system"] = system
+    output_config = {}
+    if effort:
+        output_config["effort"] = effort
+    if schema:
+        output_config["format"] = {"type": "json_schema", "schema": schema}
+    if output_config:
+        body["output_config"] = output_config
+    request = urllib.request.Request("https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode(), headers={"x-api-key": _get_api_key("anthropic-direct"),
+        "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    started = time.monotonic()
+    usage, served_model, stop_reason, error = {}, None, None, None
+    failure = None
+    visible_text = []
+    normalized = {}
+    complete = False
+    message_started = False
+    try:
+        with urllib.request.urlopen(request, timeout=timeout or 300) as response:
+            if stream:
+                event_lines = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if line:
+                        if line.startswith("data:"):
+                            event_lines.append(line[5:].lstrip())
+                        continue
+                    if not event_lines:
+                        continue
+                    event = json.loads("\n".join(event_lines))
+                    event_lines = []
+                    kind = event.get("type")
+                    if complete and kind != "ping":
+                        raise ModelError("Native Claude event after message_stop", provider="anthropic-direct", model=model)
+                    if kind == "error":
+                        error_kind = event.get("error", {}).get("type")
+                        exception_type = {
+                            "authentication_error": ApiKeyError,
+                            "permission_error": ApiKeyError,
+                            "rate_limit_error": RateLimitError,
+                            "overloaded_error": ServiceUnavailableError,
+                        }.get(error_kind, ModelError)
+                        raise exception_type("Native Claude stream error", provider="anthropic-direct", model=model)
+                    if kind == "message_start":
+                        if message_started:
+                            raise ModelError("Duplicate native Claude message_start", provider="anthropic-direct", model=model)
+                        message_started = True
+                        message = event["message"]
+                        served_model = message.get("model")
+                        usage.update(message.get("usage") or {})
+                    elif kind == "content_block_delta" and event.get("delta", {}).get("type") == "text_delta":
+                        visible_text.append(event["delta"]["text"])
+                        yield event["delta"]["text"]
+                    elif kind == "message_delta":
+                        stop_reason = event.get("delta", {}).get("stop_reason")
+                        usage.update(event.get("usage") or {})
+                    elif kind == "message_stop":
+                        complete = True
+                if not complete or not message_started or event_lines:
+                    raise ModelError("Native Claude stream ended without message_stop", provider="anthropic-direct", model=model)
+            else:
+                message = json.loads(response.read())
+                served_model = message.get("model")
+                usage = message.get("usage") or {}
+                stop_reason = message.get("stop_reason")
+                if stop_reason == "end_turn":
+                    for block in message.get("content", []):
+                        if block.get("type") == "text":
+                            visible_text.append(block["text"])
+                            yield block["text"]
+            if stop_reason != "end_turn":
+                raise ModelError(f"Native Claude incomplete response: stop_reason={stop_reason!r}",
+                                 provider="anthropic-direct", model=model)
+            if not "".join(visible_text).strip():
+                raise ModelError("Native Claude returned no visible text", provider="anthropic-direct", model=model)
+    except urllib.error.HTTPError as exc:
+        error = f"Anthropic HTTP {exc.code}"
+        kind = (ApiKeyError if exc.code in {401, 403} else QuotaError if exc.code == 402
+                else RateLimitError if exc.code == 429 else TimeoutError_ if exc.code == 408
+                else ServiceUnavailableError if exc.code >= 500 else ModelError)
+        failure = kind(error, provider="anthropic-direct", model=model, status_code=exc.code)
+        raise failure from None
+    except (TimeoutError, urllib.error.URLError, ConnectionError,
+            http.client.IncompleteRead, http.client.RemoteDisconnected) as exc:
+        kind = TimeoutError_ if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError) else ServiceUnavailableError
+        error = "Native Claude transport timeout" if kind is TimeoutError_ else "Native Claude transport unavailable"
+        failure = kind(error, provider="anthropic-direct", model=model)
+        raise failure from None
+    except BaseException as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        failure = exc
+        raise
+    finally:
+        served_model = served_model if isinstance(served_model, str) and served_model.strip() else None
+        normalized = _anthropic_shaped_usage(usage, "anthropic-direct")
+        usage_note = normalized.pop("usage_note")
+        normalized.update(reasoning_tokens=_usage_reasoning_tokens(usage),
+                          completion_includes_reasoning=True)
+        normalized["total_tokens"] = (normalized["prompt_tokens"] + normalized["completion_tokens"]
+            if normalized["prompt_tokens"] is not None and normalized["completion_tokens"] is not None else None)
+        if usage_out is not None:
+            usage_out.update(normalized)
+            usage_out.update(served_model=served_model, stop_reason=stop_reason)
+            if usage_note:
+                usage_out["usage_note"] = usage_note
+        if failure is not None:
+            failure.usage = {**normalized, "usage_note": usage_note}
+            failure.served_model = served_model
+            failure.stop_reason = stop_reason
+        log_usage(provider="anthropic-direct", model=model, served_model=served_model,
+            transport="api", billing="api", reasoning_effort=effort,
+            latency_s=time.monotonic() - started, error=error, stop_reason=stop_reason,
+            visible_token_budget=visible, native_max_tokens=ceiling,
+            note="; ".join(note for note in (usage_note,
+                f"effort omitted; reserve uses declared model default {effective!r}" if effort is None else None,
+                None if served_model else "[DEGRADED] served_model unknown") if note) or None,
+            **{key: value for key, value in normalized.items() if key != "total_tokens"})
+
+
 def _openai_chat(
     prompt,
     model,
@@ -1366,6 +1522,19 @@ def _openai_chat(
     """
     import time as _time
     from .usage_log import log_usage
+
+    if provider == "anthropic-direct":
+        text = []
+        for part in _anthropic_messages(prompt, model, system, timeout, stream, max_tokens,
+                                        schema, reasoning_effort, usage_out, media):
+            text.append(part)
+            if stream:
+                sys.stdout.write(part)
+                sys.stdout.flush()
+        result = "".join(text)
+        if not stream:
+            print(result)
+        return result
 
     base_url = OPENAI_COMPAT_URLS.get(provider)
     api_key = _get_api_key(provider)
@@ -1416,19 +1585,12 @@ def _openai_chat(
     # finish_reason="length" — the "returns nothing" fault. So treat --max-tokens
     # as the VISIBLE-OUTPUT budget and add effort-scaled reasoning headroom on
     # top; cost on a reasoning model is governed by effort, not this ceiling.
-    # Current Claude models think on every request (Opus 5.5 cannot disable it)
-    # and thinking counts toward the token ceiling, so an unset effort still
-    # needs headroom: reserve for the vendor default, `medium`.
     headroom_effort = reasoning_effort
-    if provider == "anthropic-direct" and not headroom_effort:
-        headroom_effort = "medium"
     _is_reasoning = bool(headroom_effort) and headroom_effort in _REASONING_HEADROOM
     if max_tokens:
         if _is_reasoning:
             headroom = _REASONING_HEADROOM[headroom_effort]
             ceiling = max_tokens + headroom
-            if provider == "anthropic-direct":
-                ceiling = min(ceiling, _ANTHROPIC_MAX_OUTPUT)
             kwargs["max_completion_tokens"] = ceiling
             logger.info(
                 f"reasoning headroom: max_completion_tokens={ceiling} "
@@ -1814,7 +1976,7 @@ def chat(
         check_gemini_flash_usage(model_name, prompt)
 
         # Validate reasoning_effort parameter (map aliases like max before API check)
-        restriction = get_model_restriction(model_name)
+        restriction = get_model_restriction(model_name) or {}
         if reasoning_effort:
             from .dispatch_plan import resolve_effort
 

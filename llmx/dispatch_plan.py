@@ -77,6 +77,11 @@ def map_effort_for_backend(
     e = effort.lower()
     model_l = (model or "").lower()
     restriction = get_model_restriction(model_l) or {}
+    if provider == "anthropic-direct":
+        contract = restriction.get("anthropic_messages", {})
+        if e not in contract.get("efforts", ()):
+            raise ValueError(f"Unsupported native Claude effort {e!r} for {model}")
+        return e, []
     # GPT-6 family (incl. the bare `gpt-6` alias, which has no restriction entry
     # of its own) supports native max; otherwise consult the model contract.
     native_max = model_l.startswith("gpt-6") or "max" in restriction.get(
@@ -93,20 +98,13 @@ def map_effort_for_backend(
             return "high", [f"effort {e} mapped to high for openrouter (its ceiling)"]
         return e, warnings
     if transport.endswith("-api") and not restriction.get("reasoning_effort"):
-        if provider == "anthropic-direct":
-            message = (
-                f"anthropic-direct ignores --reasoning-effort; {model} runs at its "
-                "default effort (medium on Opus 5.5). Use the subscription lane "
-                "(claude-cli --effort) to set effort."
-            )
-        else:
-            message = f"Model {model} does not support --reasoning-effort parameter (ignoring)"
+        message = f"Model {model} does not support --reasoning-effort parameter (ignoring)"
         return None, [message]
     if provider == "openai" or transport == "codex-cli":
         applied = restriction.get("reasoning_effort_aliases", {}).get(e, e)
         if applied != e:
             return applied, [f"effort {e} mapped to {applied} for {model}"]
-    if transport.endswith("-api") or provider in {"openai", "google", "anthropic-direct"}:
+    if transport.endswith("-api") or provider in {"openai", "google"}:
         if e == "max" and not native_max:
             return "xhigh", ["effort max mapped to xhigh for API transport"]
         return e, warnings

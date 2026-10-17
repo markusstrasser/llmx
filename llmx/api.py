@@ -14,6 +14,7 @@ from .providers import (
     _get_api_key,
     _google_chat,
     _openai_chat,
+    _anthropic_messages,
     _openai_request_parameters,
     _normalize_usage,
     RateLimitError,
@@ -81,6 +82,8 @@ class Response:
     usage: Dict[str, int]
     latency: float
     raw: Any
+    served_model: Optional[str] = None
+    stop_reason: Optional[str] = None
 
     def __str__(self) -> str:
         return self.content
@@ -299,6 +302,7 @@ class LLM:
                                 reasoning_effort=call_kwargs.get("reasoning_effort"),
                                 usage_out=usage_out,
                                 service_tier=call_kwargs.get("service_tier"),
+                                media=call_kwargs.get("media"),
                             )
                         else:
                             if self.search:
@@ -315,6 +319,7 @@ class LLM:
                                 schema=call_kwargs.get("response_format"),
                                 reasoning_effort=call_kwargs.get("reasoning_effort"),
                                 usage_out=usage_out,
+                                media=call_kwargs.get("media"),
                             )
                     except RateLimitError as e:
                         if attempt == max_attempts - 1:
@@ -352,6 +357,8 @@ class LLM:
                     usage=usage,
                     latency=latency,
                     raw=None,
+                    served_model=usage_out.get("served_model"),
+                    stop_reason=usage_out.get("stop_reason"),
                 )
 
             except Exception as e:
@@ -372,6 +379,14 @@ class LLM:
             )
         enforce_daily_cap(self.model)
         temp = self.temperature
+
+        if self.provider == "anthropic-direct":
+            yield from _anthropic_messages(
+                prompt, self.model, system, call_kwargs.get("timeout", 300), True,
+                call_kwargs.get("max_tokens"), call_kwargs.get("response_format"),
+                call_kwargs.get("reasoning_effort"), media=call_kwargs.get("media"),
+            )
+            return
 
         if self.provider == "google":
             from google import genai

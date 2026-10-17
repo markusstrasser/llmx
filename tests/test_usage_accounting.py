@@ -21,6 +21,240 @@ from llmx.usage_report import output_tokens
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.mark.parametrize("stop,text", [("end_turn", "verdict"), ("max_tokens", "partial"), ("max_tokens", "")])
+def test_native_claude_request_and_terminal_accounting(tmp_path, stop, text):
+    import io
+    from llmx.providers import _openai_chat, ModelError
+    payload = {"model": "served-opus", "stop_reason": stop,
+               "content": [{"type": "text", "text": text}],
+               "usage": {"input_tokens": 10, "cache_read_input_tokens": 20,
+                         "cache_creation_input_tokens": 30, "output_tokens": 40}}
+    ledger = tmp_path / "usage.jsonl"
+    def respond(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["output_config"]["effort"] == "max"
+        assert body["max_tokens"] == 104192
+        assert request.full_url == "https://api.anthropic.com/v1/messages"
+        return io.BytesIO(json.dumps(payload).encode())
+    with patch("urllib.request.urlopen", side_effect=respond), patch(
+        "llmx.providers._get_api_key", return_value="fake-key"
+    ), patch("llmx.providers.OpenAI", side_effect=AssertionError("compat route forbidden")), patch(
+        "llmx.usage_log._LOG_PATH", ledger
+    ):
+        if stop == "end_turn":
+            assert _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7,
+                                30, False, None, None, "max") == text
+        else:
+            with pytest.raises(ModelError):
+                _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7,
+                             30, False, None, None, "max")
+    row = json.loads(ledger.read_text())
+    assert row["served_model"] == "served-opus"
+    assert row["stop_reason"] == stop
+    assert row["prompt_tokens"] == 60
+    assert row["cached_tokens"] == 20 and row["cache_write_tokens"] == 30
+    assert bool(row["error"]) == (stop != "end_turn")
+
+
+@pytest.mark.parametrize("stop,terminal", [("end_turn", True), ("max_tokens", True), ("refusal", True), ("end_turn", False)])
+def test_native_claude_stream_preserves_partial_failure(tmp_path, stop, terminal):
+    import io
+    from llmx.api import LLM
+    from llmx.providers import ModelError
+    events = [{"type": "message_start", "message": {"model": "served-opus", "usage": {"input_tokens": 10}}},
+              {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "partial"}},
+              {"type": "message_delta", "delta": {"stop_reason": stop}, "usage": {"output_tokens": 12}}]
+    if terminal:
+        events.append({"type": "message_stop"})
+    payload = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
+    ledger = tmp_path / "usage.jsonl"
+    with patch("urllib.request.urlopen", return_value=io.BytesIO(payload)), patch(
+        "llmx.providers._get_api_key", return_value="fake"
+    ), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch(
+        "llmx.usage_log._LOG_PATH", ledger
+    ):
+        iterator = LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").stream("hi")
+        assert next(iterator) == "partial"
+        if stop == "end_turn" and terminal:
+            assert list(iterator) == []
+        else:
+            with pytest.raises(ModelError):
+                list(iterator)
+    row = json.loads(ledger.read_text())
+    assert row["served_model"] == "served-opus" and row["completion_tokens"] == 12
+    assert bool(row["error"]) == (stop != "end_turn" or not terminal)
+
+
+def test_native_claude_structured_vision_and_explicit_budget(tmp_path):
+    import io
+    from llmx.providers import _openai_chat
+    picture = tmp_path / "sample.png"
+    picture.write_bytes(b"test image bytes")
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
+    def respond(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["max_tokens"] == 128000
+        assert body["output_config"] == {"effort": "max", "format": {"type": "json_schema", "schema": schema}}
+        assert body["messages"][0]["content"][1]["source"]["media_type"] == "image/png"
+        assert body["system"] == "system"
+        return io.BytesIO(json.dumps({"model": "served", "stop_reason": "end_turn", "usage": {},
+                                     "content": [{"type": "text", "text": '{"ok":true}'}]}).encode())
+    with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage"):
+        assert _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", "system", .7, 30,
+                            False, 64000, schema, "max", media=[picture]) == '{"ok":true}'
+
+
+def test_native_claude_http_error_never_falls_back_or_retries():
+    import urllib.error
+    from llmx.providers import _openai_chat, RateLimitError
+    with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("https://example.invalid", 429, "limit", {}, None)) as call, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.providers.OpenAI") as alternate, patch("llmx.usage_log.log_usage") as record:
+        with pytest.raises(RateLimitError):
+            _openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, False, None, None, "max")
+    assert call.call_count == 1
+    alternate.assert_not_called()
+    assert record.call_args.kwargs["error"] == "Anthropic HTTP 429"
+
+
+@pytest.mark.parametrize("stop", ["end_turn", "max_tokens"])
+def test_native_claude_structured_result_preserves_identity_on_failure(tmp_path, stop):
+    import io
+    from llmx.dispatch_api import dispatch
+    payload = {"model": "actual-opus", "stop_reason": stop, "content": [{"type": "text", "text": "answer"}],
+               "usage": {"input_tokens": 5, "output_tokens": 7, "new_input_tokens": 2}}
+    with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage") as record:
+        result = dispatch("hi", provider="anthropic-direct", model="claude-opus-5-5", auth="api", reasoning_effort="max")
+    assert result.served_model == "actual-opus" and result.stop_reason == stop
+    assert result.usage["completion_tokens"] == 7
+    assert result.status == ("ok" if stop == "end_turn" else "model_error")
+    if stop != "end_turn":
+        assert result.text == "" and record.call_args.kwargs["error"]
+        assert "[DEGRADED]" in result.usage["usage_note"]
+    assert "[DEGRADED]" in record.call_args.kwargs["note"]
+    assert "new_input_tokens" in record.call_args.kwargs["note"]
+
+
+def test_dispatch_result_additions_preserve_positional_text():
+    from llmx.dispatch_api import DispatchResult
+    result = DispatchResult("ok", False, "existing positional text")
+    assert result.text == "existing positional text"
+    assert result.served_model is None and result.stop_reason is None
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("failure_kind", ["reset", "incomplete", "disconnect"])
+def test_native_claude_read_errors_keep_transport_class(stream, failure_kind):
+    import io
+    import http.client
+    from llmx.providers import _anthropic_messages, ServiceUnavailableError
+    error = {"reset": ConnectionResetError("private read detail"),
+             "incomplete": http.client.IncompleteRead(b"private partial"),
+             "disconnect": http.client.RemoteDisconnected("private read detail")}[failure_kind]
+    class BrokenResponse(io.BytesIO):
+        def read(self, *args):
+            raise error
+        def __iter__(self):
+            yield b'data: {"type":"message_start","message":{"model":"served","usage":{"input_tokens":10}}}\n'
+            yield b'\n'
+            raise error
+    with patch("urllib.request.urlopen", return_value=BrokenResponse()) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage") as record:
+        with pytest.raises(ServiceUnavailableError) as caught:
+            list(_anthropic_messages("hi", "claude-opus-5-5", None, 30, stream, None, None, None))
+    assert native.call_count == 1
+    assert "private" not in str(caught.value)
+    assert record.call_args.kwargs["error"]
+    assert record.call_args.kwargs["served_model"] == ("served" if stream else None)
+
+
+def test_native_claude_read_error_uses_existing_api_retry_owner():
+    import io
+    from llmx.api import LLM
+    class BrokenResponse(io.BytesIO):
+        def read(self, *args):
+            raise ConnectionResetError("reset")
+    success = {"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}
+    with patch.dict(os.environ, {"LLMX_MAX_RETRIES": "2"}), patch("urllib.request.urlopen", side_effect=[BrokenResponse(), io.BytesIO(json.dumps(success).encode())]) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.api.time.sleep") as sleep, patch("llmx.usage_log.log_usage") as record:
+        response = LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").chat("hi")
+    assert response.content == "ok" and native.call_count == 2 and sleep.call_count == 1
+    assert record.call_args_list[0].kwargs["error"]
+    assert record.call_args_list[1].kwargs["error"] is None
+
+
+@pytest.mark.parametrize("caller", ["chat", "dispatch"])
+@pytest.mark.parametrize("exists", [False, True])
+def test_public_native_claude_media_is_never_dropped(tmp_path, caller, exists):
+    import base64
+    import io
+    from llmx.api import LLM
+    from llmx.dispatch_api import dispatch
+    picture = tmp_path / "pixel.png"
+    pixels = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+    if exists:
+        picture.write_bytes(pixels)
+    def respond(request, **kwargs):
+        blocks = json.loads(request.data)["messages"][0]["content"]
+        assert base64.b64decode(blocks[1]["source"]["data"]) == pixels
+        return io.BytesIO(json.dumps({"model": "served", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+    with patch("urllib.request.urlopen", side_effect=respond) as native, patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"), patch("llmx.usage_log.log_usage"):
+        if caller == "dispatch":
+            result = dispatch("image?", provider="anthropic-direct", model="claude-opus-5-5", auth="api", media=[picture])
+            assert (result.status == "ok") is exists
+        elif exists:
+            assert LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").chat("image?", media=[picture]).content == "ok"
+        else:
+            with pytest.raises(FileNotFoundError):
+                LLM(provider="anthropic-direct", model="claude-opus-5-5", auth="api").chat("image?", media=[picture])
+    assert native.call_count == int(exists)
+
+
+def test_public_google_chat_forwards_supplied_media_to_existing_owner(tmp_path):
+    from llmx.api import LLM
+    picture = tmp_path / "pixel.png"
+    with patch("llmx.api._google_chat", return_value="ok") as owner, patch("llmx.api.check_api_key"), patch("llmx.spend_guard.enforce_daily_cap"):
+        assert LLM(provider="google", model="gemini-3.8-pro", auth="api").chat("image?", media=[picture]).content == "ok"
+    assert owner.call_args.kwargs["media"] == [picture]
+
+
+def test_native_haiku_keeps_model_cap_without_unsupported_effort():
+    import io
+    from llmx.providers import _openai_chat
+    from llmx.dispatch_plan import resolve_effort
+    with pytest.raises(ValueError, match="Unsupported native Claude effort"):
+        resolve_effort("max", transport="anthropic-direct-api", provider="anthropic-direct", model="claude-haiku-4-5")
+    def respond(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["max_tokens"] == 64000
+        assert "output_config" not in body
+        return io.BytesIO(json.dumps({"model": "claude-haiku-4-5", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+    with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage"):
+        assert _openai_chat("hi", "claude-haiku-4-5", "anthropic-direct", None, .7, 30, False, 100000, None, None) == "ok"
+
+
+@pytest.mark.parametrize("model,total", [("claude-opus-5-5", 24192), ("claude-opus-5", 40192), ("claude-fable-5-1", 40192), ("claude-sonnet-5", 40192), ("claude-haiku-4-5", 8192)])
+def test_native_claude_default_reserve_is_model_scoped(model, total):
+    import io
+    from llmx.providers import _openai_chat
+    def respond(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["max_tokens"] == total
+        assert "output_config" not in body
+        return io.BytesIO(json.dumps({"model": model, "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]}).encode())
+    with patch("urllib.request.urlopen", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage") as record:
+        _openai_chat("hi", model, "anthropic-direct", None, .7, 30, False, None, None, None)
+    assert record.call_args.kwargs["reasoning_effort"] is None
+    assert "effort omitted" in record.call_args.kwargs["note"]
+
+
+@pytest.mark.parametrize("status,kind", [(401, "ApiKeyError"), (402, "QuotaError"), (408, "TimeoutError_"), (429, "RateLimitError"), (500, "ServiceUnavailableError"), (400, "ModelError")])
+def test_native_claude_http_errors_keep_public_classes(status, kind):
+    import urllib.error
+    from llmx import providers
+    with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("https://example.invalid", status, "private sentinel", {}, None)), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage") as record:
+        with pytest.raises(getattr(providers, kind)) as caught:
+            providers._openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, False, None, None, None)
+    assert "private sentinel" not in str(caught.value)
+    assert record.call_args.kwargs["error"] == f"Anthropic HTTP {status}"
+
+
 @pytest.mark.parametrize("stream,models,expected", [
     (False, ["actual-model"], "actual-model"), (False, [None], None),
     (True, ["actual-model", "actual-model"], "actual-model"),
@@ -147,11 +381,11 @@ def _write_turns(
     path.parent.mkdir(parents=True, exist_ok=True)
     totals = {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0}
     lines = []
-    for input_tokens, output_tokens, reasoning_tokens in turns:
+    for input_tokens, generated_tokens, reasoning_tokens in turns:
         turn = {
             "input_tokens": input_tokens,
             "cached_input_tokens": 0,
-            "output_tokens": output_tokens,
+            "output_tokens": generated_tokens,
             "reasoning_output_tokens": reasoning_tokens,
         }
         for key, value in turn.items():

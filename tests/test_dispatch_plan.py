@@ -13,19 +13,17 @@ from llmx.dispatch_plan import (
 
 
 class TestEffortNormalize(unittest.TestCase):
-    def test_ignored_api_effort_is_not_applied(self):
+    def test_native_claude_effort_is_applied(self):
         from llmx.dispatch_plan import build_dispatch_plan
         for effort in ("medium", "max", None):
             plan = build_dispatch_plan(provider="anthropic-direct", model="claude-opus-5-5",
                 reasoning_effort=effort, timeout=600, lite=None, mode="chat", auth="api",
                 subscription=False, api_only=None, use_old=False)
             self.assertEqual(plan.requested_effort, effort)
-            self.assertIsNone(plan.effort_applied)
-            self.assertIn("effort=-", plan.stderr_line())
-            self.assertEqual(bool(plan.effort_warnings), bool(effort))
-        with patch("llmx.dispatch_plan.get_model_restriction", return_value={"reasoning_effort": True}):
-            self.assertEqual(resolve_effort("medium", transport="anthropic-direct-api",
-                provider="anthropic-direct", model="claude-opus-5-5"), ("medium", []))
+            self.assertEqual(plan.effort_applied, effort)
+            self.assertIn(f"effort={effort or '-'}", plan.stderr_line())
+        self.assertEqual(resolve_effort("medium", transport="anthropic-direct-api",
+            provider="anthropic-direct", model="claude-opus-5-5"), ("medium", []))
 
     def test_max_allowed(self):
         effort, warns = normalize_effort_input("max")

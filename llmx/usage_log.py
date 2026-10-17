@@ -96,6 +96,9 @@ def log_usage(
     served_model: Optional[str] = None,
     billing: Optional[str] = None,
     reported_cost_usd: Optional[float] = None,
+    stop_reason: Optional[str] = None,
+    visible_token_budget: Optional[int] = None,
+    native_max_tokens: Optional[int] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -104,6 +107,9 @@ def log_usage(
             "provider": provider,
             "model": model,
             "served_model": served_model,
+            "stop_reason": stop_reason,
+            "visible_token_budget": visible_token_budget,
+            "native_max_tokens": native_max_tokens,
             "transport": transport,
             "billing": billing,
             "reasoning_effort": reasoning_effort,

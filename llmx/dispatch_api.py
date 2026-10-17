@@ -90,6 +90,8 @@ class DispatchResult:
     error_message: Optional[str] = None
     dry_run_plan: Optional[dict[str, Any]] = None
     response: Any = None
+    served_model: Optional[str] = None
+    stop_reason: Optional[str] = None
 
     @property
     def exit_code(self) -> int:
@@ -355,6 +357,9 @@ def dispatch(
         status, message = classify_dispatch_error(exc)
         return DispatchResult(
             status=status,
+            served_model=getattr(exc, "served_model", None),
+            stop_reason=getattr(exc, "stop_reason", None),
+            usage=getattr(exc, "usage", {}),
             retryable=RETRYABLE_STATUSES.get(status, False),
             provider=plan.provider,
             model=plan.model,
@@ -396,6 +401,8 @@ def dispatch(
 
     return DispatchResult(
         status="ok",
+        served_model=getattr(response, "served_model", None),
+        stop_reason=getattr(response, "stop_reason", None),
         retryable=False,
         text=text,
         provider=getattr(response, "provider", plan.provider) or plan.provider,
