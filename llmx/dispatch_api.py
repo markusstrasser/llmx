@@ -340,8 +340,8 @@ def dispatch(
         "timeout": plan.timeout,
         **kwargs,
     }
-    if plan.effort_applied:
-        call_kwargs["reasoning_effort"] = plan.effort_applied
+    if plan.effort_applied or plan.requested_effort:
+        call_kwargs["reasoning_effort"] = plan.effort_applied or plan.requested_effort
     if schema is not None:
         call_kwargs["response_format"] = schema
     if caller:

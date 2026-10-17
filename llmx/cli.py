@@ -875,7 +875,7 @@ def chat_cmd(
 
         requested_reasoning_effort = dispatch_plan.requested_effort
         effective_reasoning_effort = dispatch_plan.effort_applied
-        reasoning_effort_source = "user" if requested_reasoning_effort else None
+        reasoning_effort_source = "user" if effective_reasoning_effort else None
 
         if dispatch_plan.transport.endswith("-api"):
             restriction = get_model_restriction(dispatch_plan.model)
@@ -899,15 +899,22 @@ def chat_cmd(
         # Key on EFFECTIVE effort so provider defaults scale consistently.
         from click.core import ParameterSource
         if ctx.get_parameter_source("timeout") == ParameterSource.DEFAULT:
+            # Ignored effort still supplied a caller scheduling budget before
+            # truthful applied-effort reporting; preserve that budget, not a
+            # claim about what the provider ran (the old API max mapped xhigh).
+            budget_effort = effective_reasoning_effort
+            if not budget_effort and dispatch_plan.transport.endswith("-api"):
+                budget_effort = ("xhigh" if requested_reasoning_effort == "max"
+                                 else requested_reasoning_effort)
             scaled = default_timeout_for(
                 mode=dispatch_plan.mode,
-                effort=effective_reasoning_effort,
+                effort=budget_effort,
             )
             if scaled > timeout:
                 timeout = scaled
                 logger.info(
                     f"Timeout auto-raised to {timeout}s for mode={dispatch_plan.mode} "
-                    f"reasoning_effort={effective_reasoning_effort}"
+                    f"effort_budget={budget_effort}"
                 )
                 dispatch_plan.timeout = timeout
 
@@ -932,6 +939,11 @@ def chat_cmd(
             sys.stdout = _TeeWriter(sys.stdout, _output_file)
 
         for w in dispatch_plan.warnings:
+            # Runtime emits ignored API effort warnings from the same resolver.
+            if (not dry_run and dispatch_plan.transport.endswith("-api")
+                    and dispatch_plan.effort_applied is None
+                    and w in dispatch_plan.effort_warnings):
+                continue
             click.echo(f"[llmx:WARN] {w}", err=True)
         if dispatch_plan.auth_source == "mode_implied":
             click.echo(f"[llmx] {AGENT_IMPLIES_SUBSCRIPTION}", err=True)

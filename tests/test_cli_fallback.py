@@ -8,6 +8,33 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+
+def test_ignored_api_effort_cli_plan_preserves_timeout_budget():
+    from llmx.dispatch_plan import default_timeout_for
+    for effort in ("medium", "high", "max"):
+        result = CliRunner().invoke(cli, ["chat", "--auth", "api", "-p", "anthropic-direct",
+            "-m", "claude-opus-5-5", "-e", effort, "--dry-run", "hi"])
+        assert result.exit_code == 0, result.output
+        plan = json.loads(result.stdout)
+        assert plan["effort_applied"] is None
+        assert plan["requested_effort"] == effort
+        # The old API max mapping used xhigh for budget selection.
+        assert plan["timeout"] == default_timeout_for(mode="chat", effort="xhigh" if effort == "max" else effort)
+        assert "effort=-" in result.stderr
+
+
+def test_ignored_api_effort_cli_runtime_keeps_intent_and_explicit_bound():
+    with patch("llmx.cli.chat", return_value="OK") as backend, patch("llmx.cli.logger.info") as info:
+        result = CliRunner().invoke(cli, ["chat", "--auth", "api", "-p", "anthropic-direct",
+            "-m", "claude-opus-5-5", "-e", "medium", "--timeout", "600", "hi"])
+    assert result.exit_code == 0, result.output
+    assert backend.call_args.args[4] == "medium"
+    assert backend.call_args.args[10] == 600
+    metadata = next(call.args[1] for call in info.call_args_list if call.args[0] == "Starting chat")
+    assert metadata["effective_reasoning_effort"] is None
+    assert metadata["reasoning_effort_source"] is None
+
+
 from llmx.api import LLM, Response
 from llmx.cli import cli
 from llmx.cli_backends import (

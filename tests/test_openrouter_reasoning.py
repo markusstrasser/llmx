@@ -395,7 +395,8 @@ class TestPlanReportsWhatTheWireCarries(unittest.TestCase):
         )
         self.assertEqual(applied, "none")
 
-    def test_openai_max_mapping_untouched(self):
+    @patch("llmx.dispatch_plan.get_model_restriction", return_value={"reasoning_effort": True})
+    def test_openai_max_mapping_untouched(self, _restriction):
         applied, _ = map_effort_for_backend(
             "max", transport="openai-api", provider="openai", model="gpt-5.4"
         )
@@ -421,6 +422,42 @@ class TestAnthropicDirectThinkingHeadroom(unittest.TestCase):
                 debug=False, json_output=False, timeout=30, max_tokens=max_tokens,
             )
         return cap.body.get("max_completion_tokens")
+
+    def test_ignored_effort_plan_matches_runtime_without_changing_body(self):
+        from llmx import providers
+        from llmx.dispatch_plan import resolve_effort
+        applied, warnings = resolve_effort("max", transport="anthropic-direct-api",
+            provider="anthropic-direct", model="claude-opus-5-5")
+        self.assertIsNone(applied)
+        self.assertTrue(any("ignores --reasoning-effort" in item for item in warnings))
+        with _Capture() as cap, patch.object(providers.logger, "warn") as warn:
+            providers.chat(prompt="hi", provider="anthropic-direct", model="claude-opus-5-5",
+                temperature=0.7, reasoning_effort="max", stream=False, debug=False,
+                json_output=False, timeout=600, max_tokens=4000)
+        self.assertNotIn("reasoning_effort", cap.body)
+        self.assertEqual(cap.body["max_completion_tokens"], 20000)
+        self.assertIsNone(cap.usage_rows[0]["reasoning_effort"])
+        self.assertTrue(any("ignores --reasoning-effort" in str(call) for call in warn.call_args_list))
+
+    def test_structured_dispatch_ignored_effort_reaches_real_sdk_boundary(self):
+        from llmx.dispatch_api import dispatch
+        with _Capture() as cap:
+            result = dispatch("hi", provider="anthropic-direct", model="claude-opus-5-5",
+                auth="api", reasoning_effort="max", max_tokens=4000, timeout=600)
+        self.assertEqual(result.status, "ok")
+        self.assertIsNone(result.effort_applied)
+        self.assertNotIn("reasoning_effort", cap.body)
+        self.assertIsNone(cap.usage_rows[0]["reasoning_effort"])
+        self.assertEqual(cap.body["max_completion_tokens"], 20000)
+
+    def test_direct_stream_ignored_effort_reaches_real_sdk_boundary(self):
+        from llmx.api import LLM
+        with _Capture() as cap:
+            output = list(LLM(provider="anthropic-direct", model="claude-opus-5-5",
+                auth="api", reasoning_effort="max", timeout=600).stream("hi"))
+        self.assertEqual(output, ["OK"])
+        self.assertNotIn("reasoning_effort", cap.body)
+        self.assertIsNone(cap.usage_rows[0]["reasoning_effort"])
 
     def test_unset_effort_reserves_medium_headroom(self):
         self.assertEqual(self._ceiling(None, 4_000), 4_000 + 16_000)

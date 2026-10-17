@@ -92,6 +92,16 @@ def map_effort_for_backend(
         if e in {"xhigh", "max"}:
             return "high", [f"effort {e} mapped to high for openrouter (its ceiling)"]
         return e, warnings
+    if transport.endswith("-api") and not restriction.get("reasoning_effort"):
+        if provider == "anthropic-direct":
+            message = (
+                f"anthropic-direct ignores --reasoning-effort; {model} runs at its "
+                "default effort (medium on Opus 5.5). Use the subscription lane "
+                "(claude-cli --effort) to set effort."
+            )
+        else:
+            message = f"Model {model} does not support --reasoning-effort parameter (ignoring)"
+        return None, [message]
     if provider == "openai" or transport == "codex-cli":
         applied = restriction.get("reasoning_effort_aliases", {}).get(e, e)
         if applied != e:
@@ -188,7 +198,7 @@ class DispatchPlan:
         return asdict(self)
 
     def stderr_line(self) -> str:
-        effort = self.effort_applied or self.requested_effort or "-"
+        effort = self.effort_applied or "-"
         return (
             f"[llmx] auth={self.auth} mode={self.mode} transport={self.transport} "
             f"model={self.model} effort={effort} timeout={self.timeout}s"

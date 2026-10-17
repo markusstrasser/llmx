@@ -1287,16 +1287,14 @@ def _openai_request_parameters(
 ) -> dict:
     """Shared sampling/reasoning contract for OpenAI-compatible chat and stream."""
     restriction = get_model_restriction(model) if provider == "openai" else None
-    if restriction and restriction.get("reasoning_effort_aliases") and reasoning_effort:
-        # The dispatch plan and direct Python callers must apply the same mapping.
-        if reasoning_effort not in restriction["reasoning_effort_levels"]:
-            from .dispatch_plan import resolve_effort
+    if reasoning_effort:
+        from .dispatch_plan import resolve_effort
 
-            reasoning_effort, warnings = resolve_effort(
-                reasoning_effort, transport="openai-api", provider=provider, model=model
-            )
-            for warning in warnings:
-                logger.warn(warning)
+        reasoning_effort, warnings = resolve_effort(
+            reasoning_effort, transport=f"{provider}-api", provider=provider, model=model
+        )
+        for warning in warnings:
+            logger.warn(warning)
 
     parameters = {}
     # Anthropic's compatibility endpoint also rejects temperature.
@@ -1406,7 +1404,12 @@ def _openai_chat(
             reasoning_effort=reasoning_effort,
         )
     )
-    reasoning_effort = kwargs.get("reasoning_effort", reasoning_effort)
+    # Derive accounting/headroom from the actual wire parameter, including
+    # OpenRouter's native reasoning object; never restore ignored caller intent.
+    reasoning_effort = (
+        kwargs.get("extra_body", {}).get("reasoning", {}).get("effort")
+        if provider == "openrouter" else kwargs.get("reasoning_effort")
+    )
     # On reasoning models, max_completion_tokens bounds reasoning AND visible
     # output together. A user-set --max-tokens (e.g. 32K) on xhigh is silently
     # consumed entirely by reasoning, yielding empty content with
@@ -1833,20 +1836,7 @@ def chat(
         # `reasoning` object itself and errors loudly when a model can't take it.
         table_governs_effort = provider != "openrouter"
         if reasoning_effort and table_governs_effort:
-            if not restriction or not restriction.get("reasoning_effort"):
-                if provider == "anthropic-direct":
-                    # Anthropic's OpenAI-compatible endpoint documents
-                    # `reasoning_effort` as ignored; the model runs at its default.
-                    message = (
-                        f"anthropic-direct ignores --reasoning-effort; {model_name} runs at its "
-                        "default effort (medium on Opus 5.5). Use the subscription lane "
-                        "(claude-cli --effort) to set effort."
-                    )
-                else:
-                    message = f"Model {model_name} does not support --reasoning-effort parameter (ignoring)"
-                logger.warn(message, {"model": model_name, "provider": provider})
-                reasoning_effort = None
-            elif restriction.get("reasoning_effort_levels"):
+            if restriction.get("reasoning_effort_levels"):
                 valid_levels = restriction["reasoning_effort_levels"]
                 if reasoning_effort not in valid_levels:
                     logger.error(

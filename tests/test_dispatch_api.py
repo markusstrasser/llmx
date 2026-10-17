@@ -49,6 +49,18 @@ class ClassifyTest(unittest.TestCase):
 
 
 class DispatchApiTest(unittest.TestCase):
+    def test_ignored_api_effort_preserves_intent_not_applied(self):
+        for dry in (True, False):
+            response = MagicMock(content="OK", latency=0.1, usage={}, provider="anthropic-direct", model="claude-opus-5-5")
+            with patch("llmx.api.chat", return_value=response) as backend:
+                result = dispatch("hi", provider="anthropic-direct", model="claude-opus-5-5",
+                    auth="api", reasoning_effort="medium", timeout=600, dry_run=dry)
+            self.assertIsNone(result.effort_applied)
+            self.assertTrue(any("ignores --reasoning-effort" in warning for warning in result.warnings))
+            if not dry:
+                self.assertEqual(backend.call_args.kwargs["reasoning_effort"], "medium")
+                self.assertEqual(backend.call_args.kwargs["timeout"], 600)
+
     def test_dry_run_returns_plan(self) -> None:
         result = dispatch(
             "hello",
