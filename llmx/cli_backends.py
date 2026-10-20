@@ -697,6 +697,10 @@ _QUOTA_MARKERS = (
     "insufficient quota",
     "insufficient_quota",
     "spend limit",
+    # 2026-10-20: Gemini 429 RESOURCE_EXHAUSTED "exceeded its monthly spending cap" is billing.
+    "spending cap",
+    "spend cap",
+    "ai.studio/spend",
     "usage cap",
 )
 _TIMEOUT_MARKERS = ("deadline exceeded", "deadline_exceeded", "timed out", "timeout")

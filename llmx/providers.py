@@ -2141,7 +2141,18 @@ def chat(
         msg = str(e)
         if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
             # Distinguish quota exhaustion from transient rate limits
-            if "quota" in msg.lower() or "billing" in msg.lower():
+            lowered = msg.lower()
+            # 2026-10-20: Gemini's monthly spending cap arrives as 429 RESOURCE_EXHAUSTED
+            # ("exceeded its monthly spending cap ... ai.studio/spend"); a billing stop, never retry.
+            if any(m in lowered for m in ("spending cap", "spend cap", "ai.studio/spend", "spend limit")):
+                raise QuotaError(
+                    f"SPENDING CAP REACHED for google/{model_name}: the project's monthly spending cap "
+                    "is exhausted. Raise it at https://ai.studio/spend.",
+                    provider="google",
+                    model=model_name,
+                    status_code=429,
+                ) from e
+            if "quota" in lowered or "billing" in lowered:
                 raise QuotaError(
                     f"BILLING EXHAUSTED for google/{model_name}. Check Google Cloud billing.",
                     provider="google",

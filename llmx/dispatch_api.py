@@ -143,6 +143,10 @@ def classify_dispatch_error(exc: BaseException) -> tuple[str, str]:
     lowered = message.lower()
     if any(m in lowered for m in ("timed out", "timeout", "deadline exceeded")):
         return "timeout", message
+    # 2026-10-20: a Gemini monthly spending cap arrives as 429 RESOURCE_EXHAUSTED; it is a
+    # billing stop, so spend-cap markers must win over the rate-limit markers below.
+    if any(m in lowered for m in ("spending cap", "spend cap", "ai.studio/spend", "spend limit")):
+        return "quota", message
     if any(
         m in lowered
         for m in (

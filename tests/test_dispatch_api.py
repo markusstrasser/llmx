@@ -47,6 +47,12 @@ class ClassifyTest(unittest.TestCase):
             "rate_limit",
         )
 
+    def test_gemini_spend_cap_is_quota_not_rate_limit(self) -> None:
+        # 2026-10-20 incident: Gemini monthly spending cap arrives as 429 RESOURCE_EXHAUSTED.
+        msg = "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'Your project has exceeded its monthly spending cap. Please go to AI Studio at https://ai.studio/spend to manage your project spend cap.', 'status': 'RESOURCE_EXHAUSTED'}}"
+        self.assertEqual(classify_dispatch_error(RuntimeError(msg))[0], "quota")
+        self.assertEqual(classify_dispatch_error(RuntimeError("429 Too Many Requests"))[0], "rate_limit")
+
 
 class DispatchApiTest(unittest.TestCase):
     def test_native_claude_effort_preserves_intent_and_application(self):

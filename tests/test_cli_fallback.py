@@ -243,6 +243,12 @@ class TestCodexCliFailureDetail(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertIs(_classify_cli_failure(detail).kind, QuotaError)
 
+    def test_gemini_spend_cap_classifies_as_quota(self):
+        # 2026-10-20 incident: Gemini monthly spending cap arrives as 429 RESOURCE_EXHAUSTED.
+        msg = "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'Your project has exceeded its monthly spending cap. Please go to AI Studio at https://ai.studio/spend to manage your project spend cap.', 'status': 'RESOURCE_EXHAUSTED'}}"
+        self.assertIs(_classify_cli_failure(msg, 429).kind, QuotaError)
+        self.assertIsNot(_classify_cli_failure("429 Too Many Requests", 429).kind, QuotaError)
+
 
 class TestLlmSubscriptionFallback(unittest.TestCase):
     def test_subscription_quota_maps_without_api_fallback(self):
