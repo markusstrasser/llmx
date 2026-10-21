@@ -891,6 +891,42 @@ def _env_key(var: str) -> Optional[str]:
     return val
 
 
+def keychain_shadow(var: str) -> Optional[str]:
+    """Environment name whose value hides a different Keychain ``var``, else None.
+
+    Environment values win over the Keychain, including metered twins that
+    ~/.zshenv sources from ~/.env, so a stale exported key silently hides a
+    fresh `llmx keys set` value (2026-10-21: a revoked OPENAI_API_KEY_METERED
+    in ~/.env shadowed a valid Keychain key and every API call returned 401).
+    """
+    env_val = os.environ.get(var)
+    twin_val = os.environ.get(var + METERED_SUFFIX)
+    used = env_val or twin_val
+    if not used:
+        return None
+    keychain_val = _keychain_get(var)
+    if not keychain_val or keychain_val == used:
+        return None
+    return var + METERED_SUFFIX if used == twin_val else var
+
+
+def api_key_error_hint(provider: str) -> str:
+    """Where a rejected key came from, for auth errors. Never key material."""
+    key_env = API_KEY_OVERRIDES.get(provider)
+    env_var = key_env or (PROVIDER_CONFIGS.get(provider) or {}).get("env_var") or ""
+    key_vars = [var.strip() for var in env_var.replace(" or ", ",").split(",") if var.strip()]
+    for var in key_vars:
+        shadow = keychain_shadow(var)
+        if shadow:
+            return (
+                f" {shadow} from the environment (often ~/.env) shadows a different"
+                f" Keychain {var}; update or unset {shadow}."
+            )
+    if key_vars:
+        return f" Run `llmx keys get {key_vars[0]}` to see where the key resolves from."
+    return ""
+
+
 def check_api_key(provider: str) -> None:
     """Check if API key is available for provider (env vars → Keychain)."""
     config = PROVIDER_CONFIGS.get(provider)
@@ -1464,7 +1500,8 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
         kind = (ApiKeyError if exc.code in {401, 403} else QuotaError if exc.code == 402
                 else RateLimitError if exc.code == 429 else TimeoutError_ if exc.code == 408
                 else ServiceUnavailableError if exc.code >= 500 else ModelError)
-        failure = kind(error, provider="anthropic-direct", model=model, status_code=exc.code)
+        message = f"{error}.{api_key_error_hint('anthropic-direct')}" if kind is ApiKeyError else error
+        failure = kind(message, provider="anthropic-direct", model=model, status_code=exc.code)
         raise failure from None
     except (TimeoutError, urllib.error.URLError, ConnectionError,
             http.client.IncompleteRead, http.client.RemoteDisconnected) as exc:
@@ -2201,7 +2238,7 @@ def chat(
         ) from e
     except openai_module.AuthenticationError as e:
         raise ApiKeyError(
-            f"Invalid API key for {provider}. Check your API key configuration.",
+            f"Invalid API key for {provider}.{api_key_error_hint(provider)}",
             provider=provider,
             model=model_name,
         ) from e

@@ -8,8 +8,10 @@ name. llmx is the sanctioned consumer and promotes the twin in-process.
 import os
 
 import pytest
+from click.testing import CliRunner
 
 from llmx import providers
+from llmx.cli import cli
 
 NAMES = (
     "OPENAI_API_KEY",
@@ -55,3 +57,31 @@ def test_override_key_twin_resolves(env):
 def test_missing_key_error_names_the_twin(env):
     with pytest.raises(RuntimeError, match="_METERED"):
         providers.check_api_key("openai")
+
+
+def test_twin_shadowing_a_different_keychain_key_is_named(env):
+    env.setenv("OPENAI_API_KEY_METERED", "sk-revoked")
+    env.setattr(providers, "_keychain_get", lambda name: "sk-valid")
+    assert providers.keychain_shadow("OPENAI_API_KEY") == "OPENAI_API_KEY_METERED"
+    providers.check_api_key("openai")  # promotion must not hide the twin's origin
+    assert providers.keychain_shadow("OPENAI_API_KEY") == "OPENAI_API_KEY_METERED"
+    assert "OPENAI_API_KEY_METERED" in providers.api_key_error_hint("openai")
+
+
+def test_matching_or_absent_keychain_key_is_not_a_shadow(env):
+    env.setenv("OPENAI_API_KEY_METERED", "sk-valid")
+    assert providers.keychain_shadow("OPENAI_API_KEY") is None
+    env.setattr(providers, "_keychain_get", lambda name: "sk-valid")
+    assert providers.keychain_shadow("OPENAI_API_KEY") is None
+    assert "llmx keys get OPENAI_API_KEY" in providers.api_key_error_hint("openai")
+
+
+def test_keys_set_warns_when_the_environment_shadows_the_stored_key(env):
+    env.setenv("OPENAI_API_KEY_METERED", "sk-revoked")
+    env.setattr(providers, "_keychain_available", lambda: True)
+    env.setattr(providers, "_keychain_set", lambda name, value: True)
+    env.setattr(providers, "_keychain_get", lambda name: "sk-valid")
+    result = CliRunner().invoke(cli, ["keys", "set", "OPENAI_API_KEY", "--value", "sk-valid"])
+    assert result.exit_code == 0, result.output
+    assert "OPENAI_API_KEY_METERED is set in the environment" in result.output
+    assert "sk-" not in result.output

@@ -1204,7 +1204,7 @@ def keys_set(key_name, value):
         llmx keys set OPENAI_API_KEY
         llmx keys set GEMINI_API_KEY --value AIza...
     """
-    from .providers import _keychain_available, _keychain_set
+    from .providers import _keychain_available, _keychain_set, keychain_shadow
 
     if not _keychain_available():
         console.print("[red]Keychain is only available on macOS.[/red]")
@@ -1219,6 +1219,13 @@ def keys_set(key_name, value):
 
     if _keychain_set(key_name, value):
         console.print(f"[green]Stored {key_name} in Keychain[/green]")
+        shadow = keychain_shadow(key_name)
+        if shadow:
+            console.print(
+                f"[yellow]{shadow} is set in the environment (often ~/.env) and takes"
+                f" precedence: llmx will not use this Keychain key until you update or"
+                f" unset {shadow}.[/yellow]"
+            )
     else:
         console.print(f"[red]Failed to store {key_name}[/red]")
         raise SystemExit(1)
@@ -1284,7 +1291,7 @@ def keys_get(key_name):
     printed here lands in their transcript.
     """
     import os
-    from .providers import METERED_SUFFIX, _keychain_get
+    from .providers import METERED_SUFFIX, _keychain_get, keychain_shadow
 
     twin = key_name + METERED_SUFFIX
     env_val = os.environ.get(key_name)
@@ -1299,6 +1306,9 @@ def keys_get(key_name):
         console.print(f"{key_name}: [blue]keychain[/blue] ({len(kc_val)} chars)")
     else:
         console.print(f"{key_name}: [red]not found[/red]")
+    shadow = keychain_shadow(key_name)
+    if shadow:
+        console.print(f"[yellow]{shadow} shadows a different Keychain {key_name}; update or unset {shadow}[/yellow]")
 
 
 cli.add_command(keys_group, name="keys")
