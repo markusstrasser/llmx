@@ -83,7 +83,7 @@ class _Capture:
                       {"type": "message_stop"}]
             return io.BytesIO("".join("data: " + json.dumps(event) + "\n\n" for event in events).encode())
         self._patches = [
-            patch("urllib.request.urlopen", side_effect=native),
+            patch("llmx.keepalive.open_url", side_effect=native),
             patch(
                 "llmx.providers.OpenAI",
                 lambda **_: _CapturingClient(self.calls, self._error),

@@ -10,6 +10,7 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.markdown import Markdown
 
+from . import keepalive
 from .logger import logger
 
 console = Console()
@@ -123,7 +124,7 @@ def research_perplexity_agent(
     console.print(f"[dim]Perplexity Agent ({preset}) — synchronous; deep-research can take 1-5 min[/dim]")
     start_time = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=3600) as r:
+        with keepalive.open_url(req, timeout=3600) as r:
             d = _json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:300]

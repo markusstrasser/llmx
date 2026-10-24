@@ -15,8 +15,8 @@ import base64
 from pathlib import Path
 from typing import Optional, Literal
 from io import BytesIO
-from urllib.request import urlopen
 
+from . import keepalive
 from .logger import logger
 
 # Model configurations (Jan 2026)
@@ -110,7 +110,7 @@ def _write_openai_image_item(item, output_path: Optional[str], prompt: str, inde
     if image_b64:
         saved_path.write_bytes(base64.b64decode(image_b64))
     elif image_url:
-        with urlopen(image_url, timeout=60) as response:
+        with keepalive.open_url(image_url, timeout=60) as response:
             saved_path.write_bytes(response.read())
     else:
         raise RuntimeError("OpenAI image response did not include b64_json or url")

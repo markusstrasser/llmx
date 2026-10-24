@@ -1,6 +1,7 @@
 """Provider management using native SDKs (google-genai, openai)"""
 
 import difflib
+import errno
 import json
 import os
 import signal
@@ -16,6 +17,7 @@ import openai as openai_module
 from openai import OpenAI
 from rich.console import Console
 
+from . import keepalive
 from .logger import logger
 from .model_ids import (
     CURSOR_GROK_MODELS,
@@ -1410,6 +1412,15 @@ def _openai_rate_limit_error(e: Exception, provider: str, model_name: str) -> Ll
     )
 
 
+# Errnos a dead peer or network produces mid-read once kernel keepalive probes give up.
+_KEEPALIVE_LOST_ERRNOS = frozenset(
+    getattr(errno, name)
+    for name in ("ETIMEDOUT", "ECONNRESET", "ECONNABORTED", "EPIPE",
+                 "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EHOSTDOWN")
+    if hasattr(errno, name)
+)
+
+
 def _anthropic_messages(prompt, model, system, timeout, max_tokens,
                         schema, reasoning_effort, usage_out=None, media=None):
     """Native direct Messages iterator; yielded text is provisional until end_turn.
@@ -1476,7 +1487,7 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
             return value
         return None
     try:
-        with urllib.request.urlopen(request, timeout=timeout or 300) as response:
+        with keepalive.open_url(request, timeout=timeout or 300) as response:
             request_id = safe_request_id(getattr(response, "headers", None))
             event_lines = []
             transport_phase = "read"
@@ -1552,15 +1563,19 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
             message = error
         failure = kind(message, provider="anthropic-direct", model=model, status_code=exc.code)
         raise failure from None
-    except (TimeoutError, urllib.error.URLError, ConnectionError,
-            http.client.IncompleteRead, http.client.RemoteDisconnected) as exc:
+    except (OSError, http.client.IncompleteRead) as exc:
         transport_error_class = type(exc).__name__
         cause = getattr(exc, "reason", exc)
         transport_errno = getattr(cause, "errno", None)
         if not isinstance(transport_errno, int):
             transport_errno = None
-        kind = TimeoutError_ if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError) else ServiceUnavailableError
-        error = "Native Claude transport timeout" if kind is TimeoutError_ else "Native Claude transport unavailable"
+        if transport_phase == "read" and transport_errno in _KEEPALIVE_LOST_ERRNOS:
+            # Kernel keepalive probes gave up: the peer or the network died mid-stream.
+            kind, error = ServiceUnavailableError, "Native Claude transport lost (keepalive)"
+        elif isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+            kind, error = TimeoutError_, "Native Claude transport timeout"
+        else:
+            kind, error = ServiceUnavailableError, "Native Claude transport unavailable"
         failure = kind(error, provider="anthropic-direct", model=model)
         raise failure from None
     except BaseException as exc:
