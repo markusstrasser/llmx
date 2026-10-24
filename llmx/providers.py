@@ -1543,7 +1543,8 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
             message = f"{error}.{api_key_error_hint('anthropic-direct')}"
         elif billing:
             message = (f"{error}: billing refusal ({refusal.get('type')}); a key rotated after this process"
-                       f" tree loaded its keys stays stale until they reload.{api_key_error_hint('anthropic-direct')}")
+                       " tree loaded its keys stays stale until they reload (new terminal, or run under"
+                       f" `env -u SECRET_ENV_LOADED zsh -c '...'`).{api_key_error_hint('anthropic-direct')}")
         else:
             message = error
         failure = kind(message, provider="anthropic-direct", model=model, status_code=exc.code)
