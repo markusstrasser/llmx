@@ -88,7 +88,7 @@ def test_native_claude_request_and_terminal_accounting(tmp_path, stop, text):
     def respond(request, **kwargs):
         body = json.loads(request.data)
         assert body["output_config"]["effort"] == "max"
-        assert body["max_tokens"] == 104192
+        assert body["max_tokens"] == 128000  # max effort takes the whole output ceiling
         assert request.full_url == "https://api.anthropic.com/v1/messages"
         return _native_sse_response(payload)
     with patch("urllib.request.urlopen", side_effect=respond), patch(

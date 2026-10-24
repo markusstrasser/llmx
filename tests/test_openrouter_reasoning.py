@@ -452,7 +452,7 @@ class TestAnthropicDirectThinkingHeadroom(unittest.TestCase):
                 temperature=0.7, reasoning_effort="max", stream=False, debug=False,
                 json_output=False, timeout=600, max_tokens=4000)
         self.assertNotIn("reasoning_effort", cap.body)
-        self.assertEqual(cap.body["max_tokens"], 100000)
+        self.assertEqual(cap.body["max_tokens"], 128000)  # max effort takes the whole output ceiling
         self.assertEqual(cap.body["output_config"]["effort"], "max")
         self.assertEqual(cap.usage_rows[0]["reasoning_effort"], "max")
 
@@ -465,7 +465,7 @@ class TestAnthropicDirectThinkingHeadroom(unittest.TestCase):
         self.assertEqual(result.effort_applied, "max")
         self.assertNotIn("reasoning_effort", cap.body)
         self.assertEqual(cap.usage_rows[0]["reasoning_effort"], "max")
-        self.assertEqual(cap.body["max_tokens"], 100000)
+        self.assertEqual(cap.body["max_tokens"], 128000)  # max effort takes the whole output ceiling
 
     def test_direct_stream_native_effort_reaches_http_boundary(self):
         from llmx.api import LLM

@@ -1434,7 +1434,10 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
     visible = 8192 if max_tokens is None else max_tokens
     if isinstance(visible, bool) or not isinstance(visible, int) or visible <= 0:
         raise ValueError("max_tokens must be a positive visible-token budget")
-    ceiling = min(visible + _REASONING_HEADROOM.get(effective, 0), contract["max_output"])
+    # Max effort gets the model's whole output ceiling: Opus 5.5 reviews at max spent 70K-103K
+    # reasoning tokens and 2 of 7 hit the 104,192 cap (2026-10-24 usage log). Billing is per token used.
+    reserve = contract["max_output"] if effective == "max" else _REASONING_HEADROOM.get(effective, 0)
+    ceiling = min(visible + reserve, contract["max_output"])
     content = [{"type": "text", "text": prompt}]
     if media:
         from .vision import build_openai_content
