@@ -1423,7 +1423,7 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
     import http.client
     from .dispatch_plan import resolve_effort
     from .usage_log import log_usage
-    from .cli_backends import _anthropic_shaped_usage
+    from .cli_backends import _QUOTA_MARKERS, _anthropic_shaped_usage
 
     effort, _ = resolve_effort(reasoning_effort, transport="anthropic-direct-api",
                               provider="anthropic-direct", model=model)
@@ -1528,10 +1528,24 @@ def _anthropic_messages(prompt, model, system, timeout, max_tokens,
         transport_error_class = type(exc).__name__
         transport_errno = exc.errno if isinstance(exc.errno, int) else None
         error = f"Anthropic HTTP {exc.code}"
-        kind = (ApiKeyError if exc.code in {401, 403} else QuotaError if exc.code == 402
+        # An unfunded key gets 400 invalid_request_error ("credit balance is too low"), not 402.
+        # Read the typed body so that refusal exits as quota (never retry), not as a model error.
+        try:
+            refusal = json.loads(exc.read(4096) or b"{}").get("error") or {}
+        except (AttributeError, OSError, TypeError, ValueError):
+            refusal = {}
+        refusal_text = str(refusal.get("message") or "").casefold()
+        billing = exc.code == 400 and any(marker in refusal_text for marker in _QUOTA_MARKERS)
+        kind = (ApiKeyError if exc.code in {401, 403} else QuotaError if exc.code == 402 or billing
                 else RateLimitError if exc.code == 429 else TimeoutError_ if exc.code == 408
                 else ServiceUnavailableError if exc.code >= 500 else ModelError)
-        message = f"{error}.{api_key_error_hint('anthropic-direct')}" if kind is ApiKeyError else error
+        if kind is ApiKeyError:
+            message = f"{error}.{api_key_error_hint('anthropic-direct')}"
+        elif billing:
+            message = (f"{error}: billing refusal ({refusal.get('type')}); a key rotated after this process"
+                       f" tree loaded its keys stays stale until they reload.{api_key_error_hint('anthropic-direct')}")
+        else:
+            message = error
         failure = kind(message, provider="anthropic-direct", model=model, status_code=exc.code)
         raise failure from None
     except (TimeoutError, urllib.error.URLError, ConnectionError,

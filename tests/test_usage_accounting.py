@@ -321,6 +321,26 @@ def test_native_claude_http_errors_keep_public_classes(status, kind):
     assert record.call_args.kwargs["error"] == f"Anthropic HTTP {status}"
 
 
+@pytest.mark.parametrize("body,kind", [
+    (b'{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}', "QuotaError"),
+    (b'{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 999999 > 128000"}}', "ModelError"),
+    (b"not json", "ModelError"),
+])
+def test_native_claude_unfunded_key_400_is_quota(body, kind):
+    # 2026-10-24: a stale inherited key got 400 "credit balance is too low"; llmx reported a model error.
+    import io
+    import urllib.error
+
+    from llmx import providers
+    refusal = urllib.error.HTTPError("https://example.invalid", 400, "private sentinel", {}, io.BytesIO(body))
+    with patch("urllib.request.urlopen", side_effect=refusal), patch("llmx.providers._get_api_key", return_value="fake"), \
+            patch("llmx.usage_log.log_usage") as record, pytest.raises(getattr(providers, kind)) as caught:
+        providers._openai_chat("hi", "claude-opus-5-5", "anthropic-direct", None, .7, 30, False, None, None, None)
+    assert type(caught.value) is getattr(providers, kind)
+    assert "private sentinel" not in str(caught.value)
+    assert record.call_args.kwargs["error"] == "Anthropic HTTP 400"
+
+
 @pytest.mark.parametrize("stream,models,expected", [
     (False, ["actual-model"], "actual-model"), (False, [None], None),
     (True, ["actual-model", "actual-model"], "actual-model"),
