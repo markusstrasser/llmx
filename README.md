@@ -284,7 +284,8 @@ def expensive(code):
 | `cursor` / `cursor-cli` | `grok-4.7-low` / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
 | `cerebras` | Qwen 3.8 27B | Fast coding and agent loops; set `-e none` for minimum latency |
-| `deepseek` | DeepSeek Chat | |
+| `deepseek` | `deepseek-flash` | DeepSeek platform (V4.1 Flash); peak-rate priced |
+| `deepinfra` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | DeepInfra OpenAI-compatible API; thinking on by default (`-e` overrides) |
 | `openrouter` | 400+ models | |
 | `zai` | GLM-5.2 | Via OpenRouter id today |
 

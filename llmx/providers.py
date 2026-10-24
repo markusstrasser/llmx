@@ -276,6 +276,18 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["low", "medium", "high"],
     },
+    # DeepSeek V4.1 Flash served by DeepInfra (model JSON + OpenAI-compatible
+    # schema, read 2026-10-24). DeepInfra thinks only when asked and accepts the
+    # full OpenAI effort ladder, so send an explicit effort; "high" is the
+    # default when the caller sets none. The key is deliberately the DeepInfra
+    # model id's tail (`…/DeepSeek-V4.1-Flash-1017`) — the platform alias
+    # `deepseek-flash` does NOT contain it, so the DeepSeek transport (which has
+    # its own effort mapping) is left untouched.
+    "deepseek-v4.1-flash": {
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+    },
     # Kimi K2.5 thinking model (Jan 2026)
     "kimi-k2.5": {
         "temperature": 1.0,
@@ -351,8 +363,15 @@ PROVIDER_CONFIGS = {
         "supports_streaming": True,
     },
     "deepseek": {
-        "model": "deepseek-chat",
+        "model": "deepseek-flash",
         "env_var": "DEEPSEEK_API_KEY",
+        "temperature_range": (0.0, 2.0),
+        "supports_streaming": True,
+    },
+    # DeepInfra's OpenAI-compatible API (api.deepinfra.com/v1/openai).
+    "deepinfra": {
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "env_var": "DEEPINFRA_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
     },
@@ -452,6 +471,7 @@ OPENAI_COMPAT_URLS = {
     "openai": None,  # default
     "xai": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com",
+    "deepinfra": "https://api.deepinfra.com/v1/openai",
     "openrouter": "https://openrouter.ai/api/v1",
     "cerebras": "https://api.cerebras.ai/v1",
     # International endpoint — measured 2026-07-16: MOONSHOT_API_KEY 401s on
@@ -479,6 +499,7 @@ _STRIP_PREFIXES = {
     "xai": "xai/",
     "anthropic": "anthropic/",
     "deepseek": "deepseek/",
+    "deepinfra": "deepinfra/",
     "cerebras": "cerebras/",
     "openrouter": "openrouter/",
     "cursor": "cursor/",
@@ -535,7 +556,11 @@ _KNOWN_MODELS = {
         "kimi-k2-thinking",
         "kimi-k2-0711-preview",
     ],
-    "deepseek": ["deepseek-chat"],
+    # The platform still accepts the retired names deepseek-v4-flash and
+    # deepseek-v4-flash-vision-exp, but they are unpriced here, so only the current
+    # name is listed.
+    "deepseek": ["deepseek-flash"],
+    "deepinfra": ["deepseek-ai/DeepSeek-V4.1-Flash-1017"],
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3.8-27b", "gpt-oss-120b"],
     "anthropic-direct": [
@@ -645,6 +670,12 @@ def infer_provider_from_model(model: str) -> Optional[str]:
         return "xai"
     if model.startswith("anthropic/") or "claude" in model_lower:
         return "anthropic"
+    # DeepInfra: explicit namespace, plus its `deepseek-ai/…` model namespace.
+    # This MUST precede the generic "deepseek" substring check below, which would
+    # otherwise route DeepInfra's DeepSeek ids to the DeepSeek platform (404 there:
+    # the platform calls the same model `deepseek-flash`).
+    if model.startswith(("deepinfra/", "deepseek-ai/")):
+        return "deepinfra"
     if model.startswith("deepseek/") or "deepseek" in model_lower:
         return "deepseek"
     if model.startswith("gpt") or model.startswith("o1") or model.startswith("chatgpt"):
