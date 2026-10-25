@@ -141,6 +141,23 @@ def _log_codex_image_usage(proc, before, started: float) -> None:
     )
 
 
+def _log_api_image_usage(response, model_name: str, quality: str, started: float) -> None:
+    """Log the Images API call's tokens (input = text + image tokens, output = image tokens)."""
+    import time
+
+    from .usage_log import log_usage
+
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "input_tokens_details", None)
+    log_usage(
+        provider="openai", model=model_name, transport="images-api", reasoning_effort=quality,
+        prompt_tokens=getattr(usage, "input_tokens", None),
+        completion_tokens=getattr(usage, "output_tokens", None), reasoning_tokens=None,
+        cached_tokens=getattr(details, "cached_tokens", None), latency_s=time.time() - started,
+        source="llmx-image", billing="metered", note=None if usage else "response carried no usage",
+    )
+
+
 def generate_codex_image(
     prompt: str,
     output_path: Optional[str] = None,
@@ -236,8 +253,11 @@ def generate_openai_image(
     if n < 1:
         raise ValueError("n must be >= 1")
 
+    import time
+
     from openai import OpenAI
 
+    started = time.time()
     model_name = OPENAI_IMAGE_MODELS.get(model, model)
     client = OpenAI()
     files = []
@@ -285,6 +305,7 @@ def generate_openai_image(
         for f in files:
             f.close()
 
+    _log_api_image_usage(response, model_name, quality, started)
     data = getattr(response, "data", None) or []
     if not data:
         logger.warn("No image was generated in the response")
