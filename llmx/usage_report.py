@@ -299,9 +299,10 @@ def output_tokens(row: dict) -> int:
     return completion if included else completion + (row.get("reasoning_tokens") or 0)
 
 
-# SDK errors carry the HTTP status ("RateLimitError: Error code: 429 - ..."). A 4xx means
-# the provider refused the request before generating, so nothing was billed.
-_CLIENT_REJECTION = re.compile(r"\bError code: 4\d\d\b")
+# Errors carry the HTTP status: the OpenAI SDK as "RateLimitError: Error code: 429 - ...", native
+# Claude as "Anthropic HTTP 400", google-genai as "ClientError: 429 RESOURCE_EXHAUSTED. ...". A 4xx
+# means the provider refused the request before generating, so nothing was billed.
+_CLIENT_REJECTION = re.compile(r"\b(?:Error code:|Anthropic HTTP|ClientError:) 4\d\d\b")
 
 
 def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:

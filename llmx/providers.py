@@ -1282,6 +1282,7 @@ def _google_chat(
     result_text = ""
     finish_reason = None
     response = None
+    error = None
     started = _time.time()
 
     try:
@@ -1308,6 +1309,11 @@ def _google_chat(
             result_text = response.text
             finish_reason = str(response.candidates[0].finish_reason)
             print(result_text)
+    except BaseException as exc:
+        # 2026-10-26: refused calls logged no error, so their rows priced as unknown and the
+        # spend guard printed [DEGRADED] for the rest of the day.
+        error = f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         usage = getattr(response, "usage_metadata", None) if response is not None else None
         log_usage(
@@ -1321,6 +1327,7 @@ def _google_chat(
             cached_tokens=getattr(usage, "cached_content_token_count", None),
             completion_includes_reasoning=False,
             latency_s=_time.time() - started,
+            error=error,
         )
 
     # Truncation detection

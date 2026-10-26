@@ -1074,3 +1074,35 @@ def test_client_rejected_call_costs_zero_not_unknown() -> None:
     assert cost_for_usage(rejected, conservative=True) == 0.0
     timed_out = {**rejected, "error": "APITimeoutError: Request timed out."}
     assert cost_for_usage(timed_out, conservative=True) is None
+
+
+@pytest.mark.parametrize("error,cost", [
+    ("Anthropic HTTP 400", 0.0),
+    ("ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429}}", 0.0),
+    ("ServerError: 503 UNAVAILABLE. {'error': {'code': 503}}", None),
+    ("Anthropic HTTP 529", None),
+])
+def test_each_transport_rejection_form_prices_like_the_sdk_one(error, cost) -> None:
+    from llmx.usage_report import cost_for_usage
+
+    row = {"model": "gemini-4-argon", "prompt_tokens": None, "completion_tokens": None, "error": error}
+    assert cost_for_usage(row, conservative=True) == cost
+
+
+def test_google_refusal_logs_its_error_so_the_row_prices_at_zero() -> None:
+    # 2026-10-26: Gemini 429s logged no error, so the spend guard printed [DEGRADED] all day.
+    from unittest.mock import Mock
+
+    from google.genai import errors as genai_errors
+
+    from llmx.providers import _google_chat
+    from llmx.usage_report import cost_for_usage
+
+    refusal = genai_errors.ClientError(429, {"error": {"code": 429, "message": "spending cap", "status": "RESOURCE_EXHAUSTED"}})
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=Mock(side_effect=refusal)))
+    with patch("llmx.providers.genai.Client", return_value=client), patch("llmx.usage_log.log_usage") as record:
+        with pytest.raises(genai_errors.ClientError):
+            _google_chat("hi", "gemini-4-argon", None, 0.0, 30, False, None, False, None, "high")
+    row = record.call_args.kwargs
+    assert row["error"].startswith("ClientError: 429")
+    assert cost_for_usage(row, conservative=True) == 0.0
