@@ -1,9 +1,11 @@
-"""DeepInfra transport + DeepSeek V4.1 Flash pricing (offline).
+"""LithosAI transport + DeepSeek V4.1 Flash pricing (offline).
 
-Pins the new `deepinfra` lane end to end at the request/usage boundary:
-routing by `-p deepinfra` and by the prefixed model id, the outgoing
-`reasoning_effort` (default "high", CLI effort overrides it), reasoning-token
-accounting, and spend-guard pricing for both DeepSeek V4.1 Flash routes.
+Pins the `lithosai` lane end to end at the request/usage boundary: routing by
+`-p lithosai`, by the prefixed and the bare `deepseek-ai/…` model id, the tier
+aliases, the outgoing `reasoning_effort` (default "high", CLI effort overrides
+it), reasoning-token accounting, and spend-guard pricing for every DeepSeek
+V4.1 Flash id. DeepInfra was retired 2026-10-26: its route fails loud, and its
+pricing row stays so historical usage rows still price.
 
 Every test patches the SDK client, so no request leaves the machine.
 """
@@ -17,6 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from llmx.dispatch_plan import build_dispatch_plan, collect_routing_mirror
+from llmx.model_ids import RetiredModelError
 from llmx.providers import (
     _KNOWN_MODELS,
     OPENAI_COMPAT_URLS,
@@ -29,11 +32,18 @@ from llmx.providers import (
 from llmx.spend_guard import enforce_daily_cap
 from llmx.usage_report import PRICING, cost_for_usage, est_cost
 
-DEEPINFRA_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+LITHOS_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash"
+LITHOS_TIERS = {
+    "deepseek-flash": LITHOS_MODEL,
+    "deepseek-flash-fast": f"{LITHOS_MODEL}-fast",
+    "deepseek-flash-ultra": f"{LITHOS_MODEL}-ultra",
+    "deepseek-flash-ultrafast": f"{LITHOS_MODEL}-ultra",
+}
+DEEPINFRA_HISTORICAL_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 
 
 def _usage(*, prompt=12, completion=50, reasoning=37, cached=0):
-    """The usage shape DeepInfra's OpenAI-compatible endpoint reports."""
+    """The usage shape LithosAI's OpenAI-compatible endpoint reports."""
     return SimpleNamespace(
         prompt_tokens=prompt,
         completion_tokens=completion,
@@ -52,7 +62,7 @@ def _response(content="ok", usage=None):
             )
         ],
         usage=usage or _usage(),
-        model=DEEPINFRA_MODEL,
+        model=LITHOS_MODEL,
     )
 
 
@@ -111,7 +121,7 @@ class _Capture:
         return self.calls[0]
 
 
-def _chat(provider="deepinfra", model=None, effort=None, temperature=0.7):
+def _chat(provider="lithosai", model=None, effort=None, temperature=0.7):
     """Drive the full dispatch path (llmx.providers.chat)."""
     from llmx import providers
 
@@ -128,28 +138,41 @@ def _chat(provider="deepinfra", model=None, effort=None, temperature=0.7):
     )
 
 
-class TestDeepInfraRouting(unittest.TestCase):
+class TestLithosRouting(unittest.TestCase):
     def test_provider_config_and_base_url(self):
-        cfg = PROVIDER_CONFIGS["deepinfra"]
-        self.assertEqual(cfg["model"], DEEPINFRA_MODEL)
-        self.assertEqual(cfg["env_var"], "DEEPINFRA_API_KEY")
-        self.assertEqual(OPENAI_COMPAT_URLS["deepinfra"], "https://api.deepinfra.com/v1/openai")
-        self.assertIn("deepinfra", list_providers())
+        cfg = PROVIDER_CONFIGS["lithosai"]
+        self.assertEqual(cfg["model"], LITHOS_MODEL)
+        self.assertEqual(cfg["env_var"], "LITHOSAI_API_KEY")
+        self.assertEqual(OPENAI_COMPAT_URLS["lithosai"], "https://api.lithosai.cloud/v1")
+        self.assertIn("lithosai", list_providers())
 
-    def test_prefixed_model_routes_to_deepinfra(self):
-        self.assertEqual(infer_provider_from_model(f"deepinfra/{DEEPINFRA_MODEL}"), "deepinfra")
-        self.assertEqual(infer_provider_from_model(DEEPINFRA_MODEL), "deepinfra")
+    def test_prefixed_and_bare_vendor_ids_route_to_lithos(self):
+        self.assertEqual(infer_provider_from_model(f"lithosai/{LITHOS_MODEL}"), "lithosai")
+        self.assertEqual(infer_provider_from_model(LITHOS_MODEL), "lithosai")
+        self.assertEqual(infer_provider_from_model(f"{LITHOS_MODEL}-ultra"), "lithosai")
 
     def test_bare_platform_alias_still_routes_to_deepseek(self):
         self.assertEqual(infer_provider_from_model("deepseek-flash"), "deepseek")
 
-    def test_prefix_is_stripped_before_the_wire(self):
-        self.assertEqual(get_model_name("deepinfra", f"deepinfra/{DEEPINFRA_MODEL}"), DEEPINFRA_MODEL)
-        self.assertEqual(get_model_name("deepinfra"), DEEPINFRA_MODEL)
+    def test_tier_aliases_and_prefix_resolve_before_the_wire(self):
+        for alias, wire in LITHOS_TIERS.items():
+            with self.subTest(alias=alias):
+                self.assertEqual(get_model_name("lithosai", alias), wire)
+        self.assertEqual(get_model_name("lithosai", f"lithosai/{LITHOS_MODEL}-fast"), f"{LITHOS_MODEL}-fast")
+        self.assertEqual(get_model_name("lithosai"), LITHOS_MODEL)
+
+    def test_deepinfra_is_retired_and_fails_loud(self):
+        self.assertNotIn("deepinfra", PROVIDER_CONFIGS)
+        self.assertNotIn("deepinfra", OPENAI_COMPAT_URLS)
+        self.assertNotIn("deepinfra", _KNOWN_MODELS)
+        with self.assertRaises(RetiredModelError):
+            infer_provider_from_model(f"deepinfra/{DEEPINFRA_HISTORICAL_MODEL}")
+        with self.assertRaisesRegex(ValueError, "lithosai"):
+            get_model_name("deepinfra")
 
     def test_dispatch_plan_by_provider_and_by_model(self):
         by_provider = build_dispatch_plan(
-            provider="deepinfra",
+            provider="lithosai",
             model=None,
             reasoning_effort=None,
             timeout=300,
@@ -160,13 +183,13 @@ class TestDeepInfraRouting(unittest.TestCase):
             api_only=None,
             use_old=False,
         )
-        self.assertEqual(by_provider.provider, "deepinfra")
-        self.assertEqual(by_provider.model, DEEPINFRA_MODEL)
-        self.assertEqual(by_provider.transport, "deepinfra-api")
+        self.assertEqual(by_provider.provider, "lithosai")
+        self.assertEqual(by_provider.model, LITHOS_MODEL)
+        self.assertEqual(by_provider.transport, "lithosai-api")
 
         by_model = build_dispatch_plan(
             provider=None,
-            model=f"deepinfra/{DEEPINFRA_MODEL}",
+            model=f"lithosai/{LITHOS_MODEL}",
             reasoning_effort="low",
             timeout=300,
             lite=None,
@@ -176,8 +199,8 @@ class TestDeepInfraRouting(unittest.TestCase):
             api_only=None,
             use_old=False,
         )
-        self.assertEqual(by_model.provider, "deepinfra")
-        self.assertEqual(by_model.model, DEEPINFRA_MODEL)
+        self.assertEqual(by_model.provider, "lithosai")
+        self.assertEqual(by_model.model, LITHOS_MODEL)
         self.assertEqual(by_model.effort_applied, "low")
 
     def test_deepseek_default_is_deepseek_flash(self):
@@ -185,19 +208,28 @@ class TestDeepInfraRouting(unittest.TestCase):
         self.assertEqual(get_model_name("deepseek"), "deepseek-flash")
         self.assertNotIn("deepseek-chat", _KNOWN_MODELS["deepseek"])
 
-    def test_info_lists_new_provider_and_models(self):
+    def test_info_lists_lithos_tiers(self):
         mirror = collect_routing_mirror()
-        self.assertIn(DEEPINFRA_MODEL, mirror["known_models"]["deepinfra"])
+        for wire in set(LITHOS_TIERS.values()):
+            self.assertIn(wire, mirror["known_models"]["lithosai"])
         self.assertIn("deepseek-flash", mirror["known_models"]["deepseek"])
+        self.assertNotIn("deepinfra", mirror["known_models"])
 
 
-class TestDeepInfraReasoning(unittest.TestCase):
+class TestLithosReasoning(unittest.TestCase):
     def test_default_request_asks_for_high_effort(self):
         with _Capture() as cap:
             _chat()
-        self.assertEqual(cap.body["model"], DEEPINFRA_MODEL)
+        self.assertEqual(cap.body["model"], LITHOS_MODEL)
         self.assertEqual(cap.body["reasoning_effort"], "high")
-        self.assertEqual(cap.client_kwargs[0]["base_url"], "https://api.deepinfra.com/v1/openai")
+        self.assertEqual(cap.client_kwargs[0]["base_url"], "https://api.lithosai.cloud/v1")
+
+    def test_every_tier_gets_the_high_default(self):
+        for alias, wire in LITHOS_TIERS.items():
+            with self.subTest(alias=alias), _Capture() as cap:
+                _chat(model=alias)
+            self.assertEqual(cap.body["model"], wire)
+            self.assertEqual(cap.body["reasoning_effort"], "high")
 
     def test_cli_effort_overrides_the_default(self):
         with _Capture() as cap:
@@ -214,8 +246,8 @@ class TestDeepInfraReasoning(unittest.TestCase):
             _chat(effort="high")
         self.assertEqual(len(cap.usage_rows), 1)
         row = cap.usage_rows[0]
-        self.assertEqual(row["provider"], "deepinfra")
-        self.assertEqual(row["model"], DEEPINFRA_MODEL)
+        self.assertEqual(row["provider"], "lithosai")
+        self.assertEqual(row["model"], LITHOS_MODEL)
         self.assertEqual(row["reasoning_effort"], "high")
         self.assertEqual(row["prompt_tokens"], 12)
         self.assertEqual(row["completion_tokens"], 50)
@@ -223,7 +255,7 @@ class TestDeepInfraReasoning(unittest.TestCase):
         self.assertTrue(row["completion_includes_reasoning"])
 
     def test_normalize_usage_reads_completion_tokens_details(self):
-        normalized = _normalize_usage("deepinfra", _usage(reasoning=99, cached=4))
+        normalized = _normalize_usage("lithosai", _usage(reasoning=99, cached=4))
         self.assertEqual(normalized["reasoning_tokens"], 99)
         self.assertEqual(normalized["cached_tokens"], 4)
         self.assertTrue(normalized["completion_includes_reasoning"])
@@ -231,22 +263,23 @@ class TestDeepInfraReasoning(unittest.TestCase):
 
 class TestDeepSeekV41Pricing(unittest.TestCase):
     def test_pricing_rows_match_the_fetched_rates(self):
-        # DeepInfra: $0.20/$0.60 list, 51% discount. DeepSeek: PEAK platform rate.
-        self.assertEqual(PRICING[DEEPINFRA_MODEL], (0.098, 0.294))
+        # LithosAI early-access rates; DeepSeek: PEAK platform rate; DeepInfra: history.
+        self.assertEqual(PRICING[LITHOS_MODEL], (0.15, 0.60))
+        self.assertEqual(PRICING[f"{LITHOS_MODEL}-fast"], (0.25, 1.00))
+        self.assertEqual(PRICING[f"{LITHOS_MODEL}-ultra"], (0.35, 1.40))
         self.assertEqual(PRICING["deepseek-flash"], (0.30, 1.20))
+        self.assertEqual(PRICING[DEEPINFRA_HISTORICAL_MODEL], (0.098, 0.294))
 
     def test_uncached_estimate(self):
-        self.assertAlmostEqual(
-            est_cost(DEEPINFRA_MODEL, 1_000_000, 1_000_000), 0.392, places=9
-        )
+        self.assertAlmostEqual(est_cost(LITHOS_MODEL, 1_000_000, 1_000_000), 0.75, places=9)
         self.assertAlmostEqual(
             est_cost("deepseek-flash", 1_000_000, 1_000_000), 1.50, places=9
         )
 
     def test_cached_input_uses_the_published_cache_rate(self):
-        # DeepInfra: 3% of $0.098 = $0.00294/M. DeepSeek peak: 2% of $0.30 = $0.006/M.
+        # LithosAI: 2% of $0.15 = $0.003/M. DeepSeek peak: 2% of $0.30 = $0.006/M.
         self.assertAlmostEqual(
-            est_cost(DEEPINFRA_MODEL, 1_000_000, 0, cached_tokens=1_000_000), 0.00294, places=9
+            est_cost(LITHOS_MODEL, 1_000_000, 0, cached_tokens=1_000_000), 0.003, places=9
         )
         self.assertAlmostEqual(
             est_cost("deepseek-flash", 1_000_000, 0, cached_tokens=1_000_000), 0.006, places=9
@@ -254,20 +287,31 @@ class TestDeepSeekV41Pricing(unittest.TestCase):
 
     def test_reasoning_tokens_bill_at_the_output_rate(self):
         row = {
-            "provider": "deepinfra",
-            "model": DEEPINFRA_MODEL,
+            "provider": "lithosai",
+            "model": f"{LITHOS_MODEL}-fast",
             "prompt_tokens": 0,
             "completion_tokens": 1_000_000,
             "reasoning_tokens": 1_000_000,
             "completion_includes_reasoning": True,
         }
-        self.assertAlmostEqual(cost_for_usage(row), 0.294, places=9)
+        self.assertAlmostEqual(cost_for_usage(row), 1.00, places=9)
 
-    def test_spend_guard_accepts_both_models(self):
+    def test_historical_deepinfra_rows_still_price(self):
+        row = {
+            "provider": "deepinfra",
+            "model": DEEPINFRA_HISTORICAL_MODEL,
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "cached_tokens": 0,
+            "completion_includes_reasoning": True,
+        }
+        self.assertAlmostEqual(cost_for_usage(row), 0.392, places=9)
+
+    def test_spend_guard_accepts_every_dispatchable_model(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "usage.jsonl"
             ledger.write_text("")
-            for model in (DEEPINFRA_MODEL, "deepseek-flash"):
+            for model in (*set(LITHOS_TIERS.values()), "deepseek-flash"):
                 with self.subTest(model=model):
                     enforce_daily_cap(model, log_path=ledger)
 

@@ -278,14 +278,14 @@ def expensive(code):
 |----------|---------------|-------|
 | `google` | Gemini 3.x | Paid API (free Gemini CLI retired 2026-05-31) |
 | `openai` | GPT-6 Astra | API by default; `--subscription` → `codex-cli` |
-| `anthropic` | Claude Opus 5 | **claude-cli subscription by default**; keys stripped |
-| `anthropic-direct` | Claude Opus 5 | Metered Anthropic API (explicit opt-in) |
+| `anthropic` | Claude Opus 5.5 | **claude-cli subscription by default**; keys stripped |
+| `anthropic-direct` | Claude Opus 5.5 | Metered Anthropic API (explicit opt-in) |
 | `xai` | Grok 4.7 | Metered xAI API; bare `grok-4.7` under `--subscription` routes to Cursor `grok-4.7-high` |
 | `cursor` / `cursor-cli` | `grok-4.7-low` / pool models | Subscription / Cursor pool |
 | `kimi` | Kimi K3 | Moonshot international API (api.moonshot.ai); metered |
 | `cerebras` | Qwen 3.8 27B | Fast coding and agent loops; set `-e none` for minimum latency |
-| `deepseek` | `deepseek-flash` | DeepSeek platform (V4.1 Flash); peak-rate priced |
-| `deepinfra` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | DeepInfra OpenAI-compatible API; thinking on by default (`-e` overrides) |
+| `deepseek` | `deepseek-flash` | DeepSeek platform (V4.1 Flash); peak-rate priced; prefer `lithosai` |
+| `lithosai` | `deepseek-ai/DeepSeek-V4.1-Flash` | **Default DeepSeek route.** LithosAI; tiers are model ids: `-m deepseek-flash` (base), `deepseek-flash-fast`, `deepseek-flash-ultra`; thinking `high` by default (`-e none` turns it off). DeepInfra retired 2026-10-26 |
 | `openrouter` | 400+ models | |
 | `zai` | GLM-5.2 | Via OpenRouter id today |
 

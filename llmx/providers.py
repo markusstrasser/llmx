@@ -278,11 +278,11 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort": True,
         "reasoning_effort_levels": ["low", "medium", "high"],
     },
-    # DeepSeek V4.1 Flash served by DeepInfra (model JSON + OpenAI-compatible
-    # schema, read 2026-10-24). DeepInfra thinks only when asked and accepts the
-    # full OpenAI effort ladder, so send an explicit effort; "high" is the
-    # default when the caller sets none. The key is deliberately the DeepInfra
-    # model id's tail (`…/DeepSeek-V4.1-Flash-1017`) — the platform alias
+    # DeepSeek V4.1 Flash served by LithosAI (OpenAI-compatible schema, read
+    # 2026-10-24). It thinks only when asked and accepts the full OpenAI effort
+    # ladder, so send an explicit effort; "high" is the default when the caller
+    # sets none. The key matches every LithosAI tier id (`…/DeepSeek-V4.1-Flash`,
+    # `-fast`, `-ultra`, `-ultra-chat`) as a substring — the platform alias
     # `deepseek-flash` does NOT contain it, so the DeepSeek transport (which has
     # its own effort mapping) is left untouched.
     "deepseek-v4.1-flash": {
@@ -370,10 +370,17 @@ PROVIDER_CONFIGS = {
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
     },
-    # DeepInfra's OpenAI-compatible API (api.deepinfra.com/v1/openai).
-    "deepinfra": {
-        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-        "env_var": "DEEPINFRA_API_KEY",
+    # LithosAI (api.lithosai.cloud/v1) serves DeepSeek V4.1 Flash 1017 weights as
+    # separate model ids per tier (base / -fast / -ultra / -ultra-chat) rather
+    # than a knob. Measured 2026-10-24 with effort=high on the same prompt: base
+    # 92 t/s, fast 123, ultra 288, ultra-chat 299 but with a 10.6 s TTFT. Default
+    # is base, the cheapest tier. Prompt caching is automatic server-side (99% hit
+    # measured on a repeated 8k prompt); do not send promptCacheKey — the API 400s
+    # on it. The only DeepSeek route since 2026-10-26: DeepInfra was retired by
+    # operator decision (its usage rows keep their pricing in usage_report).
+    "lithosai": {
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "env_var": "LITHOSAI_API_KEY",
         "temperature_range": (0.0, 2.0),
         "supports_streaming": True,
     },
@@ -473,7 +480,7 @@ OPENAI_COMPAT_URLS = {
     "openai": None,  # default
     "xai": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com",
-    "deepinfra": "https://api.deepinfra.com/v1/openai",
+    "lithosai": "https://api.lithosai.cloud/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "cerebras": "https://api.cerebras.ai/v1",
     # International endpoint — measured 2026-07-16: MOONSHOT_API_KEY 401s on
@@ -501,7 +508,7 @@ _STRIP_PREFIXES = {
     "xai": "xai/",
     "anthropic": "anthropic/",
     "deepseek": "deepseek/",
-    "deepinfra": "deepinfra/",
+    "lithosai": "lithosai/",
     "cerebras": "cerebras/",
     "openrouter": "openrouter/",
     "cursor": "cursor/",
@@ -509,9 +516,25 @@ _STRIP_PREFIXES = {
     "grok-cli": "grok/",
 }
 
+# LithosAI tier aliases (see _normalize_model). Prices and speeds per tier live in
+# usage_report.PRICING and the PROVIDER_CONFIGS comment.
+_LITHOS_TIER_ALIASES = {
+    "deepseek-flash": "deepseek-ai/DeepSeek-V4.1-Flash",
+    "deepseek-flash-fast": "deepseek-ai/DeepSeek-V4.1-Flash-fast",
+    "deepseek-flash-ultra": "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+    "deepseek-flash-ultrafast": "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+    "deepseek-flash-ultra-chat": "deepseek-ai/DeepSeek-V4.1-Flash-ultra-chat",
+}
+
 
 def _normalize_model(provider: str, model: str) -> str:
     """Strip synthetic LiteLLM prefixes, preserve real provider model IDs."""
+    # LithosAI sells one tier per model id instead of a speed knob. Accept short
+    # aliases so orchestrators do not paste the vendor namespace: `deepseek-flash`
+    # is the base tier, `-fast` and `-ultra` step up, `-ultrafast` aliases ultra.
+    if provider == "lithosai":
+        m = model.removeprefix("lithosai/")
+        return _LITHOS_TIER_ALIASES.get(m, m)
     # Z.ai routes through OpenRouter, whose GLM ids are namespaced `z-ai/…`. Accept bare
     # `glm-5.2` or `zai/glm-5.2` and emit the OpenRouter id the API expects.
     if provider == "zai":
@@ -562,7 +585,12 @@ _KNOWN_MODELS = {
     # deepseek-v4-flash-vision-exp, but they are unpriced here, so only the current
     # name is listed.
     "deepseek": ["deepseek-flash"],
-    "deepinfra": ["deepseek-ai/DeepSeek-V4.1-Flash-1017"],
+    "lithosai": [
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "deepseek-ai/DeepSeek-V4.1-Flash-fast",
+        "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+        "deepseek-ai/DeepSeek-V4.1-Flash-ultra-chat",
+    ],
     "minimax": ["MiniMax-M3", "MiniMax-M2.7"],
     "cerebras": ["qwen-3.8-27b", "gpt-oss-120b"],
     "anthropic-direct": [
@@ -672,12 +700,20 @@ def infer_provider_from_model(model: str) -> Optional[str]:
         return "xai"
     if model.startswith("anthropic/") or "claude" in model_lower:
         return "anthropic"
-    # DeepInfra: explicit namespace, plus its `deepseek-ai/…` model namespace.
+    # LithosAI: explicit namespace, plus its `deepseek-ai/…` model namespace.
     # This MUST precede the generic "deepseek" substring check below, which would
-    # otherwise route DeepInfra's DeepSeek ids to the DeepSeek platform (404 there:
-    # the platform calls the same model `deepseek-flash`).
-    if model.startswith(("deepinfra/", "deepseek-ai/")):
-        return "deepinfra"
+    # otherwise route LithosAI's DeepSeek ids to the DeepSeek platform (404 there:
+    # the platform calls the same model `deepseek-flash`). Short tier aliases
+    # (`deepseek-flash-fast`) need `-p lithosai`; see _LITHOS_TIER_ALIASES.
+    if model.startswith(("lithosai/", "deepseek-ai/")):
+        return "lithosai"
+    # DeepInfra was retired 2026-10-26 (operator: LithosAI only). Fail loud rather
+    # than let the substring check below misroute `deepinfra/…` to the platform.
+    if model.startswith("deepinfra/"):
+        raise RetiredModelError(
+            f"{model}: the DeepInfra route was retired 2026-10-26; use -p lithosai "
+            "(-m deepseek-flash | deepseek-flash-fast | deepseek-flash-ultra)"
+        )
     if model.startswith("deepseek/") or "deepseek" in model_lower:
         return "deepseek"
     if model.startswith("gpt") or model.startswith("o1") or model.startswith("chatgpt"):
@@ -713,7 +749,9 @@ def get_model_name(provider: str, model: Optional[str] = None, use_old: bool = F
     config = PROVIDER_CONFIGS.get(provider)
     if not config:
         hint = ""
-        if " " in provider or len(provider) > 24:
+        if provider == "deepinfra":
+            hint = " (retired 2026-10-26; DeepSeek V4.1 Flash runs on -p lithosai)"
+        elif " " in provider or len(provider) > 24:
             hint = (
                 " (-p/--provider takes a provider name like 'google' or 'openai'."
                 ' The PROMPT is positional: llmx chat -m MODEL "your prompt")'

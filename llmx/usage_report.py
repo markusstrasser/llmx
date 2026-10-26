@@ -121,8 +121,20 @@ PRICING: dict[str, tuple[float, float]] = {
     # DeepInfra DeepSeek V4.1 Flash (api.deepinfra.com/models/deepseek-ai/
     # DeepSeek-V4.1-Flash-1017, fetched 2026-10-24): list $0.20 in / $0.60 out per M
     # with a 51% discount applied → $0.098 / $0.294. Cached input is 3% of the
-    # input rate ($0.00294/M); reasoning bills at the output rate.
-    "deepseek-ai/DeepSeek-V4.1-Flash-1017": (0.098, 0.294),
+    # input rate ($0.00294/M); reasoning bills at the output rate. The DeepInfra
+    # route was retired 2026-10-26: this row prices historical usage only.
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017": (0.098, 0.294),  # retired: accounting only
+    # LithosAI tiers (lithosai.com/pricing, read 2026-10-24). Every tier serves the
+    # same V4.1 Flash 1017 weights; only speed and price change. The listed prices
+    # are an "early access discount" — each is half its struck-through list rate
+    # (base was $1.20 out, fast $2.00, ultra $2.80), so re-read this table when the
+    # promo ends. Cached input is 2% of the input rate on every tier; reasoning
+    # bills at the output rate. ultra-chat prices like ultra despite measuring a
+    # worse TTFT (10.6 s vs 1.3 s).
+    "deepseek-ai/DeepSeek-V4.1-Flash": (0.15, 0.60),
+    "deepseek-ai/DeepSeek-V4.1-Flash-fast": (0.25, 1.00),
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra": (0.35, 1.40),
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra-chat": (0.35, 1.40),
     # DeepSeek platform (api-docs.deepseek.com/quick_start/pricing, read 2026-10-24):
     # deepseek-flash is served by DeepSeek-V4.1-Flash-1017. Peak hours bill 2x the
     # off-peak rate, and PRICING feeds the spend-guard CAP, so register the PEAK
@@ -190,9 +202,14 @@ CONTEXT_WINDOW: dict[str, int] = {
     # Paid-tier public endpoint windows; free trial is 64/65k.
     "qwen-3.8-27b": 131_072,
     "gpt-oss-120b": 131_072,
-    # DeepSeek V4.1 Flash: 1M context on both routes (DeepInfra model JSON
+    # DeepSeek V4.1 Flash: 1M context (retired DeepInfra route's model JSON
     # max_tokens=1,048,576; api-docs.deepseek.com lists CONTEXT LENGTH 1M).
     "deepseek-ai/DeepSeek-V4.1-Flash-1017": 1_048_576,
+    # LithosAI serves the same weights with the same 1M window (docs limits page).
+    "deepseek-ai/DeepSeek-V4.1-Flash": 1_048_576,
+    "deepseek-ai/DeepSeek-V4.1-Flash-fast": 1_048_576,
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra": 1_048_576,
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra-chat": 1_048_576,
     "deepseek-flash": 1_000_000,
 }
 for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
@@ -202,13 +219,19 @@ for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
 # (sources in the PRICING comments).
 _CLAUDE_CACHE_READ = {"claude-opus-5-5": 0.05, "claude-fable-5-1": 0.025}
 
-# DeepSeek cache-hit rate as a fraction of the input rate. DeepInfra states
-# rate_per_input_token_cached=0.03 (3% of input); the DeepSeek platform's
+# DeepSeek cache-hit rate as a fraction of the input rate. The retired DeepInfra
+# route stated rate_per_input_token_cached=0.03 (3% of input); the DeepSeek platform's
 # $0.006 peak cache-hit vs $0.30 peak input is the same 2% at either time of day.
 # Cache writes are not billed separately by either vendor, so they price as
 # ordinary input.
 _DEEPSEEK_CACHE_READ = {
     "deepseek-ai/DeepSeek-V4.1-Flash-1017": 0.03,
+    # LithosAI bills cached input at $0.003/$0.005/$0.007 against $0.15/$0.25/$0.35
+    # input — 2% on every tier.
+    "deepseek-ai/DeepSeek-V4.1-Flash": 0.02,
+    "deepseek-ai/DeepSeek-V4.1-Flash-fast": 0.02,
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra": 0.02,
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra-chat": 0.02,
     "deepseek-flash": 0.02,
 }
 
@@ -249,7 +272,7 @@ def est_cost(
         read_rate = input_rate * _CLAUDE_CACHE_READ.get(model, 0.10)
         write_rate, ordinary_rate = input_rate * 2, input_rate
     elif model in _DEEPSEEK_CACHE_READ:
-        # DeepSeek (DeepInfra and the platform): cache hits are a small fraction of
+        # DeepSeek (LithosAI, the platform, historical DeepInfra rows): cache hits are a small fraction of
         # input; no separate cache-write rate is published.
         read_rate = input_rate * _DEEPSEEK_CACHE_READ[model]
         write_rate, ordinary_rate = input_rate, input_rate
