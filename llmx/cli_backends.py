@@ -186,6 +186,10 @@ LITE_ALLOWED_MODELS = {
     # gpt-6-sol stays listed for callers that check before the upgrade alias.
     "gpt-6.1-sol",
     "gpt-6-sol",
+    # 2026-10-30: GPT-6.1 Terra ("GPT-6.1 Terra Codex model", Codex catalog priority 3,
+    # between Sol and Luna); a live `codex exec -m gpt-6.1-terra` on codex-cli 0.164.0
+    # answered. Subscription only: no API price is recorded for it.
+    "gpt-6.1-terra",
     "gpt-6-luna",
     # Opus 5: cyber / dual-use-bio fallback niche.
     "claude-opus-5",

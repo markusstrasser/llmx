@@ -193,6 +193,14 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
         "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
     },
+    # GPT-6.1 Terra: the Codex catalog (~/.codex/models_cache.json, read 2026-10-30) lists
+    # efforts low..max plus a Codex-only `ultra`, and no `none`.
+    "gpt-6.1-terra": {
+        "unsupported_parameters": ("temperature", "top_p", "top_logprobs", "logprobs"),
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high", "xhigh", "max"],
+        "reasoning_effort_aliases": {"none": "low", "minimal": "low"},
+    },
     # GPT-6 Luna (2026-09-22, openai.com/index/introducing-gpt-6-sol-and-luna): cost
     # tier of the Astra generation; effort includes `none` (…/models/gpt-6-luna).
     "gpt-6-luna": {
