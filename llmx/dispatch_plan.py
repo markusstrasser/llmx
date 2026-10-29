@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 from .auth import AuthKind
@@ -358,6 +359,30 @@ def build_dispatch_plan(
     )
 
 
+CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+CODEX_THREAD_TOOL = Path.home() / "Projects" / "skills" / "bin" / "codex-thread"
+CODEX_IPC_SOCKET = Path.home() / ".codex" / "ipc" / "ipc.sock"
+
+
+def codex_desktop_threads() -> dict[str, Any]:
+    """How to reach a Codex agent running in ChatGPT.app's Codex tab (llmx-guide
+    references/codex-dispatch.md): steer into the running turn through the app's IPC router,
+    or queue for the turn's end through the app's bundled CLI."""
+    return {
+        "steer_now": f"{CODEX_THREAD_TOOL} steer <thread uuid> <message file> --cwd <workspace>",
+        "queue_end_of_turn": f"{CODEX_DESKTOP_CLI} queue --thread <thread uuid> --message <text>",
+        "probe": f"{CODEX_THREAD_TOOL} settings <thread uuid>",
+        "transcripts": "~/.codex/sessions/YYYY/MM/DD/rollout-*-<thread uuid>.jsonl",
+        "steer_tool_installed": CODEX_THREAD_TOOL.exists(),
+        "app_cli_installed": Path(CODEX_DESKTOP_CLI).exists(),
+        "app_ipc_socket": CODEX_IPC_SOCKET.is_socket(),
+        "note": (
+            "A steer needs a running turn and the thread open in the app; the model reads it at "
+            "its next step. A queued message waits for the turn to end."
+        ),
+    }
+
+
 def collect_routing_mirror() -> dict[str, Any]:
     """Filesystem-friendly routing facts for agents (not judgment/policy)."""
     cli_status = {}
@@ -388,6 +413,7 @@ def collect_routing_mirror() -> dict[str, Any]:
         "known_models": {provider: list(models) for provider, models in _KNOWN_MODELS.items()},
         "effort_aliases": sorted(CANONICAL_EFFORTS),
         "cli_effort_maps": {"grok-cli": dict(GROK_CLI_EFFORT_MAP)},
+        "codex_desktop_threads": codex_desktop_threads(),
         "note": (
             "Transport facts only. Task-class economics and cosigner policy live in "
             "model-guide/SKILL.md — not duplicated here."

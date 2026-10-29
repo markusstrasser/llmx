@@ -59,4 +59,8 @@ def info_cmd(as_json: bool, write_mirror: bool, mirror_path: str | None):
             rendered = ", ".join(f"{src}->{dst}" for src, dst in effort_map.items())
             click.echo(f"    effort: {rendered}")
     click.echo("  lite models: " + ", ".join(payload["lite_allowed_models"]))
+    desktop = payload["codex_desktop_threads"]
+    click.echo("  codex desktop threads (ChatGPT.app):")
+    click.echo(f"    steer now: {desktop['steer_now']}")
+    click.echo(f"    queue for turn end: {desktop['queue_end_of_turn']}")
     click.echo("  policy: see model-guide/SKILL.md (not duplicated here)")
