@@ -1002,6 +1002,13 @@ class TestAstraCost(unittest.TestCase):
                     ), expected)
         self.assertEqual(est_cost("gpt-5.6-luna", 1_000_000, 1_000_000), 1.40)
         self.assertIsNone(est_cost("unknown", 1, 1))
+        # Cache reads: 6.1 Sol $0.10/M (5%), Luna $0.01/M (10%), per the vendor model
+        # pages. 200K stays under the 272K surcharge boundary.
+        for model, expected in (("gpt-6.1-sol", 0.02), ("gpt-6-sol", 0.02), ("gpt-6-luna", 0.002)):
+            with self.subTest(model=model):
+                self.assertAlmostEqual(est_cost(
+                    model, 200_000, 0, cached_tokens=200_000, cache_write_tokens=0,
+                ), expected)
 
     def test_claude_cache_rates_and_reported_cost(self):
         from llmx.usage_report import cost_for_usage, est_cost

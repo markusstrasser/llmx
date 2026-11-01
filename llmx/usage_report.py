@@ -219,6 +219,12 @@ for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
 # (sources in the PRICING comments).
 _CLAUDE_CACHE_READ = {"claude-opus-5-5": 0.05, "claude-fable-5-1": 0.025}
 
+# GPT-6 cache-read rate as a fraction of the input rate where it is not the usual 10%.
+# developers.openai.com/api/docs/models/gpt-6.1-sol (read 2026-11-01): $2 input,
+# $0.10 cached (5%). Astra ($10/$1) and Luna ($0.10/$0.01) stay at 10%. gpt-6-sol
+# aliases to 6.1 Sol, so it prices the same.
+_OPENAI_CACHE_READ = {"gpt-6.1-sol": 0.05, "gpt-6-sol": 0.05}
+
 # DeepSeek cache-hit rate as a fraction of the input rate. The retired DeepInfra
 # route stated rate_per_input_token_cached=0.03 (3% of input); the DeepSeek platform's
 # $0.006 peak cache-hit vs $0.30 peak input is the same 2% at either time of day.
@@ -256,9 +262,10 @@ def est_cost(
         return None
     input_rate, output_rate = rate
     if model in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"}:
-        # developers.openai.com/api/docs/models/gpt-6-{astra,sol,luna}: cached reads 10%,
-        # cache writes 1.25x of the uncached input rate.
-        read_rate, write_rate = input_rate * 0.10, input_rate * 1.25
+        # developers.openai.com/api/docs/models/gpt-6-{astra,luna}: cached reads 10%
+        # (6.1 Sol 5%, _OPENAI_CACHE_READ), cache writes 1.25x of the uncached input rate.
+        read_rate = input_rate * _OPENAI_CACHE_READ.get(model, 0.10)
+        write_rate = input_rate * 1.25
         if prompt > 272_000:
             input_rate *= 2
             read_rate *= 2
