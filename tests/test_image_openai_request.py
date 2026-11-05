@@ -25,6 +25,7 @@ def sdk(monkeypatch):
     monkeypatch.setattr("openai.OpenAI", lambda **kwargs: client)
     monkeypatch.setattr(image, "check_openai_api_key", lambda: "key")
     monkeypatch.setattr("llmx.usage_log.log_usage", lambda **kwargs: None)
+    monkeypatch.setattr("llmx.spend_guard.enforce_daily_cap", lambda *args, **kwargs: None)
     return calls
 
 
@@ -186,3 +187,27 @@ def test_svg_author_tokens_get_their_own_priced_row(monkeypatch, total, billed_o
     author = rows[1]
     assert author["transport"] == "images-api" and author["billing"] == "metered"
     assert cost_for_usage(author) == pytest.approx((1_000 * 2 + billed_output * 10) / 1_000_000)
+
+
+def test_image_call_refused_at_daily_cap_before_any_request(monkeypatch, tmp_path):
+    """A paid image call stops at the same daily cap as chat: its spend counts, so its call must too."""
+    from datetime import datetime, timezone
+    import json
+
+    from llmx import spend_guard
+
+    ledger = tmp_path / "usage.jsonl"
+    ledger.write_text(json.dumps({
+        "ts": datetime.now(timezone.utc).isoformat(), "provider": "openai", "model": "x",
+        "transport": "images-api", "billing": "metered", "reported_cost_usd": spend_guard.DAILY_CAP_USD + 1,
+    }) + "\n")
+    monkeypatch.setattr(spend_guard, "DEFAULT_LOG", ledger)
+    monkeypatch.delenv("LLMX_SPEND_OVERRIDE", raising=False)
+    monkeypatch.setattr(image, "check_openai_api_key", lambda: "key")
+
+    def no_client(**kwargs):
+        raise AssertionError("the cap must refuse before a client is built")
+
+    monkeypatch.setattr("openai.OpenAI", no_client)
+    with pytest.raises(spend_guard.SpendCapError):
+        image.generate_openai_image("p", str(tmp_path / "o.png"), model="flare")

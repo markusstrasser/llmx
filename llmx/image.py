@@ -346,6 +346,9 @@ def generate_openai_image(
 
     started = time.time()
     model_name = OPENAI_IMAGE_MODELS.get(model, model)
+    from .spend_guard import enforce_daily_cap
+
+    enforce_daily_cap(model_name)
     client = OpenAI()
     files = []
 
