@@ -2,7 +2,7 @@
 
 Backends:
 - Gemini 3 Pro Image (Nano Banana Pro)
-- OpenAI GPT Image 2
+- OpenAI GPT Image 2.6 (Sunburst, Flare)
 
 References:
 - https://ai.google.dev/gemini-api/docs/image-generation
@@ -13,7 +13,7 @@ import os
 import sys
 import base64
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Any, Optional, Literal
 from io import BytesIO
 
 from . import keepalive
@@ -44,17 +44,78 @@ ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"
 # Resolutions must be uppercase K
 RESOLUTIONS = ["1K", "2K", "4K"]
 OPENAI_IMAGE_MODELS = {
-    "sunburst": "gpt-image-2.5-sunburst",
-    "flare": "gpt-image-2.5-flare",
+    "sunburst": "gpt-image-2.6-sunburst",
+    "flare": "gpt-image-2.6-flare",
+    "gpt-image-2.6": "gpt-image-2.6-sunburst",
     "gpt-image-2.5": "gpt-image-2.5-sunburst",
     "image2": "gpt-image-2",
     "gpt-image-2": "gpt-image-2",
     "gpt-image-2-2026-04-21": "gpt-image-2-2026-04-21",
 }
-OPENAI_IMAGE_DEFAULT = "gpt-image-2.5-sunburst"  # GPT Image 2.5, 2026-09-09
-OPENAI_IMAGE_SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"]
+OPENAI_IMAGE_DEFAULT = "gpt-image-2.6-sunburst"  # Images 2.6, 2026-11-04
 OPENAI_IMAGE_QUALITIES = ["auto", "low", "medium", "high", "xhigh", "max"]
-OPENAI_IMAGE_FORMATS = ["png", "jpeg", "webp"]
+OPENAI_IMAGE_FORMATS = ["png", "jpeg", "webp", "svg", "gif"]
+OPENAI_IMAGE_COMPLEXITIES = ["low", "medium", "high"]  # API default when omitted: high
+# The image model draws a reference; this text model writes the SVG from it. The API
+# requires svg.model on accounts with SVG model selection (live 400, 2026-11-05).
+OPENAI_SVG_AUTHOR_DEFAULT = "gpt-6.1-sol"
+
+
+def _validate_openai_request(
+    output_path: Optional[str],
+    input_images: Optional[list[str]],
+    size: str,
+    quality: str,
+    output_format: str,
+    input_fidelity: Optional[str],
+    n: int,
+    complexity: Optional[str],
+    frame_count: Optional[int],
+    frame_duration_ms: Optional[int],
+    markup: Optional[str],
+    svg_model: Optional[str],
+    svg_effort: Optional[str],
+) -> None:
+    """Enforce the request shapes the image guide documents, independent of model.
+
+    Which model accepts which feature stays the API's call: a rejection is free and
+    a local model table would need editing at every release.
+    """
+    if size != "auto":
+        width, _, height = size.partition("x")
+        if not (width.isdigit() and height.isdigit() and int(width) % 16 == 0 and int(height) % 16 == 0
+                and int(width) > 0 and int(height) > 0):
+            raise ValueError(f"Invalid OpenAI size: {size}. Use auto or WIDTHxHEIGHT in multiples of 16")
+    if quality not in OPENAI_IMAGE_QUALITIES:
+        raise ValueError(f"Invalid OpenAI quality: {quality}. Valid: {OPENAI_IMAGE_QUALITIES}")
+    if output_format not in OPENAI_IMAGE_FORMATS:
+        raise ValueError(f"Invalid OpenAI output format: {output_format}. Valid: {OPENAI_IMAGE_FORMATS}")
+    if input_fidelity is not None and input_fidelity not in {"high", "low"}:
+        raise ValueError("input_fidelity must be 'high' or 'low'")
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    if complexity is not None and complexity not in OPENAI_IMAGE_COMPLEXITIES:
+        raise ValueError(f"Invalid complexity: {complexity}. Valid: {OPENAI_IMAGE_COMPLEXITIES}")
+    if output_format in {"svg", "gif"}:
+        if input_images:
+            raise ValueError(f"{output_format} output is generation-only; the edit endpoint rejects it")
+        if output_path and Path(output_path).suffix.lower() != f".{output_format}":
+            raise ValueError(f"{output_format} output needs a .{output_format} path, got {output_path}")
+    if output_format == "svg" and n != 1:
+        raise ValueError("svg output requires n=1")
+    if output_format != "svg" and (svg_model is not None or svg_effort is not None):
+        raise ValueError("svg_model and svg_effort apply only to svg output")
+    if output_format != "gif" and (frame_count is not None or frame_duration_ms is not None):
+        raise ValueError("frame_count and frame_duration_ms apply only to gif output")
+    if frame_count is not None and not 2 <= frame_count <= 16:  # live 400 above 16; the guide says 64
+        raise ValueError("frame_count must be between 2 and 16")
+    if frame_duration_ms is not None and not 20 <= frame_duration_ms <= 2000:
+        raise ValueError("frame_duration_ms must be between 20 and 2000")
+    if markup is not None:
+        if not input_images:
+            raise ValueError("markup annotates an edit: pass the image it was drawn on as the first input image")
+        if not Path(markup).is_file():
+            raise FileNotFoundError(f"Markup image not found: {markup}")
 
 
 def check_genai_available():
@@ -141,7 +202,7 @@ def _log_codex_image_usage(proc, before, started: float) -> None:
     )
 
 
-def _log_api_image_usage(response, model_name: str, quality: str, started: float) -> None:
+def _log_api_image_usage(response, model_name: str, quality: str, complexity: Optional[str], started: float) -> None:
     """Log the Images API call's tokens (input = text + image tokens, output = image tokens)."""
     import time
 
@@ -154,7 +215,11 @@ def _log_api_image_usage(response, model_name: str, quality: str, started: float
         prompt_tokens=getattr(usage, "input_tokens", None),
         completion_tokens=getattr(usage, "output_tokens", None), reasoning_tokens=None,
         cached_tokens=getattr(details, "cached_tokens", None), latency_s=time.time() - started,
-        source="llmx-image", billing="metered", note=None if usage else "response carried no usage",
+        source="llmx-image", billing="metered",
+        note="; ".join(filter(None, [
+            f"complexity={complexity}" if complexity else None,
+            None if usage else "response carried no usage",
+        ])) or None,
     )
 
 
@@ -222,6 +287,12 @@ def generate_openai_image(
     output_format: str = "png",
     input_fidelity: Optional[str] = None,
     n: int = 1,
+    complexity: Optional[str] = None,
+    frame_count: Optional[int] = None,
+    frame_duration_ms: Optional[int] = None,
+    markup: Optional[str] = None,
+    svg_model: Optional[str] = None,
+    svg_effort: Optional[str] = None,
 ) -> list[Path]:
     """
     Generate or edit images using OpenAI GPT Image models.
@@ -229,29 +300,28 @@ def generate_openai_image(
     Args:
         prompt: Text description of the image to generate or edit
         output_path: Path to save the image; for n>1, _1/_2 suffixes are added
-        model: OpenAI image model, default gpt-image-2.5-sunburst
+        model: OpenAI image model, default gpt-image-2.6-sunburst
         input_images: Optional source images for edit/reference workflows
-        size: auto, 1024x1024, 1536x1024, or 1024x1536
-        quality: auto, low, medium, or high
-        output_format: png, jpeg, or webp
+        size: auto or WIDTHxHEIGHT in multiples of 16
+        quality: auto, low, medium, high, xhigh, or max
+        output_format: png, jpeg, webp, svg, or gif (svg/gif: generation only)
         input_fidelity: Optional high/low edit fidelity hint for models that accept it
         n: Number of output images
+        complexity: low, medium, or high planning effort; omitted means the API's high
+        frame_count: GIF frames, 2-16 (API default 9)
+        frame_duration_ms: GIF frame duration, 20-2000 ms (API default 200)
+        markup: Transparent PNG annotation layer matching the first input image's size
+        svg_model: Text model that authors SVG output, default gpt-6.1-sol
+        svg_effort: Reasoning effort for the SVG author; omitted means its default
 
     Returns:
         Paths to saved images.
     """
+    _validate_openai_request(
+        output_path, input_images, size, quality, output_format, input_fidelity, n,
+        complexity, frame_count, frame_duration_ms, markup, svg_model, svg_effort,
+    )
     check_openai_api_key()
-
-    if size not in OPENAI_IMAGE_SIZES:
-        raise ValueError(f"Invalid OpenAI size: {size}. Valid: {OPENAI_IMAGE_SIZES}")
-    if quality not in OPENAI_IMAGE_QUALITIES:
-        raise ValueError(f"Invalid OpenAI quality: {quality}. Valid: {OPENAI_IMAGE_QUALITIES}")
-    if output_format not in OPENAI_IMAGE_FORMATS:
-        raise ValueError(f"Invalid OpenAI output format: {output_format}. Valid: {OPENAI_IMAGE_FORMATS}")
-    if input_fidelity is not None and input_fidelity not in {"high", "low"}:
-        raise ValueError("input_fidelity must be 'high' or 'low'")
-    if n < 1:
-        raise ValueError("n must be >= 1")
 
     import time
 
@@ -268,10 +338,13 @@ def generate_openai_image(
         "size": size,
         "quality": quality,
         "format": output_format,
+        "complexity": complexity,
         "n": n,
         "prompt_length": len(prompt),
     })
 
+    # Sent only when chosen: older models and output formats reject the fields.
+    optional: dict[str, Any] = {"complexity": complexity} if complexity is not None else {}
     try:
         if input_images:
             for image_path in input_images:
@@ -288,11 +361,25 @@ def generate_openai_image(
                 "size": size,
                 "quality": quality,
                 "output_format": output_format,
+                **optional,
             }
             if input_fidelity is not None:
                 edit_kwargs["input_fidelity"] = input_fidelity
+            if markup is not None:
+                markup_file = Path(markup).open("rb")
+                files.append(markup_file)
+                edit_kwargs["markup"] = (Path(markup).name, markup_file, "image/png")
             response = client.images.edit(**edit_kwargs)
         else:
+            if frame_count is not None:
+                optional["frame_count"] = frame_count
+            if frame_duration_ms is not None:
+                optional["frame_duration_ms"] = frame_duration_ms
+            if output_format == "svg":
+                svg: dict[str, Any] = {"model": svg_model or OPENAI_SVG_AUTHOR_DEFAULT}
+                if svg_effort is not None:
+                    svg["reasoning"] = {"effort": svg_effort}
+                optional["svg"] = svg
             response = client.images.generate(
                 model=model_name,
                 prompt=prompt,
@@ -300,12 +387,13 @@ def generate_openai_image(
                 size=size,
                 quality=quality,
                 output_format=output_format,
+                **optional,
             )
     finally:
         for f in files:
             f.close()
 
-    _log_api_image_usage(response, model_name, quality, started)
+    _log_api_image_usage(response, model_name, quality, complexity, started)
     data = getattr(response, "data", None) or []
     if not data:
         logger.warn("No image was generated in the response")

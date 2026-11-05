@@ -86,12 +86,12 @@ SUBCOMMANDS = {
     "-p", "--provider",
     type=click.Choice(["openai", "google"]),
     default="openai",
-    help="Image backend: openai uses GPT Image 2; google uses Gemini 3 Pro Image",
+    help="Image backend: openai uses GPT Image 2.6; google uses Gemini 3 Pro Image",
 )
 @click.option(
     "-m", "--model",
     default=None,
-    help="Model alias/name. OpenAI default: gpt-image-2.5-sunburst (aliases sunburst, flare). Google: flash/pro",
+    help="Model alias/name. OpenAI default: gpt-image-2.6-sunburst (aliases sunburst, flare). Google: flash/pro",
 )
 @click.option(
     "--aspect-ratio", "-a",
@@ -113,18 +113,53 @@ SUBCOMMANDS = {
 @click.option(
     "--size",
     default="auto",
-    help="OpenAI output size: auto, 1024x1024, 1536x1024, 1024x1536",
+    help="OpenAI output size: auto or WIDTHxHEIGHT in multiples of 16 (GIF: per frame)",
 )
 @click.option(
     "--quality",
     default="auto",
-    help="OpenAI quality: auto, low, medium, high, xhigh, max (xhigh/max: 2.5 only)",
+    help="OpenAI quality: auto, low, medium, high, xhigh, max (xhigh/max: 2.5 and later)",
+)
+@click.option(
+    "--complexity",
+    type=click.Choice(["low", "medium", "high"]),
+    default=None,
+    help="OpenAI planning effort, separate from quality. Omitted: high. Low suits quick edits. Needs --auth api",
 )
 @click.option(
     "--format", "output_format",
-    type=click.Choice(["png", "jpeg", "webp"]),
+    type=click.Choice(["png", "jpeg", "webp", "svg", "gif"]),
     default="png",
-    help="OpenAI output format",
+    help="OpenAI output format. svg/gif: generation only, need --auth api",
+)
+@click.option(
+    "--frame-count",
+    type=click.IntRange(2, 16),
+    default=None,
+    help="GIF frames (API default 9). Needs --format gif",
+)
+@click.option(
+    "--frame-duration-ms",
+    type=click.IntRange(20, 2000),
+    default=None,
+    help="GIF frame duration in ms (API default 200). Needs --format gif",
+)
+@click.option(
+    "--markup",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Transparent PNG annotations matching the first -i image's size. Needs --auth api",
+)
+@click.option(
+    "--svg-model",
+    default=None,
+    help="Text model that authors SVG output (default gpt-6.1-sol). Needs --format svg",
+)
+@click.option(
+    "--svg-effort",
+    type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+    default=None,
+    help="Reasoning effort for the SVG author (default: that model's). Needs --format svg",
 )
 @click.option(
     "--input-fidelity",
@@ -146,7 +181,7 @@ SUBCOMMANDS = {
     "one image, plan's current model; size/quality/model ignored. api: metered Images API.",
 )
 @click.option("--debug", is_flag=True, help="Debug logging")
-def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_image, size, quality, output_format, input_fidelity, count, auth, debug):
+def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_image, size, quality, complexity, output_format, frame_count, frame_duration_ms, markup, svg_model, svg_effort, input_fidelity, count, auth, debug):
     """Generate or edit images.
 
     Examples:
@@ -154,12 +189,27 @@ def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_i
         llmx image -i photobooth.jpg -o beard.png "same person, short crop, trimmed beard"
         llmx image --provider google "game background forest" -m pro -r 2K
         llmx image --auth api -m flare --quality high "..."   # metered API
+        llmx image --auth api -m flare --format gif --frame-count 6 -o loop.gif "..."
+        llmx image --auth api --format svg -o logo.svg "..."
+        llmx image --auth api -m flare --complexity low -i room.png --markup circled.png "..."
     """
     configure_logger(debug=debug)
 
     prompt_text = " ".join(prompt)
 
     try:
+        api_only = {
+            "--complexity": complexity,
+            "--frame-count": frame_count,
+            "--frame-duration-ms": frame_duration_ms,
+            "--markup": markup,
+            "--svg-model": svg_model,
+            "--svg-effort": svg_effort,
+            "--format svg/gif": output_format if output_format in {"svg", "gif"} else None,
+        }
+        requested = [flag for flag, value in api_only.items() if value is not None]
+        if requested and (provider != "openai" or auth != "api"):
+            raise click.UsageError(f"{', '.join(requested)} need --provider openai --auth api")
         if provider == "openai" and auth == "subscription":
             from .image import generate_codex_image
 
@@ -181,6 +231,12 @@ def image_cmd(prompt, output, provider, model, aspect_ratio, resolution, input_i
                 output_format=output_format,
                 input_fidelity=input_fidelity,
                 n=count,
+                complexity=complexity,
+                frame_count=frame_count,
+                frame_duration_ms=frame_duration_ms,
+                markup=markup,
+                svg_model=svg_model,
+                svg_effort=svg_effort,
             )
             if results:
                 for result in results:

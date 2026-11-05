@@ -130,7 +130,7 @@ llmx usage           # cost/token rollup from ~/.claude/llmx-usage.jsonl
 llmx usage --by model --days 7
 llmx keys …          # macOS Keychain helpers
 llmx batch …         # Gemini Batch API (async, ~50% off)
-llmx image …         # image gen/edit (GPT Image 2 default)
+llmx image …         # image gen/edit, SVG, GIF (GPT Image 2.6 Sunburst default on --auth api)
 llmx svg …           # SVG via Gemini
 llmx vision …        # image/video analysis
 llmx research …      # deep research (OpenAI o3/o4-mini or Perplexity)
