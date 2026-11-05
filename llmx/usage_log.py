@@ -103,6 +103,8 @@ def log_usage(
     transport_error_class: Optional[str] = None,
     transport_errno: Optional[int] = None,
     transport_phase: Optional[str] = None,
+    image_input_tokens: Optional[int] = None,
+    text_output_tokens: Optional[int] = None,
 ) -> None:
     """Append one usage record. Best-effort — never raises."""
     try:
@@ -127,6 +129,8 @@ def log_usage(
             "cached_tokens": cached_tokens,
             "cache_write_tokens": cache_write_tokens,
             "completion_includes_reasoning": completion_includes_reasoning,
+            "image_input_tokens": image_input_tokens,
+            "text_output_tokens": text_output_tokens,
             "reported_cost_usd": reported_cost_usd,
             "latency_s": round(latency_s, 3),
             "error": error,

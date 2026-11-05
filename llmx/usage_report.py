@@ -154,6 +154,33 @@ for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
     else:
         PRICING[cursor_model] = (2.0, 6.0)
 
+# GPT Image rates per MTok: (text input, image input, text output, image output).
+# developers.openai.com/api/docs/pricing#image-generation (Standard table, read
+# 2026-11-05). None = the page lists no text output rate for that model. The dated
+# gpt-image-2 id is that model's default snapshot per
+# developers.openai.com/api/docs/models/gpt-image-2 (same read date); the pricing page
+# has no row of its own for it.
+# Cached rates are left out on purpose: llmx calls the Images API, where 2 and 2.5 get
+# no cached rate (developers.openai.com/api/docs/guides/image-generation#cached-input-pricing)
+# and whose usage reports no cached count, so these rows price as uncached.
+_GPT_IMAGE_2_RATES = (5.0, 8.0, None, 30.0)
+_GPT_IMAGE_1_5_RATES = (5.0, 8.0, 10.0, 32.0)
+_OPENAI_IMAGE_RATES: dict[str, tuple[float, float, float | None, float]] = {
+    "gpt-image-2.6-sunburst": _GPT_IMAGE_2_RATES,
+    "gpt-image-2.6-flare": _GPT_IMAGE_2_RATES,
+    "gpt-image-2.5-sunburst": _GPT_IMAGE_2_RATES,
+    "gpt-image-2.5-flare": _GPT_IMAGE_2_RATES,
+    "gpt-image-2": _GPT_IMAGE_2_RATES,
+    "gpt-image-2-2026-04-21": _GPT_IMAGE_2_RATES,
+    "gpt-image-1.5": _GPT_IMAGE_1_5_RATES,
+    "chatgpt-image-latest": _GPT_IMAGE_1_5_RATES,
+    "gpt-image-1-mini": (2.0, 2.5, None, 8.0),
+}
+# PRICING holds the image input and output rates, the upper bound for a row that does
+# not split its tokens by modality. est_cost uses the split when the row has it.
+for image_model, (_, image_input_rate, _, image_output_rate) in _OPENAI_IMAGE_RATES.items():
+    PRICING[image_model] = (image_input_rate, image_output_rate)
+
 # Context-window limit (max input tokens) per model. Static capability, not from the
 # log — surfaced so `llmx usage --by model` shows headroom vs the biggest call sent.
 CONTEXT_WINDOW: dict[str, int] = {
@@ -250,17 +277,30 @@ def est_cost(
     cached_tokens: int | None = None,
     cache_write_tokens: int | None = None,
     conservative: bool = False,
+    image_input_tokens: int | None = None,
+    text_output_tokens: int | None = None,
 ) -> float | None:
     """Price total input and billable output; cache counts partition total input.
 
     Three-argument callers retain an uncached-input estimate. For Astra, the
     conservative guard prices unknown input categories at the cache-write rate.
     Explicit zero cache counts mean known absence; None means unreported.
+    GPT Image tokens with no modality split price at the image rates, the higher ones.
     """
     rate = PRICING.get(model)
     if rate is None:
         return None
     input_rate, output_rate = rate
+    if model in _OPENAI_IMAGE_RATES:
+        text_in, image_in, text_out, image_out = _OPENAI_IMAGE_RATES[model]
+        image_input = prompt if image_input_tokens is None else max(0, min(image_input_tokens, prompt))
+        text_output = 0 if text_out is None else max(0, min(text_output_tokens or 0, out))
+        return (
+            (prompt - image_input) * text_in
+            + image_input * image_in
+            + text_output * (text_out or 0.0)
+            + (out - text_output) * image_out
+        ) / 1_000_000
     if model in {"gpt-6-astra", "gpt-6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"}:
         # developers.openai.com/api/docs/models/gpt-6-{astra,luna}: cached reads 10%
         # (6.1 Sol 5%, _OPENAI_CACHE_READ), cache writes 1.25x of the uncached input rate.
@@ -333,6 +373,8 @@ def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:
         cached_tokens=row.get("cached_tokens"),
         cache_write_tokens=row.get("cache_write_tokens"),
         conservative=conservative,
+        image_input_tokens=row.get("image_input_tokens"),
+        text_output_tokens=row.get("text_output_tokens"),
     )
 
 

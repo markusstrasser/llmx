@@ -203,24 +203,41 @@ def _log_codex_image_usage(proc, before, started: float) -> None:
 
 
 def _log_api_image_usage(response, model_name: str, quality: str, complexity: Optional[str], started: float) -> None:
-    """Log the Images API call's tokens (input = text + image tokens, output = image tokens)."""
+    """Log the Images API call's tokens, split by modality because the rates differ.
+
+    SVG output bills the authoring model too, reported apart from the image usage in
+    ``svg_usage`` (image generation guide, "GPT Image 2.6 costs"), so it gets its own row.
+    """
     import time
 
     from .usage_log import log_usage
 
     usage = getattr(response, "usage", None)
     details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
     log_usage(
         provider="openai", model=model_name, transport="images-api", reasoning_effort=quality,
         prompt_tokens=getattr(usage, "input_tokens", None),
         completion_tokens=getattr(usage, "output_tokens", None), reasoning_tokens=None,
         cached_tokens=getattr(details, "cached_tokens", None), latency_s=time.time() - started,
         source="llmx-image", billing="metered",
+        image_input_tokens=getattr(details, "image_tokens", None),
+        text_output_tokens=getattr(output_details, "text_tokens", None),
         note="; ".join(filter(None, [
             f"complexity={complexity}" if complexity else None,
             None if usage else "response carried no usage",
         ])) or None,
     )
+    svg = getattr(response, "svg_usage", None)
+    if svg:
+        log_usage(
+            provider="openai", model=svg.model, transport="images-api", reasoning_effort=None,
+            prompt_tokens=svg.input_tokens, completion_tokens=svg.output_tokens,
+            reasoning_tokens=svg.reasoning_tokens, cached_tokens=None, latency_s=time.time() - started,
+            source="llmx-image", billing="metered", note=f"svg author for {model_name}",
+            # The SDK does not say whether output_tokens holds the reasoning; the total does.
+            completion_includes_reasoning=svg.total_tokens == svg.input_tokens + svg.output_tokens,
+        )
 
 
 def generate_codex_image(

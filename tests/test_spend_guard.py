@@ -177,6 +177,30 @@ class TestSpendGuard(unittest.TestCase):
         p = self._ledger()
         sg.enforce_daily_cap("totally-unknown-model", log_path=p)  # no raise
 
+    # --- image rows (transport images-api) ---
+    def test_metered_image_row_is_priced_and_keeps_ledger_ok(self):
+        p = self._ledger(_row("gpt-image-2.6-flare", "images-api", 35, 555))
+        spend, ok = sg.metered_spend_today(p)
+        self.assertTrue(ok)
+        # No modality split in the row: image rates, $8 in and $30 out per MTok.
+        self.assertAlmostEqual(spend, (35 * 8 + 555 * 30) / 1_000_000, places=9)
+        self.assertGreater(spend, 0)
+
+    def test_truly_unpriced_row_makes_ledger_not_ok(self):
+        # Positive control: the guard still notices a row it cannot price.
+        p = self._ledger(_row("gpt-image-99-unpriced", "images-api", 35, 555))
+        spend, ok = sg.metered_spend_today(p)
+        self.assertFalse(ok)
+        self.assertEqual(spend, 0.0)
+
+    def test_image_row_missing_usage_makes_ledger_not_ok(self):
+        row = json.dumps({
+            "ts": datetime.now(timezone.utc).date().isoformat() + "T10:00:00Z",
+            "model": "gpt-image-2.6-flare", "transport": "images-api",
+            "prompt_tokens": None, "completion_tokens": None, "billing": "metered",
+        })
+        self.assertFalse(sg.metered_spend_today(self._ledger(row))[1])
+
     # --- fail-open on unreadable ledger ---
     def test_missing_ledger_fails_open(self):
         # No raise; guard fails open (loud [DEGRADED] warning to stderr).

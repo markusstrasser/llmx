@@ -23,8 +23,11 @@ approved 2026-07-06):
 - **Explicit per-run override.** ``LLMX_SPEND_OVERRIDE=1`` bypasses the block for a
   deliberately-intended large job; the block defaults on.
 
-The pricing map is single-sourced in ``usage_report.PRICING`` (this module imports
-it; agent-infra's ``scripts/usage-check.py`` vendors a copy behind a drift-test).
+The pricing map is single-sourced in ``usage_report.PRICING`` (this module and
+agent-infra's ``scripts/usage-check.py`` import it).
+
+Known gap: ``image.py``'s Images API route counts toward the cap through its ledger
+rows but never calls ``enforce_daily_cap``, so an image call is not refused at the cap.
 """
 
 from __future__ import annotations

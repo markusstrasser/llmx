@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from llmx import image
 from llmx.cli import image_cmd
+from llmx.usage_report import PRICING, cost_for_usage, est_cost
 
 
 @pytest.fixture
@@ -128,3 +129,60 @@ def test_api_only_flags_fail_loud_off_the_api_route(monkeypatch, args):
     result = CliRunner().invoke(image_cmd, ["p", *args])
     assert result.exit_code != 0
     assert "--auth api" in result.output
+
+
+def test_every_dispatchable_image_model_is_priced():
+    # A new id in the alias table must bring its price, or the guard goes DEGRADED.
+    for model in image.OPENAI_IMAGE_MODELS.values():
+        assert est_cost(model, 1_000, 1_000) > 0, model
+    for model in ("gpt-image-2.5-flare", "gpt-image-1.5", "gpt-image-1-mini", "chatgpt-image-latest"):
+        assert model in PRICING, model  # pass through generate_openai_image's alias lookup
+
+
+@pytest.mark.parametrize("model,row,expected", [
+    # Page rates per MTok. 2.6: text in $5, image in $8, image out $30.
+    ("gpt-image-2.6-sunburst", dict(prompt_tokens=1_000, completion_tokens=1_000, image_input_tokens=0), 0.035),
+    ("gpt-image-2.6-sunburst", dict(prompt_tokens=1_000, completion_tokens=1_000, image_input_tokens=1_000), 0.038),
+    # No split: image rates, the upper bound.
+    ("gpt-image-2", dict(prompt_tokens=1_000, completion_tokens=1_000), 0.038),
+    # 1.5 has a text output rate: 500 at $10, 500 at $32.
+    ("gpt-image-1.5", dict(prompt_tokens=0, completion_tokens=1_000, text_output_tokens=500), 0.021),
+    # 2.6 lists no text output rate, so text output bills at the image rate.
+    ("gpt-image-2.6-flare", dict(prompt_tokens=0, completion_tokens=1_000, text_output_tokens=500), 0.030),
+    ("gpt-image-1-mini", dict(prompt_tokens=1_000, completion_tokens=1_000, image_input_tokens=0), 0.010),
+])
+def test_image_cost_uses_the_modality_rates(model, row, expected):
+    assert cost_for_usage({"model": model, "provider": "openai", **row}) == pytest.approx(expected)
+
+
+def _logged_rows(monkeypatch, response):
+    rows = []
+    monkeypatch.setattr("llmx.usage_log.log_usage", lambda **kwargs: rows.append(kwargs))
+    image._log_api_image_usage(response, "gpt-image-2.6-sunburst", "low", None, 0.0)
+    return rows
+
+
+def test_log_splits_tokens_by_modality(monkeypatch):
+    usage = SimpleNamespace(
+        input_tokens=1_000, output_tokens=2_000, total_tokens=3_000,
+        input_tokens_details=SimpleNamespace(image_tokens=900, text_tokens=100),
+        output_tokens_details=SimpleNamespace(image_tokens=2_000, text_tokens=0),
+    )
+    rows = _logged_rows(monkeypatch, SimpleNamespace(usage=usage, svg_usage=None))
+    assert len(rows) == 1
+    assert rows[0]["image_input_tokens"] == 900
+    assert rows[0]["text_output_tokens"] == 0
+    assert cost_for_usage(rows[0]) == pytest.approx((100 * 5 + 900 * 8 + 2_000 * 30) / 1_000_000)
+
+
+@pytest.mark.parametrize("total,billed_output", [
+    (1_500, 500),  # output_tokens already holds the 200 reasoning tokens
+    (1_700, 700),  # reasoning reported on top of output_tokens
+])
+def test_svg_author_tokens_get_their_own_priced_row(monkeypatch, total, billed_output):
+    svg = SimpleNamespace(model="gpt-6.1-sol", input_tokens=1_000, output_tokens=500, reasoning_tokens=200, total_tokens=total)
+    rows = _logged_rows(monkeypatch, SimpleNamespace(usage=None, svg_usage=svg))
+    assert [r["model"] for r in rows] == ["gpt-image-2.6-sunburst", "gpt-6.1-sol"]
+    author = rows[1]
+    assert author["transport"] == "images-api" and author["billing"] == "metered"
+    assert cost_for_usage(author) == pytest.approx((1_000 * 2 + billed_output * 10) / 1_000_000)
