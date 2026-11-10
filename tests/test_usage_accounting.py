@@ -1026,6 +1026,19 @@ class TestAstraCost(unittest.TestCase):
             "claude-opus-5-5", 1_000_000, 0, cached_tokens=0, cache_write_tokens=1_000_000,
         ), 8.0)
         self.assertAlmostEqual(est_cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000), 6.0)
+        # 2026-11-10 ids: Fable 5.2 reads 2.5% of $8, Sonnet 5.5 5% of $2.
+        self.assertAlmostEqual(est_cost(
+            "claude-fable-5-2", 1_000_000, 0, cached_tokens=1_000_000, cache_write_tokens=0,
+        ), 0.20)
+        self.assertAlmostEqual(est_cost(
+            "claude-sonnet-5-5", 1_000_000, 0, cached_tokens=1_000_000, cache_write_tokens=0,
+        ), 0.10)
+        # Haiku 5.5 tier: $0.10/$0.50 up to 100K prompt tokens, 5x above.
+        self.assertAlmostEqual(est_cost("claude-haiku-5-5", 100_000, 1_000_000), 0.51)
+        self.assertAlmostEqual(est_cost("claude-haiku-5-5", 200_000, 1_000_000), 2.60)
+        self.assertAlmostEqual(est_cost(
+            "claude-haiku-5-5", 200_000, 0, cached_tokens=200_000, cache_write_tokens=0,
+        ), 0.01)
         # A live claude-cli row (2026-10-12): the estimate matches the CLI's own figure.
         row = {
             "model": "claude-opus-5-5", "prompt_tokens": 25_181, "completion_tokens": 4,

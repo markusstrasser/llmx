@@ -200,6 +200,11 @@ LITE_ALLOWED_MODELS = {
     # 2026-09-22: Opus 5.5 (same transport; Claude Code 2.1.280's default Opus).
     # Thinking can't be disabled — effort is the only control (API default medium).
     "claude-opus-5-5",
+    # 2026-11-10: Fable 5.2 (released 2026-11-09), Sonnet 5.5 and Haiku 5.5 on the same
+    # transport; live `claude -p --model <id>` answered with modelUsage keyed to each id.
+    "claude-fable-5-2",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5",
     # Cursor subscription pool: exact Grok 4.7 slugs (composer-2.5 retired 2026-10-07).
     *CURSOR_GROK_MODELS,
 }

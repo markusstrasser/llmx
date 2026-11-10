@@ -82,6 +82,13 @@ PRICING: dict[str, tuple[float, float]] = {
     # Opus 5.5 (2026-09-22): $4/$20; cache read $0.20, 5m write $5, 1h write $8
     # (platform.claude.com/docs/en/models/opus-5-5/overview).
     "claude-opus-5-5": (4.0, 20.0),
+    # Fable 5.2 (2026-11-09): $8/$40; cache read $0.20 (2.5%), 5m write $10, 1h write $16
+    # (platform.claude.com/docs/en/models/fable-5-2/overview, read 2026-11-10).
+    "claude-fable-5-2": (8.0, 40.0),
+    # Sonnet 5.5: $2/$10, cache read $0.10 (5%). Haiku 5.5: $0.10/$0.50 for prompts up to
+    # 100K tokens, $0.50/$2.50 above (est_cost applies the tier); pricing page 2026-11-10.
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     # Haiku 4.5: $1/$5. claude-cli logs the dated id.
@@ -212,6 +219,9 @@ CONTEXT_WINDOW: dict[str, int] = {
     "claude-fable-5": 1_000_000,  # retired 2026-09-25: accounting only
     "claude-fable-5-1": 1_000_000,
     "claude-opus-5-5": 1_000_000,
+    "claude-fable-5-2": 1_000_000,
+    "claude-sonnet-5-5": 1_000_000,
+    "claude-haiku-5-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
     "claude-sonnet-4-6": 1_000_000,
     # dense-student screen candidates (2026-07-10): gemma4 256K, qwen3-32b 32K native
@@ -244,7 +254,14 @@ for cursor_model in (*CURSOR_GROK_MODELS, *CURSOR_GROK46_RETIRED_MODELS):
 
 # Claude cache-read rate as a fraction of the input rate where it is not the usual 10%
 # (sources in the PRICING comments).
-_CLAUDE_CACHE_READ = {"claude-opus-5-5": 0.05, "claude-fable-5-1": 0.025}
+_CLAUDE_CACHE_READ = {
+    "claude-opus-5-5": 0.05,
+    "claude-sonnet-5-5": 0.05,
+    "claude-fable-5-2": 0.025,
+    "claude-fable-5-1": 0.025,
+}
+# Haiku 5.5 bills every token category at 5x when the prompt exceeds 100K tokens.
+_CLAUDE_LONG_PROMPT_TIER = {"claude-haiku-5-5": (100_000, 5.0)}
 
 # GPT-6 cache-read rate as a fraction of the input rate where it is not the usual 10%.
 # developers.openai.com/api/docs/models/gpt-6.1-sol (read 2026-11-01): $2 input,
@@ -313,9 +330,13 @@ def est_cost(
             output_rate *= 1.5
         ordinary_rate = write_rate if conservative and cache_write_tokens is None else input_rate
     elif model.startswith("claude-"):
-        # Anthropic prompt caching: reads 10% of input (Opus 5.5 5%, Fable 5.1 2.5%; see
+        # Anthropic prompt caching: reads 10% of input (Opus/Sonnet 5.5 5%, Fable 2.5%; see
         # PRICING), writes 1.25x for 5-minute entries and 2x for 1-hour ones. claude-cli
         # writes 1-hour entries and llmx's API path sets no cache_control, so writes are 2x.
+        threshold, multiplier = _CLAUDE_LONG_PROMPT_TIER.get(model, (None, 1.0))
+        if threshold is not None and prompt > threshold:
+            input_rate *= multiplier
+            output_rate *= multiplier
         read_rate = input_rate * _CLAUDE_CACHE_READ.get(model, 0.10)
         write_rate, ordinary_rate = input_rate * 2, input_rate
     elif model in _DEEPSEEK_CACHE_READ:

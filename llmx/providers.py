@@ -173,7 +173,10 @@ MODEL_RESTRICTIONS = {
     # Provider-scoped so OpenRouter and subscription behavior stays unchanged.
     "claude-opus-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "medium", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-opus-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-fable-5-2": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-fable-5-1": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-sonnet-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
+    "claude-haiku-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "medium", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-sonnet-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-haiku-4-5": {"anthropic_messages": {"max_output": 64000, "default_effort": None, "efforts": ()}},
     # Astra plain-text Chat Completions contract; tool calls require Responses.
@@ -604,8 +607,11 @@ _KNOWN_MODELS = {
     "anthropic-direct": [
         "claude-opus-5-5",
         "claude-opus-5",
+        "claude-fable-5-2",
         "claude-fable-5-1",
+        "claude-sonnet-5-5",
         "claude-sonnet-5",
+        "claude-haiku-5-5",
         "claude-haiku-4-5",
     ],
     "zai": ["z-ai/glm-5.2", "z-ai/glm-5.2[1m]", "z-ai/glm-5.1", "z-ai/glm-5"],
@@ -1363,7 +1369,10 @@ _REASONING_HEADROOM = {
 # fails instead of finishing, so claude-cli calls raise the cap to the model's ceiling.
 CLAUDE_CLI_MAX_OUTPUT_TOKENS = {
     "claude-opus-5-5": 128_000,
+    "claude-fable-5-2": 128_000,
     "claude-fable-5-1": 128_000,
+    "claude-sonnet-5-5": 128_000,
+    "claude-haiku-5-5": 128_000,
     "claude-opus-5": 128_000,
 }
 
