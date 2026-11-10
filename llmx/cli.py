@@ -5,7 +5,7 @@ llmx - Unified LLM CLI via native SDKs
 Usage:
     llmx "your prompt"
     llmx --model gpt-6.1-sol "your prompt"
-    cat file.txt | llmx --model claude-sonnet-5 "review"
+    cat file.txt | llmx --model claude-sonnet-5-5 "review"
     llmx --compare "question"
     llmx image "a cute robot" -o robot.png
     llmx svg "physics momentum arrow icon" -o momentum.svg

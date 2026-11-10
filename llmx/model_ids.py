@@ -107,7 +107,11 @@ RETIRED_API_MODELS: dict[str, str] = {
     "gpt-5.6-sol": "gpt-6.1-sol",
     "gpt-5.6-terra": "gpt-6.1-sol",
     "gpt-5.6-luna": "gpt-6-luna",
-    "claude-fable-5": "claude-fable-5-1",
+    "claude-fable-5": "claude-fable-5-2",
+    # 2026-11-10: dominated by the newer Claude ids at the same or lower price.
+    "claude-fable-5-1": "claude-fable-5-2",
+    "claude-sonnet-5": "claude-sonnet-5-5",
+    "claude-haiku-4-5": "claude-haiku-5-5",
     "claude-opus-4-8": "claude-opus-5-5",
     "gemini-3-flash-preview": "gemini-3.8-flash",
 }
@@ -124,6 +128,12 @@ _PRUNE_2026_09_25 = "2026-09-25 (Pareto-frontier prune)"
 RETIRED_ON: dict[str, str] = {
     model: "2026-10-07 (Composer outdated)" for model in COMPOSER_RETIRED_MODELS
 }
+# Fable 5.2 ($8/$40) beats Fable 5.1 ($10/$50); Sonnet 5.5 and Haiku 5.5 replace Sonnet 5
+# and Haiku 4.5 at the same or lower price (platform.claude.com pricing, 2026-11-10).
+RETIRED_ON.update({
+    model: "2026-11-10 (newer Claude ids dominate)"
+    for model in ("claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5")
+})
 
 
 def retired_on(model: str) -> str:

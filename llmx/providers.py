@@ -174,11 +174,8 @@ MODEL_RESTRICTIONS = {
     "claude-opus-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "medium", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-opus-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-fable-5-2": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
-    "claude-fable-5-1": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-sonnet-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
     "claude-haiku-5-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "medium", "efforts": ("low", "medium", "high", "xhigh", "max")}},
-    "claude-sonnet-5": {"anthropic_messages": {"max_output": 128000, "default_effort": "high", "efforts": ("low", "medium", "high", "xhigh", "max")}},
-    "claude-haiku-4-5": {"anthropic_messages": {"max_output": 64000, "default_effort": None, "efforts": ()}},
     # Astra plain-text Chat Completions contract; tool calls require Responses.
     # Pricing/admission remains governed independently by the spend guard.
     "gpt-6-astra": {
@@ -608,11 +605,8 @@ _KNOWN_MODELS = {
         "claude-opus-5-5",
         "claude-opus-5",
         "claude-fable-5-2",
-        "claude-fable-5-1",
         "claude-sonnet-5-5",
-        "claude-sonnet-5",
         "claude-haiku-5-5",
-        "claude-haiku-4-5",
     ],
     "zai": ["z-ai/glm-5.2", "z-ai/glm-5.2[1m]", "z-ai/glm-5.1", "z-ai/glm-5"],
 }
@@ -640,7 +634,7 @@ _MODEL_UPGRADES = {
     # 2026-10-09 (operator: move to the newer model): GPT-6.1 Sol supersedes GPT-6 Sol at
     # the same price. An alias, not a retirement, so pinned callers keep working.
     "gpt-6-sol": "gpt-6.1-sol",
-    "claude-3.5-sonnet": "claude-sonnet-5",
+    "claude-3.5-sonnet": "claude-sonnet-5-5",
     "claude-3-opus": "claude-opus-5-5",
     # Do NOT auto-upgrade claude-opus-5 → 5-5 either: Opus 5 is the biology
     # fallback target for Opus 5.5 and Fable 5.x, and eval arms pin it.
@@ -1370,7 +1364,6 @@ _REASONING_HEADROOM = {
 CLAUDE_CLI_MAX_OUTPUT_TOKENS = {
     "claude-opus-5-5": 128_000,
     "claude-fable-5-2": 128_000,
-    "claude-fable-5-1": 128_000,
     "claude-sonnet-5-5": 128_000,
     "claude-haiku-5-5": 128_000,
     "claude-opus-5": 128_000,

@@ -421,7 +421,7 @@ class TestProviderSubscriptionFallback(unittest.TestCase):
             chat(
                 "hi",
                 provider="anthropic",
-                model="claude-fable-5-1",
+                model="claude-fable-5-2",
                 temperature=0.7,
                 reasoning_effort="medium",
                 stream=False,

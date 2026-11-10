@@ -177,7 +177,8 @@ def _research_mcp_args() -> list[str]:
 # (ANTHROPIC_API_KEY unset, --disable-slash-commands, empty mcp-config or
 # research-mcp only); gpt-6-* route via codex-cli. Allowlist = Pareto frontier
 # only (2026-09-25 prune retired gpt-5.6-*, claude-fable-5, claude-opus-4-8,
-# gemini-3-flash-preview, grok-4.6 lanes; 2026-10-07 retired composer-2.5*).
+# gemini-3-flash-preview, grok-4.6 lanes; 2026-10-07 retired composer-2.5*;
+# 2026-11-10 retired claude-fable-5-1 for claude-fable-5-2).
 LITE_ALLOWED_MODELS = {
     "gpt-6-astra",
     "gpt-6",  # alias → astra
@@ -193,15 +194,13 @@ LITE_ALLOWED_MODELS = {
     "gpt-6-luna",
     # Opus 5: cyber / dual-use-bio fallback niche.
     "claude-opus-5",
-    # 2026-09-01: Fable 5.1 (same transport; interactive default on the Max
-    # account since launch day). Plan-vs-usage-credit billing is per plan/seat —
-    # Claude Code's /model picker says "Requires usage credits" when it applies.
-    "claude-fable-5-1",
     # 2026-09-22: Opus 5.5 (same transport; Claude Code 2.1.280's default Opus).
     # Thinking can't be disabled — effort is the only control (API default medium).
     "claude-opus-5-5",
     # 2026-11-10: Fable 5.2 (released 2026-11-09), Sonnet 5.5 and Haiku 5.5 on the same
     # transport; live `claude -p --model <id>` answered with modelUsage keyed to each id.
+    # Fable 5.2 replaces Fable 5.1 (retired, model_ids.RETIRED_API_MODELS). Plan-vs-
+    # usage-credit billing is per plan/seat ("Requires usage credits" in /model).
     "claude-fable-5-2",
     "claude-sonnet-5-5",
     "claude-haiku-5-5",

@@ -282,21 +282,7 @@ def test_public_google_chat_forwards_supplied_media_to_existing_owner(tmp_path):
     assert owner.call_args.kwargs["media"] == [picture]
 
 
-def test_native_haiku_keeps_model_cap_without_unsupported_effort():
-    from llmx.providers import _openai_chat
-    from llmx.dispatch_plan import resolve_effort
-    with pytest.raises(ValueError, match="Unsupported native Claude effort"):
-        resolve_effort("max", transport="anthropic-direct-api", provider="anthropic-direct", model="claude-haiku-4-5")
-    def respond(request, **kwargs):
-        body = json.loads(request.data)
-        assert body["max_tokens"] == 64000
-        assert "output_config" not in body
-        return _native_sse_response({"model": "claude-haiku-4-5", "stop_reason": "end_turn", "usage": {}, "content": [{"type": "text", "text": "ok"}]})
-    with patch("llmx.keepalive.open_url", side_effect=respond), patch("llmx.providers._get_api_key", return_value="fake"), patch("llmx.usage_log.log_usage"):
-        assert _openai_chat("hi", "claude-haiku-4-5", "anthropic-direct", None, .7, 30, False, 100000, None, None) == "ok"
-
-
-@pytest.mark.parametrize("model,total", [("claude-opus-5-5", 24192), ("claude-opus-5", 40192), ("claude-fable-5-1", 40192), ("claude-sonnet-5", 40192), ("claude-haiku-4-5", 8192)])
+@pytest.mark.parametrize("model,total", [("claude-opus-5-5", 24192), ("claude-opus-5", 40192), ("claude-fable-5-2", 40192), ("claude-sonnet-5-5", 40192), ("claude-haiku-5-5", 24192)])
 def test_native_claude_default_reserve_is_model_scoped(model, total):
     from llmx.providers import _openai_chat
     def respond(request, **kwargs):

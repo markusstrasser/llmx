@@ -8,6 +8,7 @@ from llmx.providers import infer_provider_from_model
 
 RETIRED = (
     "claude-fable-5",
+    "claude-fable-5-1",
     "claude-opus-4-8",
     "gpt-5.6",
     "gpt-5.6-sol",
@@ -34,7 +35,7 @@ def test_retired_cursor_grok_never_routes_to_paid_xai(model: str) -> None:
 
 
 def test_frontier_successors_stay_allowed() -> None:
-    for model in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5-1", "claude-opus-5-5", "grok-4.7-high"):
+    for model in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5", "grok-4.7-high"):
         assert lite_model_allowed(model)
 
 
@@ -45,7 +46,7 @@ from llmx.providers import _KNOWN_MODELS, _auto_upgrade_model  # noqa: E402
 
 @pytest.mark.parametrize("model", sorted(RETIRED_API_MODELS))
 def test_retired_api_ids_refuse_with_successor(model: str) -> None:
-    with pytest.raises(ValueError, match=r"retired 2026-(09-25|10-07)"):
+    with pytest.raises(ValueError, match=r"retired 2026-(09-25|10-07|11-10)"):
         _auto_upgrade_model(model)
     assert all(model not in ids for ids in _KNOWN_MODELS.values())
 

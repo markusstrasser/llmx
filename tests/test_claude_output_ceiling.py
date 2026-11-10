@@ -32,7 +32,7 @@ class TestClaudeOutputCeiling(unittest.TestCase):
         return call.kwargs["env"]
 
     def test_subscription_models_get_their_ceiling(self) -> None:
-        for model in ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-fable-5-1[1m]"):
+        for model in ("claude-opus-5-5", "claude-fable-5-2", "claude-opus-5", "claude-fable-5-2[1m]", "claude-sonnet-5-5", "claude-haiku-5-5"):
             for kwargs in ({}, {"mode": "agent"}, {"reasoning_effort": "max"}):
                 with self.subTest(model=model, kwargs=kwargs), patch.dict(os.environ):
                     os.environ.pop(CAP, None)
