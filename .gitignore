@@ -42,3 +42,4 @@ __pycache__/
 
 # ---- Agent session-private state ----
 .claude/current-session-id
+.claude/worktrees/
