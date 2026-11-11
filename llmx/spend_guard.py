@@ -10,7 +10,7 @@ Design (agent-infra ``decisions/2026-06-25-metered-spend-funnel-enforcement.md``
 approved 2026-07-06):
 
 - **The block lives at the funnel, not at a proxy surface.** A backgrounded
-  worker's metered escalation bypasses the foreground-Bash ``pretool-cost-guard``
+  worker's metered escalation is invisible to a foreground-Bash hook
   but still appends to this ledger like every other call — so the funnel is the
   only surface-agnostic choke point (epistemic-discipline #8: don't guard a proxy).
 - **Fail-open on missing accounting, but LOUD.** An unreadable/incomplete ledger
@@ -44,8 +44,7 @@ from .providers import SpendCapError
 from .usage_report import DEFAULT_LOG, PRICING, cost_for_usage
 
 # The constitution / invariants.md daily cap on metered API spend (subscriptions are $0
-# and never reach this guard). ONE number: usage-check.py reports it to doctor, and
-# pretool-cost-guard states the same figure. $10 since 2026-11-11 (operator: "10$ should
+# and never reach this guard). ONE number: usage-check.py reports it to doctor. $10 since 2026-11-11 (operator: "10$ should
 # be the daily cap (API ... not subscriptions) ... or at least tell me when it's hit");
 # $25 before. In the 30 days before the change, 4 of 27 spending days passed $10.
 DAILY_CAP_USD = 10.0
