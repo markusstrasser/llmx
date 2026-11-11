@@ -99,7 +99,9 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
     return total, ledger_ok
 
 
-def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTIFY_DIR) -> bool:
+def notify_cap_reached(
+    spend: float, cap_usd: float, *, marker_dir: Path = _NOTIFY_DIR, kind: str = "refused"
+) -> bool:
     """Tell the operator, once per UTC day, that the cap stopped a metered call.
 
     The refusal itself only reaches the agent that made the call. A desktop notification
@@ -107,7 +109,7 @@ def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTI
     unwritable marker never blocks or changes the refusal. Returns True when it notified.
     """
     today = datetime.now(timezone.utc).date().isoformat()
-    marker = marker_dir / f"llmx-spend-cap-notified-{today}"
+    marker = marker_dir / f"llmx-spend-cap-{kind}-{today}"
     notifier = shutil.which("terminal-notifier")
     try:
         if marker.exists() or notifier is None:
@@ -118,8 +120,12 @@ def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTI
                 notifier,
                 "-title", "llmx: daily API cap reached",
                 "-message",
-                f"${spend:.2f} metered today, cap ${cap_usd:.2f}. Paid calls are refused "
-                f"until 00:00 UTC unless {_OVERRIDE_ENV}=1 is set.",
+                f"${spend:.2f} metered today, cap ${cap_usd:.2f}. "
+                + (
+                    f"A run is spending past the cap with {_OVERRIDE_ENV}=1."
+                    if kind == "override"
+                    else f"Paid calls are refused until 00:00 UTC unless {_OVERRIDE_ENV}=1 is set."
+                ),
                 "-group", "llmx-spend-cap",
             ],
             stdout=subprocess.DEVNULL,
@@ -160,6 +166,10 @@ def enforce_daily_cap(
             f"bypassed for this run (model={model})",
             file=sys.stderr,
         )
+        # The override skips the refusal, so it would also skip the operator's notice.
+        spend, _ = metered_spend_today(log_path)
+        if spend >= cap_usd and log_path is None:
+            notify_cap_reached(spend, cap_usd, kind="override")
         return
 
     if check_model_priced and model not in PRICING:

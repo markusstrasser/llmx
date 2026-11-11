@@ -234,3 +234,13 @@ def test_cap_notification_never_raises_without_a_notifier(tmp_path):
 
     with patch.object(sg.shutil, "which", return_value=None):
         assert sg.notify_cap_reached(12.5, 10.0, marker_dir=tmp_path) is False
+
+
+def test_override_above_cap_still_notifies_the_operator(tmp_path):
+    from unittest.mock import patch
+
+    with patch.dict(sg.os.environ, {"LLMX_SPEND_OVERRIDE": "1"}), patch.object(
+        sg, "metered_spend_today", return_value=(14.0, True)
+    ), patch.object(sg, "notify_cap_reached") as notify:
+        sg.enforce_daily_cap("gpt-6-astra")
+    assert notify.call_args.kwargs["kind"] == "override"
