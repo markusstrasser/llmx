@@ -37,7 +37,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .providers import SpendCapError
@@ -64,6 +64,23 @@ def is_metered_transport(transport: str | None) -> bool:
     return transport == "api" or transport.endswith("-api")
 
 
+def cap_day(ts: str | None = None) -> str:
+    """The local calendar date a ledger timestamp falls on (now when None); "" if unparseable.
+
+    The cap's day is the operator's day. A UTC day resets at 08:00 in UTC+8, which let one
+    working day spend the cap twice. Ledger timestamps are UTC; a naive one is read as UTC.
+    """
+    if ts is None:
+        return datetime.now().astimezone().date().isoformat()
+    try:
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone().date().isoformat()
+
+
 def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool]:
     """Sum today's genuinely-billed (metered) spend from the usage ledger.
 
@@ -73,7 +90,10 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
     A NEW dispatch of an unpriced model is still refused up front.
     """
     path = Path(log_path) if log_path else DEFAULT_LOG
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = cap_day()
+    # A local day spans at most three UTC dates; skip parsing every other row.
+    utc_now = datetime.now(timezone.utc).date()
+    near = {(utc_now + timedelta(days=d)).isoformat() for d in (-1, 0, 1)}
     total = 0.0
     ledger_ok = True
     try:
@@ -81,13 +101,16 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
     except (FileNotFoundError, OSError, UnicodeDecodeError):
         return 0.0, False
     for line in raw.splitlines():
-        if not line.strip():
+        # A row from a near date contains that date as text; skip the JSON parse otherwise
+        # (the ledger is tens of thousands of rows and this runs before every paid call).
+        if not any(day in line for day in near):
             continue
         try:
             r = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not (r.get("ts", "") or "").startswith(today):
+        ts = r.get("ts", "") or ""
+        if ts[:10] not in near or cap_day(ts) != today:
             continue
         if not is_metered_transport(r.get("transport")):
             continue
@@ -102,13 +125,13 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
 def notify_cap_reached(
     spend: float, cap_usd: float, *, marker_dir: Path = _NOTIFY_DIR, kind: str = "refused"
 ) -> bool:
-    """Tell the operator, once per UTC day, that the cap stopped a metered call.
+    """Tell the operator, once per local day, that the cap stopped a metered call.
 
     The refusal itself only reaches the agent that made the call. A desktop notification
     reaches the person who can decide to override. Best-effort: a missing notifier or an
     unwritable marker never blocks or changes the refusal. Returns True when it notified.
     """
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = cap_day()
     marker = marker_dir / f"llmx-spend-cap-{kind}-{today}"
     notifier = shutil.which("terminal-notifier")
     try:
@@ -124,7 +147,7 @@ def notify_cap_reached(
                 + (
                     f"A run is spending past the cap with {_OVERRIDE_ENV}=1."
                     if kind == "override"
-                    else f"Paid calls are refused until 00:00 UTC unless {_OVERRIDE_ENV}=1 is set."
+                    else f"Paid calls are refused until local midnight unless {_OVERRIDE_ENV}=1 is set."
                 ),
                 "-group", "llmx-spend-cap",
             ],
@@ -194,7 +217,7 @@ def enforce_daily_cap(
             notify_cap_reached(spend, cap_usd)
         raise SpendCapError(
             f"daily metered-spend cap reached: ${spend:.2f} billed today "
-            f">= ${cap_usd:.2f} cap. Refusing further metered dispatch until 00:00 UTC. "
+            f">= ${cap_usd:.2f} cap. Refusing further metered dispatch until local midnight. "
             f"{_OVERRIDE_ENV}=1 lifts it, and granting that is the operator's decision: "
             f"report this refusal and use a subscription route meanwhile; do not set it yourself.",
             model=model,

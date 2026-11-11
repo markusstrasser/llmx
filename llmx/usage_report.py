@@ -45,11 +45,12 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-pro-preview": (1.25, 10.0),
     # Gemini 4 Argon (ai.google.dev/gemini-api/docs/pricing, 2026-10-14): intro $2/$10
-    # through 2026-11-30; standard $4/$20 from 2026-12-01 — bump this entry then.
+    # through 2026-11-30; standard $4/$20 from 2026-12-01 (PRICE_CHANGES below).
     # No prompt-length tiers; not on the free tier.
     "gemini-4-argon": (2.0, 10.0),
     # Gemini 4 Carbon (aistudio.google.com/docs/pricing, 2026-11-11): same schedule as
-    # Argon, intro $2/$10 through 2026-11-30, standard $4/$20 from 2026-12-01.
+    # Argon, intro $2/$10 through 2026-11-30, standard $4/$20 from 2026-12-01
+    # (PRICE_CHANGES below).
     "gemini-4-carbon": (2.0, 10.0),
     # GPT-6 Astra (developers.openai.com/api/docs/models/gpt-6-astra, 2026-09-05):
     # $10/$50 short context; 2x/1.5x above 272K input. Fast mode is 2x Standard.
@@ -291,6 +292,30 @@ _DEEPSEEK_CACHE_READ = {
 }
 
 
+# Announced price changes: model -> [(first UTC date the new rate applies, (input, output))],
+# oldest first. PRICING holds the rate in force before the first change. rate_for() picks
+# by date, so the spend cap prices a ledger row at the rate that applied when it ran and
+# nobody has to remember to edit PRICING on the day.
+PRICE_CHANGES: dict[str, list[tuple[str, tuple[float, float]]]] = {
+    "gemini-4-argon": [("2026-12-01", (4.0, 20.0))],
+    "gemini-4-carbon": [("2026-12-01", (4.0, 20.0))],
+    "gemini-3.8-flash": [("2027-01-01", (1.50, 7.50))],
+}
+
+
+def rate_for(model: str, on: str | None = None) -> tuple[float, float] | None:
+    """Per-MTok (input, output) for ``model`` on UTC date ``on``; today when None.
+
+    ``on`` is an ISO date or timestamp (a ledger row's ``ts``); only its date is read.
+    """
+    rate = PRICING.get(model)
+    day = (on or datetime.now(timezone.utc).date().isoformat())[:10]
+    for start, new_rate in PRICE_CHANGES.get(model, ()):
+        if day >= start:
+            rate = new_rate
+    return rate
+
+
 def est_cost(
     model: str,
     prompt: int,
@@ -301,15 +326,19 @@ def est_cost(
     conservative: bool = False,
     image_input_tokens: int | None = None,
     text_output_tokens: int | None = None,
+    on: str | None = None,
 ) -> float | None:
     """Price total input and billable output; cache counts partition total input.
+
+    ``on`` is the date the call ran (a ledger ``ts``); it selects the rate when a
+    model has a dated price change. None prices at today's rate.
 
     Three-argument callers retain an uncached-input estimate. For Astra, the
     conservative guard prices unknown input categories at the cache-write rate.
     Explicit zero cache counts mean known absence; None means unreported.
     GPT Image tokens with no modality split price at the image rates, the higher ones.
     """
-    rate = PRICING.get(model)
+    rate = rate_for(model, on)
     if rate is None:
         return None
     input_rate, output_rate = rate
@@ -401,6 +430,7 @@ def cost_for_usage(row: dict, *, conservative: bool = False) -> float | None:
         conservative=conservative,
         image_input_tokens=row.get("image_input_tokens"),
         text_output_tokens=row.get("text_output_tokens"),
+        on=row.get("ts") or None,
     )
 
 

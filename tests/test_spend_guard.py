@@ -12,15 +12,22 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from llmx.providers import SpendCapError
 from llmx import spend_guard as sg
+from llmx import usage_report as ur
+
+
+def _now_ts():
+    # "Now" is inside the local cap day at any hour; a fixed UTC hour is not.
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _row(model, transport, ptok=0, ctok=0, rtok=0, *, ts=None):
-    ts = ts or (datetime.now(timezone.utc).date().isoformat() + "T10:00:00Z")
+    ts = ts or _now_ts()
     return json.dumps({
         "ts": ts, "model": model, "transport": transport,
         "prompt_tokens": ptok, "completion_tokens": ctok, "reasoning_tokens": rtok,
@@ -196,7 +203,7 @@ class TestSpendGuard(unittest.TestCase):
 
     def test_image_row_missing_usage_makes_ledger_not_ok(self):
         row = json.dumps({
-            "ts": datetime.now(timezone.utc).date().isoformat() + "T10:00:00Z",
+            "ts": _now_ts(),
             "model": "gpt-image-2.6-flare", "transport": "images-api",
             "prompt_tokens": None, "completion_tokens": None, "billing": "metered",
         })
@@ -244,3 +251,51 @@ def test_override_above_cap_still_notifies_the_operator(tmp_path):
     ), patch.object(sg, "notify_cap_reached") as notify:
         sg.enforce_daily_cap("gpt-6-astra")
     assert notify.call_args.kwargs["kind"] == "override"
+
+
+class TestCapDayAndDatedPrices(unittest.TestCase):
+    def setUp(self):
+        self._tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Shanghai"  # UTC+8, no daylight saving
+        time.tzset()
+
+    def tearDown(self):
+        if self._tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._tz
+        time.tzset()
+
+    def test_cap_day_is_the_local_date(self):
+        # 17:00 UTC on the 10th is 01:00 on the 11th in UTC+8.
+        self.assertEqual(sg.cap_day("2026-11-10T17:00:00Z"), "2026-11-11")
+        self.assertEqual(sg.cap_day("2026-11-10T15:00:00+00:00"), "2026-11-10")
+        self.assertEqual(sg.cap_day("2026-11-10T17:00:00"), "2026-11-11")  # naive reads as UTC
+        self.assertEqual(sg.cap_day("not a timestamp"), "")
+
+    def test_spend_before_local_midnight_does_not_count_today(self):
+        now = datetime.now(timezone.utc)
+        local_midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        before = (local_midnight - timedelta(minutes=5)).astimezone(timezone.utc)
+        ts = before.isoformat(timespec="seconds").replace("+00:00", "Z")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usage.jsonl"
+            path.write_text(
+                _row("claude-opus-5", "api", 1_000_000, 0, ts=ts) + "\n"
+                + _row("claude-opus-5", "api", 1_000_000, 0) + "\n"
+            )
+            spend, ok = sg.metered_spend_today(path)
+        self.assertTrue(ok)
+        self.assertAlmostEqual(spend, ur.PRICING["claude-opus-5"][0])
+
+    def test_price_change_applies_from_its_date(self):
+        self.assertEqual(ur.rate_for("gemini-4-carbon", "2026-11-30T23:59:59Z"), (2.0, 10.0))
+        self.assertEqual(ur.rate_for("gemini-4-carbon", "2026-12-01T00:00:00Z"), (4.0, 20.0))
+        self.assertEqual(ur.rate_for("gemini-4-argon", "2026-12-15"), (4.0, 20.0))
+        self.assertEqual(ur.rate_for("claude-opus-5", "2030-01-01"), ur.PRICING["claude-opus-5"])
+        self.assertIsNone(ur.rate_for("no-such-model", "2026-12-01"))
+        row = {"ts": "2026-12-02T03:00:00Z", "model": "gemini-4-carbon", "transport": "api",
+               "prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
+        self.assertAlmostEqual(ur.cost_for_usage(row), 24.0)
+        row["ts"] = "2026-11-20T03:00:00Z"
+        self.assertAlmostEqual(ur.cost_for_usage(row), 12.0)
