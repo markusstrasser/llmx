@@ -113,7 +113,6 @@ def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTI
         if marker.exists() or notifier is None:
             return False
         marker_dir.mkdir(parents=True, exist_ok=True)
-        marker.write_text(f"{spend:.2f}\n")
         subprocess.Popen(
             [
                 notifier,
@@ -126,6 +125,7 @@ def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTI
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        marker.write_text(f"{spend:.2f}\n")  # after the launch: a failed launch retries
         return True
     except OSError:
         return False
@@ -184,7 +184,8 @@ def enforce_daily_cap(
             notify_cap_reached(spend, cap_usd)
         raise SpendCapError(
             f"daily metered-spend cap reached: ${spend:.2f} billed today "
-            f">= ${cap_usd:.2f} cap. Refusing further metered dispatch. Set "
-            f"{_OVERRIDE_ENV}=1 for a deliberately-intended large job.",
+            f">= ${cap_usd:.2f} cap. Refusing further metered dispatch until 00:00 UTC. "
+            f"{_OVERRIDE_ENV}=1 lifts it, and granting that is the operator's decision: "
+            f"report this refusal and use a subscription route meanwhile; do not set it yourself.",
             model=model,
         )
