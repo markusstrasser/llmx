@@ -15,6 +15,7 @@ from .cli_backends import (
     LITE_ALLOWED_MODELS,
     binary_available,
     configured_cli_provider,
+    headless_default_effort,
     lite_model_allowed,
     needs_api_fallback,
     preferred_cli_provider,
@@ -188,6 +189,9 @@ class DispatchPlan:
     lite: Optional[str] = None
     requested_effort: Optional[str] = None
     effort_applied: Optional[str] = None
+    # "caller" when the request named the effort, "llmx-default" when llmx chose
+    # it for a subscription CLI (cli_backends.headless_default_effort).
+    effort_source: Optional[str] = None
     effort_warnings: list[str] = field(default_factory=list)
     timeout: int = 300
     cli_fallback_reason: Optional[str] = None
@@ -332,6 +336,10 @@ def build_dispatch_plan(
         model=planned_model,
     )
     warnings.extend(backend_warn)
+    effort_source = "caller" if effort_applied else None
+    if not effort_token:
+        effort_applied = headless_default_effort(planned_transport, planned_model, resolved_mode)
+        effort_source = "llmx-default" if effort_applied else None
 
     if (
         effective_lite == "bare"
@@ -352,6 +360,7 @@ def build_dispatch_plan(
         lite=effective_lite,
         requested_effort=effort_token,
         effort_applied=effort_applied,
+        effort_source=effort_source,
         effort_warnings=backend_warn,
         timeout=timeout,
         cli_fallback_reason=cli_fallback_reason,

@@ -181,6 +181,10 @@ def _write_openai_image_item(item, output_path: Optional[str], prompt: str, inde
 
 
 CODEX_GENERATED_DIR = Path.home() / ".codex" / "generated_images"
+# The codex session that calls the image tool. It relays a prompt and copies a
+# file, so it runs on a named model at low effort whatever config.toml holds.
+CODEX_IMAGE_RELAY_MODEL = "gpt-6.1-sol"
+CODEX_IMAGE_RELAY_EFFORT = "low"
 
 
 def _log_codex_image_usage(proc, before, started: float) -> None:
@@ -194,7 +198,8 @@ def _log_codex_image_usage(proc, before, started: float) -> None:
         before, started_at=started, session_id=_codex_session_id(proc.stderr or "")
     )
     log_usage(
-        provider="openai", model="codex-image_gen", transport="codex-cli", reasoning_effort=None,
+        provider="openai", model="codex-image_gen", transport="codex-cli",
+        reasoning_effort=CODEX_IMAGE_RELAY_EFFORT,
         prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"),
         reasoning_tokens=usage.get("reasoning_tokens"), cached_tokens=usage.get("cached_tokens"),
         latency_s=time.time() - started, source="llmx-image", note=note, billing="subscription",
@@ -270,11 +275,18 @@ def generate_codex_image(
         f"{ref_note} Do not alter the prompt's content. Copy the generated file to {out} "
         "(convert to PNG if needed) and reply with only that path.\n\nPROMPT:\n" + prompt
     )
-    cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "workspace-write", "-C", str(out.parent)]
+    # Model, effort and tier are named here: left out, codex takes them from
+    # config.toml, which the Codex app rewrites when its picker changes. The
+    # session only relays the prompt to the image tool, so low effort is enough.
+    from .cli_backends import CODEX_HEADLESS_TIER_ARGS, _codex_rollout_snapshot
+    cmd = [
+        "codex", "exec", "--skip-git-repo-check", *CODEX_HEADLESS_TIER_ARGS,
+        "-m", CODEX_IMAGE_RELAY_MODEL, "-c", f'model_reasoning_effort="{CODEX_IMAGE_RELAY_EFFORT}"',
+        "-s", "workspace-write", "-C", str(out.parent),
+    ]
     for r in refs:
         cmd += ["-i", r]
     cmd += ["--", instruction]  # `-i` is multi-value in codex's parser; `--` ends it
-    from .cli_backends import _codex_rollout_snapshot
 
     before = _codex_rollout_snapshot()
     started = time.time()

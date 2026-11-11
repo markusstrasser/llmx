@@ -290,6 +290,34 @@ def preferred_cli_provider(
     return cli_provider if binary_available(cli_provider) else None
 
 
+# Every `codex exec` llmx starts names its tier. config.toml's service_tier is
+# the Codex app's speed setting; left to it, an Ultrafast value there billed
+# headless runs at 6x on 2026-11-04. The PATH shim does the same, but a launchd
+# job's PATH can reach the real binary first.
+CODEX_HEADLESS_TIER_ARGS = ("-c", 'service_tier="default"')
+
+
+def headless_default_effort(
+    transport: str, model: Optional[str], mode: Optional[str]
+) -> Optional[str]:
+    """Effort llmx sends to a subscription CLI when the caller names none.
+
+    It goes on the command line, so a default saved from an interactive session
+    (Claude Code `/effort`, the Codex app's config.toml) never decides what a
+    headless call spends. The values are the ones these calls ran at before
+    2026-11-11: Opus `high` and the other Claude models `medium` from Claude
+    Code's saved settings, Codex chat at the catalog's `medium` and Codex agents
+    at config.toml's `high`. Fable ran at whatever `/effort` last saved (`xhigh`
+    that day); it is `high` here. None means the CLI takes no effort flag.
+    """
+    if transport == "claude-cli":
+        name = (model or "").lower()
+        return "high" if ("opus" in name or "fable" in name) else "medium"
+    if transport == "codex-cli":
+        return "high" if mode == "agent" else "medium"
+    return None
+
+
 def needs_api_fallback(
     provider: str,
     schema,
@@ -1359,6 +1387,12 @@ def cli_chat(
     # the Anthropic API path gets it too. Don't double-prefix here.
     _ = lite  # used for cwd routing below
 
+    if provider in {"claude-cli", "codex-cli"} and not model:
+        # Without a model flag the CLI falls back to the one saved in its config.
+        raise ValueError(f"{provider} needs an explicit model; llmx never runs one on the CLI's saved default")
+    if not reasoning_effort:
+        reasoning_effort = headless_default_effort(provider, model, mode)
+
     config = CLI_PROVIDERS[provider]
     binary = config["binary"]
     if images and binary != "codex":
@@ -1373,7 +1407,7 @@ def cli_chat(
         if binary == "codex":
             codex_rollouts_before = _codex_rollout_snapshot()
             # codex exec [PROMPT] [-m <model>] [--output-schema schema.json]
-            cmd = ["codex", "exec", "--skip-git-repo-check"]
+            cmd = ["codex", "exec", "--skip-git-repo-check", *CODEX_HEADLESS_TIER_ARGS]
             # `-i` is multi-value in codex's clap parser: keep it ahead of other
             # flags so it can never swallow the positional prompt.
             for image in images or []:

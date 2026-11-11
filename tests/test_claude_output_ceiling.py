@@ -42,10 +42,10 @@ class TestClaudeOutputCeiling(unittest.TestCase):
         with patch.dict(os.environ, {CAP: "64000"}):
             self.assertEqual(self._env("claude-opus-5-5")[CAP], "64000")
 
-    def test_unnamed_model_keeps_cli_default(self) -> None:
-        with patch.dict(os.environ):
-            os.environ.pop(CAP, None)
-            self.assertNotIn(CAP, self._env(None))
+    def test_unnamed_model_is_refused(self) -> None:
+        # No --model would run the call on whatever model Claude Code last saved.
+        with self.assertRaisesRegex(ValueError, "explicit model"):
+            self._env(None)
 
 
 if __name__ == "__main__":

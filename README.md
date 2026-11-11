@@ -113,6 +113,17 @@ nonempty truncated text as success. Offline native request/stream/usage controls
 in `tests/test_usage_accounting.py` cover this class; no live entitlement or model
 quality claim follows from those controls.
 
+### Subscription CLI calls name their own settings
+
+A `claude -p` or `codex exec` that llmx starts always carries its model, effort
+and (Codex) service tier on the command line. Without `-e`, the effort is llmx's
+own default (`cli_backends.headless_default_effort`): Claude Opus and Fable
+`high`, Sonnet and Haiku `medium`, Codex `medium` in chat and `high` in agent
+mode. A default saved from an interactive session (Claude Code `/effort`, the
+Codex app's model, effort or speed picker) therefore never changes what a
+headless call spends. The dry-run plan reports `effort_source`: `caller` or
+`llmx-default`.
+
 ### Timeouts (all routes)
 
 Default wall-clock is **300s**. llmx auto-raises defaults for agent mode and

@@ -931,7 +931,7 @@ def chat_cmd(
 
         requested_reasoning_effort = dispatch_plan.requested_effort
         effective_reasoning_effort = dispatch_plan.effort_applied
-        reasoning_effort_source = "user" if effective_reasoning_effort else None
+        reasoning_effort_source = "user" if dispatch_plan.effort_source == "caller" else None
 
         if dispatch_plan.transport.endswith("-api"):
             restriction = get_model_restriction(dispatch_plan.model)
@@ -943,12 +943,15 @@ def chat_cmd(
                 else:
                     effective_reasoning_effort = "provider-default"
                     reasoning_effort_source = "provider-default"
+        elif dispatch_plan.effort_source == "llmx-default":
+            # Sent on the command line: the CLI's saved default does not apply.
+            reasoning_effort_source = "llmx-default"
+        elif effective_reasoning_effort:
+            reasoning_effort_source = "user-requested-cli-may-ignore"
         else:
-            if not effective_reasoning_effort:
-                effective_reasoning_effort = "cli-default"
-                reasoning_effort_source = "cli-default"
-            else:
-                reasoning_effort_source = "user-requested-cli-may-ignore"
+            # cursor-agent and Grok Build take no effort llmx can set.
+            effective_reasoning_effort = "cli-default"
+            reasoning_effort_source = "cli-default"
 
         # Repository agents and high-effort reasoning routinely exceed the flat
         # chat timeout. Scale only the default; an explicit operator bound wins.
