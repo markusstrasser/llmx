@@ -115,8 +115,9 @@ class TestSpendGuard(unittest.TestCase):
         sg.enforce_daily_cap("claude-opus-5", log_path=p)  # no raise
 
     def test_exactly_at_cap_refuses(self):
-        # 1M in @ $5 + 800k out @ $25 = $5 + $20 = $25.00 == cap → refuse (>=)
-        p = self._ledger(_row("claude-opus-5", "api", 1_000_000, 800_000))
+        # 1M in @ $5 + 200k out @ $25 = $5 + $5 = $10.00 == cap → refuse (>=)
+        self.assertEqual(sg.DAILY_CAP_USD, 10.0)
+        p = self._ledger(_row("claude-opus-5", "api", 1_000_000, 200_000))
         with self.assertRaises(SpendCapError):
             sg.enforce_daily_cap("claude-opus-5", log_path=p)
 
@@ -214,3 +215,22 @@ class TestSpendGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_cap_notification_fires_once_per_day(tmp_path):
+    from unittest.mock import patch
+
+    with patch.object(sg.shutil, "which", return_value="/usr/bin/true"), patch.object(
+        sg.subprocess, "Popen"
+    ) as popen:
+        assert sg.notify_cap_reached(12.5, 10.0, marker_dir=tmp_path) is True
+        assert sg.notify_cap_reached(13.0, 10.0, marker_dir=tmp_path) is False
+    assert popen.call_count == 1
+    assert "$12.50 metered today, cap $10.00" in " ".join(popen.call_args.args[0])
+
+
+def test_cap_notification_never_raises_without_a_notifier(tmp_path):
+    from unittest.mock import patch
+
+    with patch.object(sg.shutil, "which", return_value=None):
+        assert sg.notify_cap_reached(12.5, 10.0, marker_dir=tmp_path) is False

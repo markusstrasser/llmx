@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,9 +43,13 @@ from pathlib import Path
 from .providers import SpendCapError
 from .usage_report import DEFAULT_LOG, PRICING, cost_for_usage
 
-# The constitution / invariants.md daily cap. ONE number; the launchd alarm
-# (usage-check.py --alarm) and pretool-cost-guard reconcile to it.
-DAILY_CAP_USD = 25.0
+# The constitution / invariants.md daily cap on metered API spend (subscriptions are $0
+# and never reach this guard). ONE number: usage-check.py reports it to doctor, and
+# pretool-cost-guard states the same figure. $10 since 2026-11-11 (operator: "10$ should
+# be the daily cap (API ... not subscriptions) ... or at least tell me when it's hit");
+# $25 before. In the 30 days before the change, 4 of 27 spending days passed $10.
+DAILY_CAP_USD = 10.0
+_NOTIFY_DIR = Path.home() / ".claude" / "cache"
 
 _OVERRIDE_ENV = "LLMX_SPEND_OVERRIDE"
 def is_metered_transport(transport: str | None) -> bool:
@@ -91,6 +97,38 @@ def metered_spend_today(log_path: str | Path | None = None) -> tuple[float, bool
         else:
             total += c
     return total, ledger_ok
+
+
+def notify_cap_reached(spend: float, cap_usd: float, *, marker_dir: Path = _NOTIFY_DIR) -> bool:
+    """Tell the operator, once per UTC day, that the cap stopped a metered call.
+
+    The refusal itself only reaches the agent that made the call. A desktop notification
+    reaches the person who can decide to override. Best-effort: a missing notifier or an
+    unwritable marker never blocks or changes the refusal. Returns True when it notified.
+    """
+    today = datetime.now(timezone.utc).date().isoformat()
+    marker = marker_dir / f"llmx-spend-cap-notified-{today}"
+    notifier = shutil.which("terminal-notifier")
+    try:
+        if marker.exists() or notifier is None:
+            return False
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{spend:.2f}\n")
+        subprocess.Popen(
+            [
+                notifier,
+                "-title", "llmx: daily API cap reached",
+                "-message",
+                f"${spend:.2f} metered today, cap ${cap_usd:.2f}. Paid calls are refused "
+                f"until 00:00 UTC unless {_OVERRIDE_ENV}=1 is set.",
+                "-group", "llmx-spend-cap",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except OSError:
+        return False
 
 
 def enforce_daily_cap(
@@ -142,6 +180,8 @@ def enforce_daily_cap(
         )
 
     if spend >= cap_usd:
+        if log_path is None:  # the real ledger, not a caller-supplied one
+            notify_cap_reached(spend, cap_usd)
         raise SpendCapError(
             f"daily metered-spend cap reached: ${spend:.2f} billed today "
             f">= ${cap_usd:.2f} cap. Refusing further metered dispatch. Set "
