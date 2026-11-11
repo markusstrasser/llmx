@@ -254,6 +254,17 @@ MODEL_RESTRICTIONS = {
         "reasoning_effort_levels": ["low", "medium", "high"],
         "default_effort": "medium",
     },
+    # Gemini 4 Carbon (on the public model list 2026-11-11). Probed live that day:
+    # thinkingLevel low/medium/high/xhigh/max accepted; minimal → 400 "not supported",
+    # none → 400 invalid enum. xhigh and max are not offered here because
+    # _google_chat's level_map folds xhigh into high and has no max entry.
+    "gemini-4-carbon": {
+        "temperature": 1.0,
+        "fixed": True,
+        "reasoning_effort": True,
+        "reasoning_effort_levels": ["low", "medium", "high"],
+        "default_effort": "medium",
+    },
     "gemini-3.5-flash-lite": {
         "temperature": 1.0,
         "fixed": True,
@@ -559,6 +570,7 @@ def _normalize_model(provider: str, model: str) -> str:
 # Known models for typo detection
 _KNOWN_MODELS = {
     "google": [
+        "gemini-4-carbon",
         "gemini-4-argon",
         "gemini-3.1-pro-preview",
         "gemini-3.8-flash",
