@@ -4,6 +4,7 @@ import difflib
 import errno
 import json
 import os
+import warnings
 import signal
 import sys
 import threading
@@ -256,8 +257,10 @@ MODEL_RESTRICTIONS = {
     },
     # Gemini 4 Carbon (on the public model list 2026-11-11). Probed live that day:
     # thinkingLevel low/medium/high/xhigh/max accepted; minimal → 400 "not supported",
-    # none → 400 invalid enum. xhigh and max are not offered here because
-    # _google_chat's level_map folds xhigh into high and has no max entry.
+    # none → 400 invalid enum. xhigh and max are NOT offered: the API accepts them but
+    # they think less than high. Same problem, two runs each, reasoning tokens:
+    # high 8,539 / 9,079 (91-99 s); xhigh 1,006 / 1,179; max 906 / 1,167 (21 s); low 0.
+    # Google's thinking docs list low/medium/high for Carbon, default medium.
     "gemini-4-carbon": {
         "temperature": 1.0,
         "fixed": True,
@@ -1229,6 +1232,50 @@ def _normalize_usage(provider: str, raw) -> dict:
     }
 
 
+_GOOGLE_LEGACY_LEVEL_FOLD = {"minimal": "low", "none": "low", "xhigh": "high"}
+
+
+def _google_thinking_level(model: str, reasoning_effort: str) -> str:
+    """The thinkingLevel to send for an llmx effort name.
+
+    A level the model declares in MODEL_RESTRICTIONS goes to the API verbatim. Until
+    2026-11-11 one shared map rewrote every model's effort (minimal → low, xhigh → high,
+    anything unknown → high), so gemini-3.5-flash-lite never received the `minimal` it
+    declares. The fold remains only for a model with no declared ladder, and it logs the
+    substitution.
+    """
+    declared = (get_model_restriction(model) or {}).get("reasoning_effort_levels") or []
+    if reasoning_effort in declared or reasoning_effort in ("low", "medium", "high"):
+        return reasoning_effort
+    folded = _GOOGLE_LEGACY_LEVEL_FOLD.get(reasoning_effort, "high")
+    logger.warn(
+        f"[DEGRADED] {model} declares no '{reasoning_effort}' thinking level; sending '{folded}'"
+    )
+    return folded
+
+
+def _raise_if_google_thinking_starved(response, finish_reason, result_text, model) -> None:
+    """Fail when thinking used the whole output ceiling and no answer came back.
+
+    Gemini counts thought tokens against maxOutputTokens. Probed 2026-11-11 on Carbon:
+    maxOutputTokens=1500 at high returned finishReason MAX_TOKENS, 1,497 thought tokens
+    and empty text. An Argon review on 2026-10-18 billed 65,533 thought tokens for a
+    3-token answer, and llmx returned it with a warning.
+    """
+    if not finish_reason or "MAX_TOKENS" not in finish_reason or (result_text or "").strip():
+        return
+    usage = getattr(response, "usage_metadata", None)
+    failure = ModelError(
+        f"{model} returned no visible output: thinking used the output ceiling "
+        f"({getattr(usage, 'thoughts_token_count', None)} thought tokens, finish_reason "
+        f"MAX_TOKENS). Lower --reasoning-effort, shrink the input or raise --max-tokens.",
+        provider="google",
+        model=model,
+    )
+    failure.stop_reason = finish_reason
+    raise failure
+
+
 def _google_chat(
     prompt,
     model,
@@ -1276,17 +1323,13 @@ def _google_chat(
     if max_tokens:
         config.max_output_tokens = max_tokens
     if reasoning_effort:
-        level_map = {
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "minimal": "low",
-            "none": "low",
-            "xhigh": "high",
-        }
-        config.thinking_config = types.ThinkingConfig(
-            thinking_level=level_map.get(reasoning_effort, "high")
-        )
+        with warnings.catch_warnings():
+            # The SDK's ThinkingLevel enum trails the API (2.25 lacks xhigh/max); it
+            # passes an unlisted value through and warns. The API is the validator.
+            warnings.filterwarnings("ignore", message=".*is not a valid ThinkingLevel")
+            config.thinking_config = types.ThinkingConfig(
+                thinking_level=_google_thinking_level(model, reasoning_effort)
+            )
     if schema:
         config.response_mime_type = "application/json"
         config.response_schema = _normalize_schema_for_provider(schema, "google")
@@ -1316,6 +1359,8 @@ def _google_chat(
                     result_text += chunk.text
                 response = chunk  # last chunk carries usage_metadata
             sys.stdout.write("\n")
+            if response is not None and response.candidates:
+                finish_reason = str(response.candidates[0].finish_reason)
         else:
             response = client.models.generate_content(model=model, contents=contents, config=config)
             # Guard empty candidates from safety filter
@@ -1326,8 +1371,9 @@ def _google_chat(
                     provider="google",
                     model=model,
                 )
-            result_text = response.text
             finish_reason = str(response.candidates[0].finish_reason)
+            result_text = response.text or ""
+            _raise_if_google_thinking_starved(response, finish_reason, result_text, model)
             print(result_text)
     except BaseException as exc:
         # 2026-10-26: refused calls logged no error, so their rows priced as unknown and the
@@ -1348,14 +1394,23 @@ def _google_chat(
             completion_includes_reasoning=False,
             latency_s=_time.time() - started,
             error=error,
+            stop_reason=finish_reason,
         )
 
-    # Truncation detection
-    if finish_reason and "MAX_TOKENS" in str(finish_reason):
-        logger.warn(f"[llmx:WARN] output may be truncated (hit {max_tokens or 8192} token limit)")
+    if stream:
+        _raise_if_google_thinking_starved(response, finish_reason, result_text, model)
+    # A cut-off answer with visible text is returned, loudly: callers read stop_reason.
+    if finish_reason and "MAX_TOKENS" in finish_reason:
+        logger.warn(
+            f"[llmx:WARN] {model} output is truncated (finish_reason MAX_TOKENS): "
+            f"{getattr(usage, 'thoughts_token_count', None)} thinking + "
+            f"{getattr(usage, 'candidates_token_count', None)} visible tokens hit the "
+            f"output ceiling ({max_tokens or 'model maximum'}); thinking counts against it"
+        )
 
     if usage_out is not None:
         usage_out.update(_normalize_usage("google", usage))
+        usage_out["stop_reason"] = finish_reason
     return result_text
 
 
